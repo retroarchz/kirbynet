@@ -56,14 +56,14 @@ addEventListener("keydown", (e) => {
   if (DEBUG_KEYS) toast(`tecla: key=${e.key} code=${e.code || "—"} keyCode=${e.keyCode}`);
   // Xbox: o controle também gera teclas ("GamepadB", "Escape", "Unidentified"…) que o Edge usa para
   // voltar / sair da tela cheia. Na partida, nenhuma tecla vai para o navegador.
-  if (Play.run && !typing() && (XBOX || boundKeys().has(e.code) || /^Gamepad/.test(e.key))) {
+  if (Play.run && !typing() && (XBOX || e.code === "Space" || boundKeys().has(e.code) || /^Gamepad/.test(e.key))) {
     e.preventDefault(); e.stopPropagation();
   }
   down.add(e.code);
   if (Play.run) sendKeys(Play.run);   // manda o botão NA HORA (não espera o próximo timer)
 });
 addEventListener("keyup", (e) => {
-  if (Play.run && XBOX && !typing()) e.preventDefault();
+  if (Play.run && (XBOX || e.code === "Space") && !typing()) e.preventDefault();   // Espaço = acelerar, não "clicar" botão
   down.delete(e.code); if (Play.run) sendKeys(Play.run);
 });
 addEventListener("blur", () => down.clear());
@@ -339,6 +339,7 @@ function renderGame(m, fresh) {
   Fit.apply();
   $("btn-all").textContent = m.view_all ? "Só a minha" : "Ver todas";
   $("btn-all").classList.toggle("hidden", m.mode === "local");
+  $("btn-ff").classList.toggle("hidden", m.mode !== "local");   // acelerar: só sozinho / "Mesmo PC"
   $("desync").classList.toggle("hidden", m.desync == null);
   if (m.desync != null) $("desync").textContent = `⚠️ Os PCs dessincronizaram no frame ${m.desync}. Saiam e recomecem.`;
 }
@@ -487,6 +488,7 @@ $("btn-leave").onclick = () => {
   if (!local) send({ t: "leave" });           // o host saiu: encerra a sala para todos
 };
 $("btn-all").onclick = () => toggleRunView();
+$("btn-ff").onclick = (e) => { e.currentTarget.blur(); toggleTurbo(); };
 // tela cheia: no celular vai a área de jogo inteira (com os botões de toque)
 const goFull = () => {
   if (document.fullscreenElement) return document.exitFullscreen();

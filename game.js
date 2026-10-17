@@ -655,7 +655,32 @@ function startRun(opts) {
   sendKeys(run);
 }
 
+// Acelerar (como o fast forward dos emuladores). Só sozinho / "Mesmo PC": em sala, todos os
+// aparelhos rodam o jogo no mesmo passo, então um não pode correr na frente dos outros.
+// PC: segurar Espaço · Xbox / controle: segurar RT · celular: botão ⏩ no menu ☰ (liga/desliga)
+const FF_SPEED = 3;
+const Turbo = { locked: false, warned: false };
+function turboHeld() {
+  if (down.has("Space") || Turbo.locked) return true;
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  return [...pads].some(p => p && p.buttons[7] && (p.buttons[7].pressed || p.buttons[7].value > 0.5));
+}
+function updateTurboButton() {
+  const b = $("btn-ff"); if (b) b.textContent = Turbo.locked ? `⏩ Acelerando (${FF_SPEED}x)` : "⏩ Acelerar";
+}
+function toggleTurbo() {
+  if (Play.run && Play.run.net) return toast("⏩ Acelerar só funciona jogando sozinho.");
+  Turbo.locked = !Turbo.locked; updateTurboButton();
+  if (Play.run) sendKeys(Play.run);
+}
 function sendKeys(run) {
+  const want = turboHeld();
+  if (run.net) {
+    if (want && down.has("Space") && !Turbo.warned) { Turbo.warned = true; toast("⏩ Acelerar só funciona jogando sozinho."); }
+  } else if (want !== !!run.ff) {
+    run.ff = want;
+    run.worker.postMessage({ t: "speed", speed: want ? FF_SPEED : 1 });
+  }
   const k = run.net ? [maskFor(0)] : [...Array(run.n).keys()].map(p => maskFor(p));
   const sig = k.join(",");
   if (sig === run.lastKeys) return;
@@ -806,6 +831,7 @@ function endRun() {
   const run = Play.run;
   if (!run) return;
   Play.run = null;
+  Turbo.locked = false; Turbo.warned = false; updateTurboButton();   // a próxima partida começa normal
   PadMode.set(false);
   clearInterval(run.keyIv);
   if (run.raf) cancelAnimationFrame(run.raf);

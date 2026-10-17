@@ -124,12 +124,14 @@ function sendNet(kind, bytes) { postMessage({ t: "net", kind, bytes }, [bytes.bu
 function tick() {
   if (!run) return;
   const now = performance.now();
-  let due = Math.floor((now - run.t0) / 1000 * GBA_FPS);
-  if (due - run.frames > 10) { run.t0 = now - run.frames / GBA_FPS * 1000; due = run.frames + 1; }
+  // acelerar (só sozinho / "Mesmo PC"): o relógio do jogo anda 'speed' vezes mais rápido
+  const speed = run.speed || 1, fps = GBA_FPS * speed, cap = 3 * speed;
+  let due = Math.floor((now - run.t0) / 1000 * fps);
+  if (due - run.frames > 10 * speed) { run.t0 = now - run.frames / fps * 1000; due = run.frames + 1; }
   let ran = 0;
   const out = [], transfer = [];   // TODOS os quadros (antes: só o último de cada rodada → vídeo pulava)
   try {
-    while (run.frames < due && ran < 3) {
+    while (run.frames < due && ran < cap) {
       const tf = performance.now();
       if (run.net) {
         const held = keys[0] | 0;
@@ -162,6 +164,9 @@ function tick() {
         for (let p = 0; p < run.n; p++) k.push(keys[p] | 0);
         run.s.runFrame(k);
       }
+      // acelerando: só a imagem do último quadro da rodada vai para a tela, e o som fica mudo
+      // (o som de 3 quadros por quadro não cabe na caixa; seria só ruído)
+      if (speed > 1 && run.frames + 1 < due && ran + 1 < cap) { run.s.audio(0); run.frames++; ran++; run.busy += performance.now() - tf; run.busyN++; continue; }
       // imagem + som DESTE quadro, numerados: a página mostra cada um na hora certa
       const vids = [];
       for (const i of view) {
@@ -171,7 +176,8 @@ function tick() {
         vids.push({ i, buf }); transfer.push(buf);
       }
       const a = run.s.audio(run.net ? run.slot : 0);   // som do SEU Kirby (no "Mesmo PC", o do P1)
-      if (audioPort) {   // som vai direto para a placa, sem passar pela página
+      if (speed > 1) out.push({ f: run.frames, vids, audio: null });
+      else if (audioPort) {   // som vai direto para a placa, sem passar pela página
         audioPort.postMessage(a, [a.samples.buffer]);
         out.push({ f: run.frames, vids, audio: null });
       } else {
@@ -236,6 +242,12 @@ onmessage = async (ev) => {
   }
   else if (m.t === "input") { if (run) bookPut(m.slot, m.frame, m.keys); else (pending = pending || []).push([m.slot, m.frame, m.keys]); }
   else if (m.t === "keys") keys = m.keys;
+  else if (m.t === "speed") {   // acelerar: só fora da rede (em sala, todos andam no mesmo passo)
+    if (run && !run.net && m.speed !== (run.speed || 1)) {
+      run.speed = m.speed;
+      run.t0 = performance.now() - run.frames / (GBA_FPS * m.speed) * 1000;   // continua do quadro atual
+    }
+  }
   else if (m.t === "pm") {   // o que um dos outros achou dos MEUS botões (últimos ~2 s)
     if (run) {
       const pm = run.pm;
