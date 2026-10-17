@@ -21,20 +21,37 @@ async function romLoad() {
     return await new Promise(ok => { const r = db.transaction("roms").objectStore("roms").get("last"); r.onsuccess = () => ok(r.result); r.onerror = () => ok(null); });
   } catch (e) { return null; }
 }
-const saveKey = () => "kirbynet.save." + Guest.romSha1;
-function loadMySave() { try { return b64dec(localStorage.getItem(saveKey()) || ""); } catch (e) { return new Uint8Array(0); } }
+// O save é da PESSOA (o nome digitado; "Luan" = "luan"), e vai junto para os outros aparelhos
+// dela pela nuvem (cloud.js). Sem nome: fica só neste aparelho, como antes.
+const who = () => normName($("g-name").value);
+const saveKey = (w = who(), rom = Guest.romSha1) => w ? `kirbynet.save.${w}.${rom}` : "kirbynet.save." + rom;
+function loadMySave() {
+  migrateSave(who(), Guest.romSha1);
+  try { return b64dec(localStorage.getItem(saveKey()) || ""); } catch (e) { return new Uint8Array(0); }
+}
 // rotate = true só na 1ª gravação da partida: o .bak fica sendo o save de antes da sessão.
-function storeMySave(bytes, rotate) {
+function storeMySave(bytes, rotate, w, rom) {
   if (!bytes || !bytes.length) return;
+  const k = saveKey(w, rom);
   try {
-    const old = localStorage.getItem(saveKey());
-    if (rotate && old) localStorage.setItem(saveKey() + ".bak", old);
-    localStorage.setItem(saveKey(), b64enc(bytes));
-  } catch (e) { toast("Não consegui guardar o save neste navegador."); }
+    const old = localStorage.getItem(k);
+    if (rotate && old) localStorage.setItem(k + ".bak", old);
+    localStorage.setItem(k, b64enc(bytes));
+  } catch (e) { return toast("Não consegui guardar o save neste navegador."); }
+  Cloud.changed(w, rom);   // sobe para a nuvem (os outros aparelhos desta pessoa pegam de lá)
 }
 function guestSaveWriter() {
   let rotated = false;
-  return (saves) => { storeMySave(saves[0], !rotated); rotated = true; };
+  const w = who(), rom = Guest.romSha1;   // fixos durante a partida, mesmo se mudarem o nome
+  return (saves) => { storeMySave(saves[0], !rotated, w, rom); rotated = true; };
+}
+// antes de jogar: traz o save mais novo desta pessoa (de outro aparelho, se for o caso)
+async function freshSave() {
+  const w = who();
+  if (!w || !Guest.romSha1) return;
+  migrateSave(w, Guest.romSha1);
+  $("g-msg").textContent = "Buscando o seu save…";
+  await Cloud.before(w, Guest.romSha1);
 }
 
 function showGuestPage(msg) {
@@ -53,6 +70,13 @@ async function guestInit() {
   $("g-host").textContent = location.host;
   try { $("g-name").value = localStorage.getItem("kirbynet.name") || ""; } catch (e) {}
   showGuestPage();
+  // aparelhos desta pessoa na mesma internet se apresentam (e dividem os saves) sozinhos
+  Cloud.meet(who());
+  let nameT = 0;
+  $("g-name").addEventListener("input", () => {
+    clearTimeout(nameT);
+    nameT = setTimeout(() => { try { localStorage.setItem("kirbynet.name", $("g-name").value.trim()); } catch (e) {} if (who() !== Cloud.who) Cloud.meet(who()); }, 1200);
+  });
   const saved = await romLoad();
   if (saved && saved.bytes) setRom(saved.name, saved.bytes);
   $("g-controls").onclick = openControls;
@@ -91,6 +115,7 @@ async function guestSolo() {
   $("g-solo").disabled = true;
   $("g-msg").textContent = "Carregando o motor…";
   try { await loadEngine(); } catch (err) { $("g-solo").disabled = false; return showGuestPage("Não consegui carregar o motor: " + err); }
+  await freshSave();
   $("g-solo").disabled = false;
   $("g-msg").textContent = "";
   const name = ($("g-name").value || "").trim() || "Jogador";
@@ -160,6 +185,7 @@ async function guestJoin(roomCode) {
   $("g-join").disabled = true;
   $("g-msg").textContent = "Carregando o motor…";
   try { await loadEngine(); } catch (err) { return showGuestPage("Não consegui carregar o motor: " + err); }
+  await freshSave();
   $("g-msg").textContent = "Conectando à sala…";
   netJoin(SITE ? siteSocket(code) : `ws://${location.host}/net`,
     { name, rom: Guest.romSha1, save: b64enc(loadMySave()) }, roomCallbacks());
@@ -199,6 +225,7 @@ async function guestCreate() {
   $("g-msg").textContent = "Criando a sala…";
   try {
     await loadEngine();
+    await freshSave();
     await SiteRoom.create(Guest.romSha1, siteLobby, Guest.rom, Guest.romName);
   } catch (err) {
     SiteRoom.close();

@@ -370,6 +370,7 @@ function showStatus(st) {
   if (st.waiting && st.waiting.length) t = `⏳ esperando os botões de ${st.waiting.map(i => "P" + (i + 1)).join(", ")}… · ` + t;
   const at = Play.run && Play.run.savedAt;
   if (at) t += ` · 💾 salvo às ${at.toLocaleTimeString("pt-BR")}`;
+  if (typeof Cloud !== "undefined" && Cloud.lastUp && GUEST) t += ` · ☁ na nuvem às ${Cloud.lastUp.toLocaleTimeString("pt-BR")}`;
   // convidado em http://IP: o navegador não libera o som rápido (veja "SOM MAIS RÁPIDO" no LEIA-ME)
   if (Sound.on && Sound.ctx && Sound.mode !== "worklet") t += " · 🔈 som em modo compatível";
   $("status").textContent = t;
