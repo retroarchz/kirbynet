@@ -48,6 +48,8 @@ function setRom(name, bytes) {
 }
 
 async function guestInit() {
+  // saves e ROM ficam neste navegador: pede para ele nunca apagar sozinho quando faltar espaço
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (e) {}
   $("g-host").textContent = location.host;
   try { $("g-name").value = localStorage.getItem("kirbynet.name") || ""; } catch (e) {}
   showGuestPage();
