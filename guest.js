@@ -52,6 +52,12 @@ async function freshSave() {
   migrateSave(w, Guest.romSha1);
   $("g-msg").textContent = "Buscando o seu save…";
   await Cloud.before(w, Guest.romSha1);
+  showUndo();
+}
+// "↩ Voltar o save deste aparelho": aparece quando o save daqui foi trocado por um da nuvem
+function showUndo() {
+  const has = !!(who() && Guest.romSha1 && (() => { try { return localStorage.getItem(saveKey() + ".antes"); } catch (e) { return null; } })());
+  $("g-undo").classList.toggle("hidden", !has);
 }
 
 function showGuestPage(msg) {
@@ -79,6 +85,7 @@ async function guestInit() {
   });
   const saved = await romLoad();
   if (saved && saved.bytes) setRom(saved.name, saved.bytes);
+  showUndo();
   $("g-controls").onclick = openControls;
   $("g-file").onchange = async (e) => {
     const f = e.target.files[0];
@@ -96,6 +103,11 @@ async function guestInit() {
   $("g-join").onclick = guestJoin;
   $("g-solo").onclick = guestSolo;
   $("g-create").onclick = guestCreate;
+  $("g-undo").onclick = () => {
+    if (!confirm("Voltar o save que estava neste aparelho? Ele passa a valer em todos os seus aparelhos.")) return;
+    if (undoCloudSave(who(), Guest.romSha1)) toast("↩ Pronto: voltou o save deste aparelho.");
+    showUndo();
+  };
   if (SITE) {
     // como era pelo Wi-Fi: as salas da mesma internet aparecem sozinhas, sem código
     $("g-join").classList.add("hidden");

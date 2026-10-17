@@ -49,7 +49,7 @@ const Cloud = {
   async put(who, rom) {
     const d = lsGet(`kirbynet.save.${who}.${rom}`);
     if (!d) return;
-    const m = this.meta(who, rom), t = m.t || Date.now();
+    const m = this.meta(who, rom), t = m.t || 0;
     const r = await fetch(`${CLOUD_DB}/saves/${this.key(who)}/${rom}.json`, {
       method: "PUT", body: JSON.stringify({ d, t, dev: this.dev }) });
     if (!r.ok) throw new Error("nuvem " + r.status);
@@ -70,9 +70,9 @@ const Cloud = {
     const local = lsGet(`kirbynet.save.${who}.${rom}`), m = this.meta(who, rom);
     if (c && c.d && (!local || (c.t > (m.t || 0) && c.d !== local))) {
       // mudou aqui também desde a última vez? avisa: o daqui fica como cópia
-      if (local && m.t && m.t > (m.synced || 0)) {
-        lsSet(`kirbynet.save.${who}.${rom}.bak`, local);
-        toast("☁ O save de outro aparelho era mais novo e foi usado. O deste aparelho ficou guardado como cópia.");
+      if (local) {
+        lsSet(`kirbynet.save.${who}.${rom}.antes`, local);
+        if (m.t > (m.synced || 0)) toast("☁ O save de outro aparelho era mais novo e foi usado. Se não era esse, toque em “↩ Voltar o save deste aparelho”.");
       }
       lsSet(`kirbynet.save.${who}.${rom}`, c.d);
       this.setMeta(who, rom, { t: c.t, synced: c.t });
@@ -91,7 +91,7 @@ const Cloud = {
   async syncAll(who) {
     if (!who) return;
     const pre = `kirbynet.save.${who}.`, roms = new Set();
-    try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith(pre) && !k.endsWith(".bak")) roms.add(k.slice(pre.length)); } } catch (e) {}
+    try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith(pre) && !/\.(bak|antes)$/.test(k)) roms.add(k.slice(pre.length)); } } catch (e) {}
     for (const rom of roms) try { await this.sync(who, rom); } catch (e) {}
   },
 
@@ -147,6 +147,16 @@ const Cloud = {
   },
 };
 
+// desfazer: volta o save que estava neste aparelho antes de chegar o da nuvem (e ele passa a valer em todos)
+function undoCloudSave(who, rom) {
+  const k = `kirbynet.save.${who}.${rom}`, antes = lsGet(k + ".antes");
+  if (!antes) return false;
+  lsSet(k + ".bak", lsGet(k) || "");
+  lsSet(k, antes); lsDel(k + ".antes");
+  Cloud.changed(who, rom);
+  return true;
+}
+
 // saves antigos (de antes dos nomes) ficam com o primeiro nome usado neste aparelho
 function migrateSave(who, rom) {
   if (!who || !rom || lsGet(`kirbynet.save.${who}.${rom}`)) return;
@@ -156,5 +166,7 @@ function migrateSave(who, rom) {
   const bak = lsGet("kirbynet.save." + rom + ".bak");
   if (bak) lsSet(`kirbynet.save.${who}.${rom}.bak`, bak);
   lsDel("kirbynet.save." + rom); lsDel("kirbynet.save." + rom + ".bak");
-  Cloud.setMeta(who, rom, { t: Date.now(), synced: 0 });
+  // idade desconhecida: t = 0. Assim ele nunca passa na frente de um save jogado de verdade
+  // (antes ganhava o horário da mudança e um save velho de outro aparelho parecia o mais novo).
+  Cloud.setMeta(who, rom, { t: 0, synced: 0 });
 }
