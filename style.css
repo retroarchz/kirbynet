@@ -206,3 +206,8 @@ body.touchui.menuopen #game .gamebar .menu-ver { display: block; text-align: cen
 
 /* durante a partida a página não rola (Xbox: analógico/setas não mexem a tela) */
 body.playing { overflow: hidden; overscroll-behavior: none; }
+
+/* "começar do zero": canto de baixo à direita, bem discreto */
+button.corner-link { position: fixed; right: 12px; bottom: 10px; background: none; border: 0; padding: 4px 6px;
+  color: var(--sub); font-size: 12px; font-weight: 400; opacity: .45; }
+button.corner-link:hover, button.corner-link:focus-visible { opacity: .9; filter: none; }

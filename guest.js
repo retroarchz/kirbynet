@@ -103,6 +103,17 @@ async function guestInit() {
   $("g-join").onclick = guestJoin;
   $("g-solo").onclick = guestSolo;
   $("g-create").onclick = guestCreate;
+  $("g-reset").onclick = async () => {
+    const w = who();
+    if (!w) return toast("Coloque o seu nome primeiro.");
+    if (!Guest.rom) return toast("Escolha o jogo primeiro.");
+    const jogo = Guest.romName.replace(/\.gba$/i, "");
+    if (!confirm(`Apagar o save de “${w}” em ${jogo}? Vale para todos os aparelhos de “${w}”.`)) return;
+    if (!confirm("Tem certeza? O jogo vai começar do zero.")) return;
+    try { await Cloud.reset(w, Guest.romSha1); toast("🗑 Pronto: " + jogo + " começa do zero."); }
+    catch (e) { toast("Apaguei neste aparelho, mas sem internet não deu para apagar na nuvem. Tente de novo com internet."); }
+    showUndo();
+  };
   $("g-undo").onclick = () => {
     if (!confirm("Voltar o save que estava neste aparelho? Ele passa a valer em todos os seus aparelhos.")) return;
     if (undoCloudSave(who(), Guest.romSha1)) toast("↩ Pronto: voltou o save deste aparelho.");

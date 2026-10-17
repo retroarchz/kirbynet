@@ -68,6 +68,12 @@ const Cloud = {
     if (!who || !rom) return false;
     const c = await this.get(who, rom);
     const local = lsGet(`kirbynet.save.${who}.${rom}`), m = this.meta(who, rom);
+    // "começar do zero" em outro aparelho desta pessoa: zera aqui também (o daqui fica em .antes)
+    if (c && !c.d && c.t > (m.t || 0)) {
+      if (local) { lsSet(`kirbynet.save.${who}.${rom}.antes`, local); lsDel(`kirbynet.save.${who}.${rom}`); }
+      this.setMeta(who, rom, { t: c.t, synced: c.t });
+      return true;
+    }
     if (c && c.d && (!local || (c.t > (m.t || 0) && c.d !== local))) {
       // mudou aqui também desde a última vez? avisa: o daqui fica como cópia
       if (local) {
@@ -80,6 +86,17 @@ const Cloud = {
     }
     if (local && (!c || (m.t || 0) > c.t)) await this.put(who, rom);
     return false;
+  },
+  // começar do zero: apaga o save desta pessoa neste jogo, aqui e na nuvem. Fica uma marca "apagado"
+  // na nuvem (save vazio, mais novo), senão outro aparelho dela mandaria o save antigo de volta.
+  async reset(who, rom) {
+    const k = `kirbynet.save.${who}.${rom}`, t = Date.now();
+    clearTimeout(this.timers[rom]);
+    for (const x of ["", ".bak", ".antes"]) lsDel(k + x);
+    this.setMeta(who, rom, { t, synced: t });
+    const r = await fetch(`${CLOUD_DB}/saves/${this.key(who)}/${rom}.json`, {
+      method: "PUT", body: JSON.stringify({ d: "", t, dev: this.dev }) });
+    if (!r.ok) throw new Error("nuvem " + r.status);
   },
   // antes de jogar: puxa o mais novo (sem internet? joga com o daqui mesmo)
   async before(who, rom) {
