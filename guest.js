@@ -122,7 +122,7 @@ function renderRooms(rooms) {
     b.onclick = () => guestJoin(r.code);
     list.appendChild(b);
   }
-  $("g-rooms-msg").textContent = rooms.length ? "" : "nenhuma sala aberta ainda (alguém aperta “Criar sala”)";
+  $("g-rooms-box").classList.toggle("hidden", !rooms.length);   // sem sala: nem aparece (quem chega primeiro cria)
 }
 
 async function guestJoin(roomCode) {
