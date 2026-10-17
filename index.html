@@ -72,7 +72,6 @@
   </header>
   <div class="panel">
     <div class="row"><label>Nome</label><input id="g-name" maxlength="16" placeholder="Seu nome"></div>
-    <div class="row hidden" id="g-code-row"><label>Código da sala</label><input id="g-code" maxlength="5" placeholder="ex.: K7P2Q" autocapitalize="characters" autocomplete="off"></div>
     <div class="row"><label>ROM</label>
       <span id="g-rom" class="sub grow">O jogo será carregado automaticamente ao entrar</span>
       <label class="upload ghost-btn">Escolher ROM (.gba / .zip)<input id="g-file" type="file" accept=".gba,.zip" hidden></label>
@@ -83,7 +82,6 @@
     <p><b>Salas nesta internet</b></p>
     <div id="g-room-list" class="row"></div>
   </div>
-  <div id="g-rooms" class="hidden"><button id="g-other" class="ghost">Alguém de outra casa? Entrar com código</button></div>
   <div class="row">
     <button id="g-join" style="background: var(--p4)">Entrar na sala</button>
     <button id="g-create" class="hidden" style="background: var(--p2)">🏠 Criar sala</button>
@@ -98,7 +96,7 @@
   <h1>Sala de espera</h1>
   <div id="lobby-host" class="hidden">
     <p class="pc-only">Os outros abrem no navegador: <span id="guest-urls" class="ipbig"></span></p>
-    <p><span id="code-label">Ou pelo site <b>retroarchz.github.io/kirbynet</b>: na mesma internet a sala aparece sozinha. De outra casa, o código:</span> <span id="room-code" class="ipbig"></span></p>
+    <p><span id="code-label">Ou pelo site <b>retroarchz.github.io/kirbynet</b>: quem está na mesma internet vê a sala sozinho.</span> <span id="room-code" class="hidden"></span></p>
     <p class="sub pc-only">(IP deste PC: <span id="ips"></span> · ninguém precisa instalar nada)</p>
     <p class="sub pc-only">Se o Windows perguntar sobre o firewall do Python, clique em <b>Permitir</b> (rede privada).</p>
   </div>
@@ -122,6 +120,7 @@
     <div class="grow"></div>
     <button id="btn-all" class="ghost" title="F2">Ver todas</button>
     <button id="btn-ff" class="ghost hidden" title="Segure Espaço (PC) ou RT (controle)">⏩ Acelerar</button>
+    <button id="btn-ffx" class="ghost hidden" title="Quanto o ⏩ acelera">Velocidade 8x</button>
     <button id="btn-sound" class="ghost">🔊 Som</button>
     <button id="btn-touch" class="ghost">📱 Botões de toque</button>
     <button id="btn-controls2" class="ghost">🎮 Controles</button>

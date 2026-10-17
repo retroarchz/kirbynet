@@ -340,6 +340,8 @@ function renderGame(m, fresh) {
   $("btn-all").textContent = m.view_all ? "Só a minha" : "Ver todas";
   $("btn-all").classList.toggle("hidden", m.mode === "local");
   $("btn-ff").classList.toggle("hidden", m.mode !== "local");   // acelerar: só sozinho / "Mesmo PC"
+  $("btn-ffx").classList.toggle("hidden", m.mode !== "local");
+  updateTurboButton();
   $("desync").classList.toggle("hidden", m.desync == null);
   if (m.desync != null) $("desync").textContent = `⚠️ Os PCs dessincronizaram no frame ${m.desync}. Saiam e recomecem.`;
 }
@@ -489,6 +491,7 @@ $("btn-leave").onclick = () => {
 };
 $("btn-all").onclick = () => toggleRunView();
 $("btn-ff").onclick = (e) => { e.currentTarget.blur(); toggleTurbo(); };
+$("btn-ffx").onclick = (e) => { e.currentTarget.blur(); cycleTurboSpeed(); };
 // tela cheia: no celular vai a área de jogo inteira (com os botões de toque)
 const goFull = () => {
   if (document.fullscreenElement) return document.exitFullscreen();

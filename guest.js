@@ -72,18 +72,13 @@ async function guestInit() {
   $("g-join").onclick = guestJoin;
   $("g-solo").onclick = guestSolo;
   $("g-create").onclick = guestCreate;
-  $("g-other").onclick = () => {
-    $("g-code-row").classList.remove("hidden"); $("g-join").classList.remove("hidden"); $("g-other").classList.add("hidden");
-  };
   if (SITE) {
-    // como era pelo Wi-Fi: as salas da mesma internet aparecem sozinhas; o código só para outra casa
+    // como era pelo Wi-Fi: as salas da mesma internet aparecem sozinhas, sem código
     $("g-join").classList.add("hidden");
-    $("g-rooms").classList.remove("hidden");
     $("g-create").classList.remove("hidden");
     roomScanLoop();
     document.querySelectorAll(".pc-only").forEach(el => el.classList.add("hidden"));
-    $("code-label").textContent = "Quem está na mesma internet já vê esta sala no site. De outra casa, passe o código:";
-    try { $("g-code").value = localStorage.getItem("kirbynet.code") || ""; } catch (e) {}
+    $("code-label").textContent = "Quem está na mesma internet já vê esta sala no site.";
     $("g-sub").textContent = "A ROM e o save ficam guardados neste navegador, sozinho ou junto. "
       + "Para jogar junto: um aperta “Criar sala” e os outros tocam na sala que aparece aqui.";
     if (!Guest.rom) $("g-rom").textContent = "Escolha a ROM uma vez; ela fica guardada aqui";
@@ -128,11 +123,9 @@ function renderRooms(rooms) {
 }
 
 async function guestJoin(roomCode) {
-  // pelo site: a sala tocada na lista, ou o código digitado (outra casa)
-  const typed = typeof roomCode !== "string";
-  const code = SITE ? (typed ? $("g-code").value || "" : roomCode).trim().toUpperCase().replace(/[^A-Z0-9]/g, "") : "";
+  // pelo site: a sala tocada na lista
+  const code = SITE && typeof roomCode === "string" ? roomCode : "";
   if (SITE && !code) return toast("Digite o código da sala (quem criou a sala vê o código na tela).");
-  if (SITE && typed) try { localStorage.setItem("kirbynet.code", code); } catch (e) {}
   $("g-join").disabled = true;
   $("g-msg").textContent = "Carregando o jogo do host…";
   // pelo site: o jogo vem de quem criou a sala (só baixa se ainda não for o mesmo)

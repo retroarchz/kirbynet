@@ -141,7 +141,7 @@ function packMsg(kind, payload) {
 // ---------------------------------------------------------------- achar as salas da mesma internet
 // Como era pelo Wi-Fi: quem está na mesma internet (mesmo endereço público) vê as salas sozinho,
 // sem código. O código de uma sala é [4 letras tiradas do endereço da casa][2|3|4|5]: quem cria
-// pega o primeiro livre; quem entra testa os 4. De outra casa, ainda dá para digitar o código.
+// pega o primeiro livre; quem entra testa os 4.
 const ROOM_DIGITS = "2345";
 let prefixP = null;
 function netPrefix() {

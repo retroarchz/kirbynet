@@ -658,15 +658,26 @@ function startRun(opts) {
 // Acelerar (como o fast forward dos emuladores). Só sozinho / "Mesmo PC": em sala, todos os
 // aparelhos rodam o jogo no mesmo passo, então um não pode correr na frente dos outros.
 // PC: segurar Espaço · Xbox / controle: segurar RT · celular: botão ⏩ no menu ☰ (liga/desliga)
-const FF_SPEED = 3;
-const Turbo = { locked: false, warned: false };
+// A velocidade é escolhida no botão ao lado (2x a 16x, como o My Boy) e fica lembrada aqui.
+// Se o aparelho não aguentar, o jogo roda o mais rápido que ele conseguir.
+const FF_SPEEDS = [2, 4, 8, 16];
+const Turbo = { locked: false, warned: false,
+  speed: (() => { try { const v = +localStorage.getItem("kirbynet.ff"); return FF_SPEEDS.includes(v) ? v : 8; } catch (e) { return 8; } })() };
 function turboHeld() {
   if (down.has("Space") || Turbo.locked) return true;
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   return [...pads].some(p => p && p.buttons[7] && (p.buttons[7].pressed || p.buttons[7].value > 0.5));
 }
 function updateTurboButton() {
-  const b = $("btn-ff"); if (b) b.textContent = Turbo.locked ? `⏩ Acelerando (${FF_SPEED}x)` : "⏩ Acelerar";
+  const b = $("btn-ff"); if (b) b.textContent = Turbo.locked ? "⏩ Acelerando" : "⏩ Acelerar";
+  const v = $("btn-ffx"); if (v) v.textContent = `Velocidade ${Turbo.speed}x`;
+}
+function cycleTurboSpeed() {
+  Turbo.speed = FF_SPEEDS[(FF_SPEEDS.indexOf(Turbo.speed) + 1) % FF_SPEEDS.length];
+  try { localStorage.setItem("kirbynet.ff", Turbo.speed); } catch (e) {}
+  updateTurboButton();
+  const run = Play.run;
+  if (run && run.ff) { run.ff = Turbo.speed; run.worker.postMessage({ t: "speed", speed: Turbo.speed }); }
 }
 function toggleTurbo() {
   if (Play.run && Play.run.net) return toast("⏩ Acelerar só funciona jogando sozinho.");
@@ -677,9 +688,9 @@ function sendKeys(run) {
   const want = turboHeld();
   if (run.net) {
     if (want && down.has("Space") && !Turbo.warned) { Turbo.warned = true; toast("⏩ Acelerar só funciona jogando sozinho."); }
-  } else if (want !== !!run.ff) {
-    run.ff = want;
-    run.worker.postMessage({ t: "speed", speed: want ? FF_SPEED : 1 });
+  } else if ((want ? Turbo.speed : 0) !== (run.ff || 0)) {
+    run.ff = want ? Turbo.speed : 0;
+    run.worker.postMessage({ t: "speed", speed: want ? Turbo.speed : 1 });
   }
   const k = run.net ? [maskFor(0)] : [...Array(run.n).keys()].map(p => maskFor(p));
   const sig = k.join(",");

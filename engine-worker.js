@@ -126,12 +126,13 @@ function tick() {
   const now = performance.now();
   // acelerar (só sozinho / "Mesmo PC"): o relógio do jogo anda 'speed' vezes mais rápido
   const speed = run.speed || 1, fps = GBA_FPS * speed, cap = 3 * speed;
+  const budget = now + 10;   // acelerando: no máximo ~10 ms de trabalho por rodada
   let due = Math.floor((now - run.t0) / 1000 * fps);
   if (due - run.frames > 10 * speed) { run.t0 = now - run.frames / fps * 1000; due = run.frames + 1; }
   let ran = 0;
   const out = [], transfer = [];   // TODOS os quadros (antes: só o último de cada rodada → vídeo pulava)
   try {
-    while (run.frames < due && ran < cap) {
+    while (run.frames < due && ran < cap && (speed === 1 || ran === 0 || performance.now() < budget)) {
       const tf = performance.now();
       if (run.net) {
         const held = keys[0] | 0;
@@ -166,7 +167,7 @@ function tick() {
       }
       // acelerando: só a imagem do último quadro da rodada vai para a tela, e o som fica mudo
       // (o som de 3 quadros por quadro não cabe na caixa; seria só ruído)
-      if (speed > 1 && run.frames + 1 < due && ran + 1 < cap) { run.s.audio(0); run.frames++; ran++; run.busy += performance.now() - tf; run.busyN++; continue; }
+      if (speed > 1 && run.frames + 1 < due && ran + 1 < cap && performance.now() + (run.busyN ? run.busy / run.busyN : 4) < budget) { run.s.audio(0); run.frames++; ran++; run.busy += performance.now() - tf; run.busyN++; continue; }
       // imagem + som DESTE quadro, numerados: a página mostra cada um na hora certa
       const vids = [];
       for (const i of view) {
