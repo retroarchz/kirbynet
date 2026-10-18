@@ -265,7 +265,7 @@ async function guestJoin(roomCode) {
   await freshSave();
   $("g-msg").textContent = "Conectando à sala…";
   netJoin(SITE ? siteSocket(code) : `ws://${location.host}/net`,
-    { name, rom: Guest.romSha1, save: b64enc(loadMySave()) }, roomCallbacks());
+    { name, rom: Guest.romSha1, save: b64enc(loadMySave()), eng: SYS.engineV }, roomCallbacks());
 }
 
 // O que fazer na sala (igual para quem entra e para quem cria pelo site)
@@ -315,7 +315,7 @@ async function guestCreate() {
   $("g-msg").textContent = "";
   const name = ($("g-name").value || "").trim() || "Host";
   try { localStorage.setItem("kirbynet.name", name); } catch (e) {}
-  netJoin(SiteRoom.localSocket(), { name, rom: Guest.romSha1, save: b64enc(loadMySave()) }, roomCallbacks());
+  netJoin(SiteRoom.localSocket(), { name, rom: Guest.romSha1, save: b64enc(loadMySave()), eng: SYS.engineV }, roomCallbacks());
 }
 // tela da sala de espera de quem criou pelo site (a mesma do host no PC)
 function siteLobby(m) {

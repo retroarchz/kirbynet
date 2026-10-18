@@ -1,0 +1,33 @@
+Motor de GBA do site (kncore.wasm) - codigo-fonte
+=================================================
+
+O que e
+- kncore.wasm = mGBA (emulador de GBA, licenca MPL 2.0) compilado para WebAssembly,
+  mais a "ponte" kncore.c que liga o mGBA ao site (kncore.js / engine-worker.js).
+- mGBA: https://github.com/mgba-emu/mgba  (commit 9660a668f, 17/10/2026)
+  (c) Vicki Pfau e colaboradores. O codigo do mGBA nao foi alterado.
+
+Como recompilar
+1. Baixe o mGBA no commit acima e o wasi-sdk 24:
+     git clone https://github.com/mgba-emu/mgba.git && git -C mgba checkout 9660a668f
+     https://github.com/WebAssembly/wasi-sdk/releases (wasi-sdk-24.0)
+2. Nesta pasta:  WASI=/caminho/wasi-sdk-24.0 MGBA=/caminho/mgba ./compilar.sh
+   O resultado vai para ../../kncore.wasm (raiz do site).
+
+Diferencas para o motor anterior (testadas antes de publicar)
+- Mesmas funcoes para o site, mais kn_render: cada aparelho desenha so os GBAs
+  que mostra (na sala, so o proprio). O jogo continua igual; so a imagem nao e
+  feita. Na sala: 5% (2 jogadores) a 10% (4 jogadores) mais leve.
+- Sem relogio de cartucho (RTC): no motor anterior a hora vinha de memoria nao
+  preenchida e era sempre invalida (Pokemon Quetzal: "eventos baseados no relogio
+  nao ocorrerao mais"). Sem relogio o jogo fica no mesmo modo, sem depender disso.
+- Cabo link: o contador de tempo passa do limite de 32 bits a cada ~2 min 8 s
+  (quadro 7645). sio/lockstep.c, core/timing.c e gba/sio.c sao compilados com
+  -fwrapv para isso nao travar a partida (testado ate 33.000 quadros, 2 e 4 GBAs).
+
+Testes feitos (motor anterior x este, mesmos botoes)
+- 1 GBA: Kirby Nightmare, Kirby Amazing Mirror, Minish Cap e Pokemon Quetzal com
+  imagem, som e save identicos quadro a quadro.
+- Com cabo (2 e 4 GBAs): mesma memoria de jogo e mesmos saves; cada GBA anda
+  exatamente 1 quadro por chamada.
+- Sala de verdade com dois navegadores (Quetzal, Coop): 60 fps, sem dessincronizar.

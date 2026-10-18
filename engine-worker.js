@@ -41,6 +41,11 @@ let audioPort = null;   // canal direto para a linha de áudio do navegador (Aud
 let keys = [0, 0, 0, 0];
 let pending = null;   // botões que chegaram antes do motor terminar de carregar
 let view = [0];
+// só os GBAs que esta página mostra são desenhados (os outros rodam igual, sem imagem: bem mais leve)
+function applyView() {
+  if (!run || !run.s.render) return;
+  for (let i = 0; i < run.n; i++) run.s.render(i, view.includes(i));
+}
 const pool = [];   // buffers de imagem reaproveitados (a página devolve depois de desenhar)
 
 function bookPut(slot, frame, k) {
@@ -242,6 +247,7 @@ onmessage = async (ev) => {
       if (run.net) for (let f = 0; f < run.delay; f++) run.book.set(f, new Array(run.n).fill(0));
       for (const it of (pending || [])) bookPut(...it);
       pending = null;
+      applyView();
       iv = setInterval(tick, 4);
       postMessage({ t: "started" });
     } catch (err) { postMessage({ t: "err", msg: String(err && err.message || err) }); }
@@ -262,7 +268,7 @@ onmessage = async (ev) => {
       by.sum += m.sum || 0; by.cnt += m.cnt || 0; by.delay = m.delay | 0;
     }
   }
-  else if (m.t === "view") view = m.view;
+  else if (m.t === "view") { view = m.view; applyView(); }
   else if (m.t === "bufs") { for (const b of m.bufs) if (b.byteLength === FRAME_BYTES && pool.length < 48) pool.push(b); }
   else if (m.t === "vs") { if (run && iv) tick(); }   // a tela atualizou: roda o quadro que já está na hora
   else if (m.t === "aport") audioPort = m.port;

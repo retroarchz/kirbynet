@@ -19,6 +19,7 @@ const SYSTEMS = {
     pad: { A: "b1", B: "b0", L: "b4", R: "b5", Select: "b8", Start: "b9",
       Cima: "b12", Baixo: "b13", Esquerda: "b14", Direita: "b15" },
     profiles: "kirbynet.profiles", touchMap: "kirbynet.touchmap", romSlot: "last",
+    engineV: "2",   // motor (kncore.wasm): todos da sala precisam do mesmo. 2 = mGBA de 2026-10 com desenho só do que aparece
   },
   snes: {
     id: "snes", name: "SNES", W: 256, H: 224, fps: 60.0988,
@@ -38,6 +39,7 @@ const SYSTEMS = {
     pad: { A: "b1", B: "b0", X: "b3", Y: "b2", L: "b4", R: "b5", Select: "b8", Start: "b9",
       Cima: "b12", Baixo: "b13", Esquerda: "b14", Direita: "b15" },
     profiles: "kirbynet.snes.profiles", touchMap: "kirbynet.snes.touchmap", romSlot: "last-snes",
+    engineV: "1",
   },
 };
 const SYS = SYSTEMS[(() => { try { return localStorage.getItem("kirbynet.sys"); } catch (e) { return null; } })()] || SYSTEMS.gba;

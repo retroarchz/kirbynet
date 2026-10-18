@@ -92,6 +92,9 @@
           dst.set(new Uint8Array(x.memory.buffer, vidPtr, W * H * 4));
         },
         hash() { return BigInt.asUintN(64, x.kn_game_hash(ptr)); },  // igual ao nativo
+        // desenho do GBA i ligado/desligado: o jogo não muda, só a imagem deixa de ser feita
+        // (cada aparelho desenha só os GBAs que mostra). Motor antigo sem isso: não faz nada.
+        render(i, on) { if (x.kn_render) x.kn_render(ptr, i, on ? 1 : 0); },
         // Som do GBA i: { rate, samples: Int16Array estéreo intercalado } (não mexe na emulação)
         audio(i) {
           const frames = x.kn_audio_read(ptr, i, audPtr, AUD_MAX);

@@ -319,6 +319,8 @@ const SiteRoom = {
       let info; try { info = JSON.parse(dec(data)); } catch (e) { return; }
       if (this.running) fail("A partida já começou.");
       else if (info.rom !== this.sha1) fail("A sua ROM é diferente da do host. Todos precisam da MESMA ROM.");
+      // motor diferente (alguém com o site antigo guardado no navegador) dessincronizaria no meio do jogo
+      else if ((info.eng || "1") !== SYS.engineV) fail("O site foi atualizado: recarregue a página (puxe a tela para baixo ou Ctrl+F5) e entre de novo.");
       else if (this.players.length >= SYS.maxP) fail(`A sala está cheia (${SYS.maxP} jogadores).`);
       else if (slot < 0) {
         const p = { name: String(info.name || "?").slice(0, 16), c, save: String(info.save || "") };
