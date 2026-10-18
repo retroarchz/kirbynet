@@ -14,6 +14,7 @@ h2 { margin: 0 0 6px; font-size: 18px; }
 .sub { color: var(--sub); }
 .page { max-width: 1100px; margin: 0 auto; padding: 26px 28px; }
 .hero { display: flex; align-items: flex-start; gap: 16px; justify-content: space-between; margin-bottom: 18px; }
+.hero > button { flex-shrink: 0; white-space: nowrap; }   /* "🎮 Controles" numa linha só, como no kirbynet do Python */
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 18px; margin-bottom: 18px; }
 .row { display: flex; align-items: center; gap: 12px; margin: 8px 0; flex-wrap: wrap; }
 .row > label:first-child { width: 90px; color: var(--sub); }
@@ -50,6 +51,9 @@ button.ghost, .ghost-btn { background: transparent; color: #d0d0ec; border: 1px 
 .players.small { margin: 0; }
 .players.small .badge { padding: 4px 10px; font-size: 13px; }
 .gamebar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+/* botões da partida menores, para caberem todos numa linha (o Sair não cai para baixo) */
+.gamebar button { padding: 6px 10px; font-size: 13.5px; white-space: nowrap; }
+.gamebar { gap: 6px; }
 .stage { display: grid; gap: 12px; justify-content: center; align-content: center; }
 .stage.one { grid-template-columns: 1fr; }
 .stage.many { grid-template-columns: repeat(2, 1fr); }
