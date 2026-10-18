@@ -206,9 +206,9 @@ body.touchui .toast { top: 10px; bottom: auto; }
   .touch .tmenu { top: 10px; left: max(10px, env(safe-area-inset-left)); }
   .touch .dpad { --d: min(36cqh, 19cqw); left: max(3cqw, env(safe-area-inset-left)); bottom: 6cqh; }
   .touch .abz { --d: min(36cqh, 19cqw); right: max(3cqw, env(safe-area-inset-right)); bottom: 6cqh; }
-  /* L e R juntos, à direita, acima de B/A (padrão dos emuladores deitados) */
-  .touch .sh { width: min(9.5cqw, 88px); height: clamp(24px, 7.5cqh, 36px); font-size: clamp(13px, 4cqh, 17px);
-    bottom: calc(6cqh + min(36cqh, 19cqw) + 3cqh); }
+  /* L e R juntos no canto de cima à direita, na altura do ☰ (que fica no canto de cima à esquerda) */
+  .touch .sh { width: min(9.5cqw, 88px); height: clamp(30px, 8cqmin, 40px); font-size: clamp(13px, 4cqh, 17px);
+    top: 10px; bottom: auto; }
   .touch .sh.r { right: max(3cqw, env(safe-area-inset-right)); }
   .touch .sh.l { right: calc(max(3cqw, env(safe-area-inset-right)) + min(9.5cqw, 88px) + 1.5cqw); }
   .touch .tmenu { width: clamp(30px, 8cqmin, 40px); height: clamp(30px, 8cqmin, 40px); }
