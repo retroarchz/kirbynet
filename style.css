@@ -54,6 +54,12 @@ button.ghost, .ghost-btn { background: transparent; color: #d0d0ec; border: 1px 
 /* botões da partida menores, para caberem todos numa linha (o Sair não cai para baixo) */
 .gamebar button { padding: 6px 10px; font-size: 13.5px; white-space: nowrap; }
 .gamebar { gap: 6px; }
+/* barra e rodapé com a mesma largura da tela do jogo (antes iam até a borda da página e o Sair passava da tela) */
+body:not(.touchui) #game .gamebar, body:not(.touchui) #game .statusbar {
+  width: min(100%, calc((100vh - 170px) * var(--ar))); margin-left: auto; margin-right: auto; }
+/* se não couber numa linha, os botões que sobram ficam à direita, embaixo dos outros */
+body:not(.touchui) #game .gamebar { justify-content: flex-end; }
+body:not(.touchui) #game-players { margin-right: auto; }
 .stage { display: grid; gap: 12px; justify-content: center; align-content: center; }
 .stage.one { grid-template-columns: 1fr; }
 .stage.many { grid-template-columns: repeat(2, 1fr); }
