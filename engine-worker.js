@@ -5,7 +5,8 @@
 // som, e as mensagens de rede (I = botões, X = conferência de sincronia).
 // qual videogame: a página diz pelo endereço (engine-worker.js?sys=snes)
 const SNES = /[?&]sys=snes\b/.test(location.search);
-importScripts(SNES ? "sncore.js" : "kncore.js");
+const V = (location.search.match(/[?&]v=(\w+)/) || [])[1] || "";   // mesma versão da página
+importScripts((SNES ? "sncore.js" : "kncore.js") + "?v=" + V);
 const Core = SNES ? SnCore : KnCore;
 
 const W = Core.W, H = Core.H, FRAME_BYTES = W * H * 4;

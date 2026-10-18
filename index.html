@@ -7,7 +7,9 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png">
 <meta name="theme-color" content="#161629">
-<link rel="stylesheet" href="style.css">
+<!-- versão dos arquivos: muda a cada publicação, para o celular não misturar arquivo velho com novo -->
+<script>const ASSET_V = "20261018130431";</script>
+<link rel="stylesheet" href="style.css?v=20261018130431">
 </head>
 <body>
 <div id="conn" class="conn hidden">Sem conexão com o kirbynet. A janela do Python está aberta?</div>
@@ -190,14 +192,14 @@
   </div>
 </div>
 
-<script src="system.js"></script>
+<script src="system.js?v=20261018130431"></script>
 <script>document.getElementById("sys").value = SYS.id;</script>
-<script src="peerjs.min.js"></script>
-<script src="sitenet.js"></script>
-<script src="cloud.js"></script>
-<script src="app.js"></script>
-<script src="game.js"></script>
-<script src="guest.js"></script>
+<script src="peerjs.min.js?v=20261018130431"></script>
+<script src="sitenet.js?v=20261018130431"></script>
+<script src="cloud.js?v=20261018130431"></script>
+<script src="app.js?v=20261018130431"></script>
+<script src="game.js?v=20261018130431"></script>
+<script src="guest.js?v=20261018130431"></script>
 <script>touchInit(); updateSoundButton(); if (!GUEST) connect();</script>
 </body>
 </html>

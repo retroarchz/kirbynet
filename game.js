@@ -66,7 +66,7 @@ function b64dec(s) { const b = atob(s || ""); const u = new Uint8Array(b.length)
 // O motor (WebAssembly) é compilado uma vez aqui e entregue ao worker de cada partida.
 async function loadEngine() {
   if (!Play.mod) {
-    const bytes = await (await fetch(SYS.wasm)).arrayBuffer();
+    const bytes = await (await fetch(SYS.wasm + "?v=" + ASSET_V)).arrayBuffer();
     await WebAssembly.compile(bytes);          // confere que o navegador aceita o motor
     Play.mod = bytes;
   }
@@ -632,7 +632,7 @@ function netJoin(url, hello, cb) {
 // opts: { n, rom, saves[], names[], net (ou null), slot, delay,
 //         onSave(saves[], fechandoAba) — grava o save; onEnd(saves[]) — partida acabou }
 function startRun(opts) {
-  const worker = new Worker("engine-worker.js?sys=" + SYS.id);
+  const worker = new Worker(`engine-worker.js?sys=${SYS.id}&v=${ASSET_V}`);
   const run = { ...opts, worker, desync: null, raf: 0, lastKeys: "",
                 queue: [], base: null, avOff: null, lagS: null, k: null, vsync: 1000 / 60, lastTs: 0,
                 stat: { shown: 0, skipped: 0, idle: 0, gaps: 0, lastF: null, audioLag: null },
