@@ -1,14 +1,11 @@
 "use strict";
 // Save da PESSOA, em qualquer aparelho (sem senha): "Luan" no Xbox, no celular e no PC é o mesmo save.
 //
-// Os saves sobem para o Firebase (Realtime Database), guardados com uma CHAVE que ninguém digita:
-// os aparelhos de uma mesma pessoa combinam a chave sozinhos quando estão com o site aberto ao
-// mesmo tempo na mesma internet (a "senha" é o Wi-Fi de casa, como sempre foi). Depois disso cada
-// aparelho manda o save toda vez que o jogo grava e puxa o mais novo antes de jogar, mesmo que o
-// outro aparelho já esteja desligado. Quem só sabe o nome "Luan" não acha nada: sem a chave, as
-// regras do banco (pasta firebase/) não deixam ler nem listar.
+// Os saves sobem para o Firebase (Realtime Database) numa chave que sai só do NOME ("Luan", "luan"
+// e "LUÃ" dão a mesma chave). Não precisa de outro aparelho ligado nem da mesma internet: cada
+// aparelho manda o save toda vez que o jogo grava e puxa o mais novo antes de jogar.
 //
-// Regra quando os dois mudaram: vale o mais novo; o deste aparelho fica como cópia (.bak) e avisa.
+// Regra quando os dois mudaram: vale o mais novo; o deste aparelho fica como cópia (.antes) e avisa.
 const CLOUD_DB = "https://retroarch-81605-default-rtdb.firebaseio.com";
 
 // "Luan", "luan", " LUAN " e "Luã" viram a mesma pessoa
@@ -28,15 +25,8 @@ const Cloud = {
     return d;
   },
 
-  // chave desta pessoa neste aparelho: { s: segredo, c: quando foi criada }. Sem ela ainda? cria.
-  ident(who) {
-    if (!who) return null;
-    try { const v = JSON.parse(lsGet("kirbynet.id." + who)); if (v && v.s && v.c) return v; } catch (e) {}
-    const v = { s: sha1Hex(crypto.getRandomValues(new Uint8Array(32))) + sha1Hex(crypto.getRandomValues(new Uint8Array(32))), c: Date.now() };
-    lsSet("kirbynet.id." + who, JSON.stringify(v));
-    return v;
-  },
-  key(who) { const id = this.ident(who); return id ? sha1Hex(enc("kirbynet-save:" + id.s)) : null; },
+  // chave na nuvem: só do nome (já normalizado por normName)
+  key(who) { return who ? sha1Hex(enc("kirbynet-nome-save:" + who)) : null; },
   // quando cada save mudou aqui (t) e qual versão da nuvem já está aqui (synced)
   meta(who, rom) { try { return JSON.parse(lsGet(`kirbynet.savet.${who}.${rom}`)) || {}; } catch (e) { return {}; } },
   setMeta(who, rom, m) { lsSet(`kirbynet.savet.${who}.${rom}`, JSON.stringify(m)); },
@@ -112,55 +102,10 @@ const Cloud = {
     for (const rom of roms) try { await this.sync(who, rom); } catch (e) {}
   },
 
-  // ---------- apresentação: os aparelhos da mesma pessoa na mesma internet combinam a chave
-  peer: null, gen: 0,
-  async meet(who) {
-    const gen = ++this.gen;
-    if (this.peer) { try { this.peer.destroy(); } catch (e) {} this.peer = null; }
+  // nome escolhido/trocado: acerta todos os saves desse nome neste aparelho com a nuvem
+  meet(who) {
     this.who = who;
-    if (!who || typeof Peer === "undefined") return;
-    this.ident(who);
-    this.syncAll(who).catch(() => {});
-    const pre = await netPrefix();
-    if (!pre || gen !== this.gen) return;
-    const base = `${SITE_PREFIX}eu-${pre}-${sha1Hex(enc("kirbynet-nome:" + who)).slice(0, 10)}-`;
-    let me = -1;
-    for (let i = 1; i <= 6 && me < 0; i++) {
-      try {
-        const peer = await openPeer(base + i);
-        if (gen !== this.gen) return peer.destroy();
-        this.peer = peer; me = i;
-        peer.on("connection", (c) => this.talk(c, who));
-        keepAlive(peer, () => this.peer === peer);
-      } catch (e) { if (e.type !== "unavailable-id") return; }
-    }
-    // procura os outros aparelhos desta pessoa de tempos em tempos
-    const look = () => {
-      if (gen !== this.gen || !this.peer || this.peer.destroyed) return;
-      for (let i = 1; i <= 6; i++) if (i !== me) this.talk(this.peer.connect(base + i, { serialization: "raw", reliable: true }), who);
-      setTimeout(look, 20000);
-    };
-    look();
-  },
-  // conversa com outro aparelho da mesma pessoa: fica valendo a chave mais antiga
-  talk(c, who) {
-    c.on("open", () => { const id = this.ident(who); chunkSend(c, packMsg("K", enc(JSON.stringify({ s: id.s, c: id.c })))); });
-    c.on("data", chunkReader(buf => {
-      const u8 = new Uint8Array(buf);
-      if (u8[0] !== 75 || who !== this.who) return;
-      let o; try { o = JSON.parse(dec(u8.subarray(1))); } catch (e) { return; }
-      const id = this.ident(who);
-      if (o && typeof o.s === "string" && o.s.length === 80 && (o.c < id.c || (o.c === id.c && o.s < id.s))) {
-        lsSet("kirbynet.id." + who, JSON.stringify({ s: o.s, c: o.c }));
-        // os saves daqui ainda não estão nessa chave: marca como "mudou aqui" para irem junto
-        const pre = `kirbynet.savet.${who}.`;
-        try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith(pre)) { const m = JSON.parse(localStorage.getItem(k)) || {}; m.synced = 0; localStorage.setItem(k, JSON.stringify(m)); } } } catch (e) {}
-        toast("☁ Este aparelho agora divide os saves de “" + who + "” com o outro aparelho.");
-        this.syncAll(who).catch(() => {});
-      }
-      setTimeout(() => { try { c.close(); } catch (e) {} }, 1000);
-    }));
-    c.on("error", () => {});
+    if (who) this.syncAll(who).catch(() => {});
   },
 };
 

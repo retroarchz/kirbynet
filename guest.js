@@ -123,7 +123,7 @@ async function guestInit() {
   $("g-host").textContent = location.host;
   try { $("g-name").value = localStorage.getItem("kirbynet.name") || ""; } catch (e) {}
   showGuestPage();
-  // aparelhos desta pessoa na mesma internet se apresentam (e dividem os saves) sozinhos
+  // saves deste nome: acerta com a nuvem (vale em qualquer aparelho e internet)
   Cloud.meet(who());
   let nameT = 0;
   $("g-name").addEventListener("input", () => {
