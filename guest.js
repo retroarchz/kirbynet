@@ -123,6 +123,16 @@ async function guestInit() {
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (e) {}
   $("g-host").textContent = location.host;
   try { $("g-name").value = localStorage.getItem("kirbynet.name") || ""; } catch (e) {}
+  if (SITE) {
+    // textos e botões do site já antes de aparecer a tela (senão piscava a tela de "sala do PC")
+    $("g-join").classList.add("hidden");
+    $("g-create").classList.remove("hidden");
+    document.querySelectorAll(".pc-only").forEach(el => el.classList.add("hidden"));
+    $("code-label").textContent = "Quem está na mesma internet já vê esta sala no site.";
+    $("g-sub").textContent = "Escolha um jogo da lista. O save fica guardado neste navegador. "
+      + "Para jogar junto: um aperta “Criar sala” e os outros tocam na sala que aparece aqui.";
+    $("g-rom").textContent = "Carregando jogos…";
+  }
   showGuestPage();
   // saves deste nome: acerta com a nuvem (vale em qualquer aparelho e internet)
   Cloud.meet(who());
@@ -169,13 +179,7 @@ async function guestInit() {
   };
   if (SITE) {
     // como era pelo Wi-Fi: as salas da mesma internet aparecem sozinhas, sem código
-    $("g-join").classList.add("hidden");
-    $("g-create").classList.remove("hidden");
     roomScanLoop();
-    document.querySelectorAll(".pc-only").forEach(el => el.classList.add("hidden"));
-    $("code-label").textContent = "Quem está na mesma internet já vê esta sala no site.";
-    $("g-sub").textContent = "Escolha um jogo da lista. O save fica guardado neste navegador. "
-      + "Para jogar junto: um aperta “Criar sala” e os outros tocam na sala que aparece aqui.";
     await initLibrary();
   }
 }
