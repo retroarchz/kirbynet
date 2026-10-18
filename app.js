@@ -149,8 +149,8 @@ function renderTouchMap() {
   const box = $("ctl-touch"), touch = Touch.isTouch || Touch.shown;
   box.classList.toggle("hidden", ctlTab !== 0 || !touch);   // os botões da tela são do Jogador 1
   if (box.classList.contains("hidden")) return;
-  const label = (k) => k === "AB" ? "A+B" : k;
-  const opts = [...BUTTONS, ...(SYS.oneScreen ? [] : ["AB"])];
+  const label = (k) => k === "AB" ? "A+B" : k === "-" ? "—" : k;
+  const opts = ["-", ...BUTTONS, ...(SYS.oneScreen ? [] : ["AB"])];   // "—" = o botão não faz nada
   const map = $("ctl-touch-map");
   map.innerHTML = "";
   for (const k of TouchMap.keys()) {
