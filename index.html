@@ -8,8 +8,8 @@
 <link rel="icon" href="icon-192.png">
 <meta name="theme-color" content="#161629">
 <!-- versão dos arquivos: muda a cada publicação, para o celular não misturar arquivo velho com novo -->
-<script>const ASSET_V = "20261018182621";</script>
-<link rel="stylesheet" href="style.css?v=20261018182621">
+<script>const ASSET_V = "20261018190844";</script>
+<link rel="stylesheet" href="style.css?v=20261018190844">
 </head>
 <body>
 <div id="conn" class="conn hidden">Sem conexão com o kirbynet. A janela do Python está aberta?</div>
@@ -144,6 +144,8 @@
   </div>
   <div id="stage" class="stage"></div>
   <div class="statusbar"><span id="status"></span><span id="desync" class="bad hidden"></span></div>
+  <!-- códigos (GameShark / Action Replay / CodeBreaker): canto de baixo à direita, bem discreto -->
+  <button id="btn-cheats" class="corner-link cheat-q hidden" title="Códigos" aria-label="Códigos">?</button>
   <!-- botões de toque (aparecem sozinhos em celular/tablet) — estilo emulador clássico:
        em pé: jogo em cima e controles embaixo; deitado: jogo na tela toda e controles por cima -->
   <div id="touch" class="touch hidden">
@@ -192,15 +194,28 @@
   </div>
 </div>
 
-<script src="system.js?v=20261018182621"></script>
-<script src="ghost-core.js?v=20261018182621"></script>   <!-- SNES, Mundo livre: onde está o boneco de cada um -->
+<!-- CÓDIGOS -->
+<div id="cheats" class="modal hidden">
+  <div class="modal-box">
+    <header class="row"><h2>Códigos</h2><div class="grow"></div><button id="cheats-close" class="ghost">Fechar</button></header>
+    <p class="sub">GameShark, Action Replay ou CodeBreaker (o tipo é descoberto sozinho). Cole cada código numa caixa
+      (pode ter várias linhas) e aperte <b>Aplicar</b>. Fica salvo neste aparelho, só para este jogo<span id="cheats-game"></span>.</p>
+    <p class="sub">O código tem que ser da mesma versão da ROM (USA, Europa, Japão). Se o jogo travar ou ficar estranho,
+      desligue o código e aplique. O que o jogo gravar no save com o código ligado continua lá depois.</p>
+    <div id="cheats-list"></div>
+    <div class="row"><button id="cheats-add" class="ghost">+ Novo código</button><div class="grow"></div>
+      <span id="cheats-msg" class="sub"></span><button id="cheats-apply">Aplicar</button></div>
+  </div>
+</div>
+<script src="system.js?v=20261018190844"></script>
+<script src="ghost-core.js?v=20261018190844"></script>   <!-- SNES, Mundo livre: onde está o boneco de cada um -->
 <script>document.getElementById("sys").value = SYS.id;</script>
-<script src="peerjs.min.js?v=20261018182621"></script>
-<script src="sitenet.js?v=20261018182621"></script>
-<script src="cloud.js?v=20261018182621"></script>
-<script src="app.js?v=20261018182621"></script>
-<script src="game.js?v=20261018182621"></script>
-<script src="guest.js?v=20261018182621"></script>
+<script src="peerjs.min.js?v=20261018190844"></script>
+<script src="sitenet.js?v=20261018190844"></script>
+<script src="cloud.js?v=20261018190844"></script>
+<script src="app.js?v=20261018190844"></script>
+<script src="game.js?v=20261018190844"></script>
+<script src="guest.js?v=20261018190844"></script>
 <script>touchInit(); updateSoundButton(); if (!GUEST) connect();</script>
 </body>
 </html>

@@ -236,6 +236,14 @@ body.playing { overflow: hidden; overscroll-behavior: none; }
 button.corner-link { position: fixed; right: 12px; bottom: 10px; background: none; border: 0; padding: 4px 6px;
   color: var(--sub); font-size: 12px; font-weight: 400; opacity: .45; }
 button.corner-link:hover, button.corner-link:focus-visible { opacity: .9; filter: none; }
+/* "?" dos códigos, na tela do jogo: pequeno, por cima dos botões de toque */
+button.cheat-q { right: max(4px, env(safe-area-inset-right)); bottom: max(4px, env(safe-area-inset-bottom)); z-index: 16;
+  width: 22px; height: 22px; padding: 0; border-radius: 50%; font-size: 12px; line-height: 22px; opacity: .3; }
+.cheat { background: #18183a; border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; margin: 8px 0; }
+.cheat .row { margin: 4px 0; }
+.cheat .cheat-name { flex: 1; min-width: 0; }
+.cheat textarea { width: 100%; min-height: 64px; resize: vertical; background: #12122a; color: var(--text);
+  border: 1px solid #44446c; border-radius: 9px; padding: 8px 10px; font: 14px/1.4 Consolas, monospace; }
 
 /* escolha do videogame: no canto de cima à esquerda (em tela estreita, em cima do título) */
 .sys-pick { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }

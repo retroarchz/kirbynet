@@ -48,6 +48,14 @@ function applyView() {
   if (!run || !run.s.render) return;
   for (let i = 0; i < run.n; i++) run.s.render(i, view.includes(i));
 }
+// Códigos (GameShark / Action Replay / CodeBreaker): só sozinho ou no "Mesmo PC" (em sala todos os
+// aparelhos rodam o mesmo jogo; um código só aqui separaria as partidas). Vale para todos os GBAs daqui.
+function setCheats(codes) {
+  if (run.net || !run.s.cheats) return postMessage({ t: "cheats", res: null });
+  let res = null;
+  for (let i = 0; i < run.n; i++) res = run.s.cheats(i, codes);
+  postMessage({ t: "cheats", res });
+}
 const pool = [];   // buffers de imagem reaproveitados (a página devolve depois de desenhar)
 
 function bookPut(slot, frame, k) {
@@ -377,6 +385,7 @@ onmessage = async (ev) => {
       if (run.net) for (let f = 0; f < run.delay; f++) run.book.set(f, new Array(run.n).fill(0));
       for (const it of (pending || [])) bookPut(...it);
       pending = null;
+      if (m.cheats) setCheats(m.cheats);
       applyView();
       iv = setInterval(tick, 4);
       postMessage({ t: "started" });
@@ -399,6 +408,7 @@ onmessage = async (ev) => {
     }
   }
   else if (m.t === "view") { view = m.view; applyView(); }
+  else if (m.t === "cheats") { if (run) setCheats(m.cheats); }
   // Mundo livre (SNES): inimigos/golpes/abates dos outros e "manda de novo os desenhos" (alguém entrou)
   else if (m.t === "kill") { if (run && run.free && m.k) CoopSync.addKill(run.cs[0], m.k); }
   else if (m.t === "rooms") {}

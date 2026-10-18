@@ -4,6 +4,7 @@
  * kn_audio_rate, kn_savedata, kn_game_hash, kn_destroy, kn_read16, kn_malloc, kn_free.
  * Novo: kn_render(ptr, i, ligado) — desliga o desenho de um GBA que não está na tela deste aparelho.
  * O jogo continua rodando igual (é o frameskip do próprio mGBA); só a imagem não é feita.
+ * kn_cheat_clear / kn_cheat_add — códigos (GameShark, Action Replay, CodeBreaker) de um GBA.
  * kn_rom_ptr / kn_rom_len — onde está a cópia da ROM de cada GBA. A fotografia da partida para o rollback
  * (kncore.js) é a memória inteira do motor menos as ROMs, que nunca mudam: exata, sem depender do
  * salvamento de estado do mGBA (que não guarda várias coisas do cabo link, do som e do save).
@@ -13,10 +14,12 @@
  * pulando os que estão dormindo, até todos terminarem o quadro. A ordem é fixa, então o resultado é
  * o mesmo em todos os aparelhos.
  */
+#include <mgba/core/cheats.h>
 #include <mgba/core/core.h>
 #include <mgba/core/log.h>
 #include <mgba/core/lockstep.h>
 #include <mgba/gba/core.h>
+#include <mgba/internal/gba/cheats.h>
 #include <mgba/internal/gba/gba.h>
 #include <mgba/internal/gba/overrides.h>
 #include <mgba/internal/gba/sio/lockstep.h>
@@ -302,6 +305,58 @@ KN_EXPORT(kn_game_hash) uint64_t kn_game_hash(struct KnGame* game) {
 }
 KN_EXPORT(kn_hash) uint64_t kn_hash(struct KnGame* game) { return kn_game_hash(game); }
 KN_EXPORT(kn_frame) uint32_t kn_frame(struct KnGame* game) { return game->frames; }
+
+// Códigos do GBA i (GameShark, Action Replay, CodeBreaker; o tipo é descoberto pelo próprio mGBA).
+// Depois de entrar, o mGBA aplica sozinho a cada quadro (ou no gancho do código mestre).
+// Só fora da sala: em sala todos os aparelhos precisam rodar exatamente o mesmo jogo.
+// Tira todos os códigos; se algum mudou a ROM, ela volta ao original.
+KN_EXPORT(kn_cheat_clear) void kn_cheat_clear(struct KnGame* game, int i) {
+	struct mCheatDevice* device = game->cores[i]->cheatDevice(game->cores[i]);
+	while (mCheatSetsSize(&device->cheats)) {
+		struct mCheatSet* set = *mCheatSetsGetPointer(&device->cheats, mCheatSetsSize(&device->cheats) - 1);
+		set->enabled = false;
+		mCheatRefresh(device, set);   // desfaz as mudanças na ROM
+		mCheatRemoveSet(device, set);   // e tira o gancho do código mestre
+		mCheatSetDeinit(set);
+	}
+}
+
+// Um código (uma ou mais linhas). Devolve 0 se entrou, ou o número da linha que o mGBA não entendeu
+// (aí o código inteiro fica de fora).
+KN_EXPORT(kn_cheat_add) int kn_cheat_add(struct KnGame* game, int i, const char* text) {
+	struct mCheatDevice* device = game->cores[i]->cheatDevice(game->cores[i]);
+	struct mCheatSet* set = device->createSet(device, NULL);
+	char line[128];
+	int lineNo = 0;
+	for (const char* p = text; *p;) {
+		const char* end = strchr(p, '\n');
+		size_t len = end ? (size_t) (end - p) : strlen(p);
+		++lineNo;
+		if (len >= sizeof(line)) {
+			mCheatSetDeinit(set);
+			return lineNo;
+		}
+		memcpy(line, p, len);
+		p += end ? len + 1 : len;
+		while (len && (line[len - 1] == '\r' || line[len - 1] == ' ' || line[len - 1] == '\t')) {
+			--len;
+		}
+		line[len] = '\0';
+		const char* start = line;
+		while (*start == ' ' || *start == '\t') {
+			++start;
+		}
+		if (!*start) {
+			continue;   // linha vazia
+		}
+		if (!mCheatAddLine(set, start, GBA_CHEAT_AUTODETECT)) {
+			mCheatSetDeinit(set);
+			return lineNo;
+		}
+	}
+	mCheatAddSet(device, set);
+	return 0;
+}
 
 // cópia da ROM do GBA i dentro do motor (para a fotografia deixar de fora). 0 = a ROM foi alterada pelo
 // jogo (cartuchos especiais) e precisa entrar na fotografia

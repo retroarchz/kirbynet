@@ -41,6 +41,15 @@ Rollback (sala pela internet)
   nao cresce no meio de um quadro (crescer num quadro desfeito deixaria sobra).
 - Quem decide quando supor e voltar e o engine-worker.js (veja os comentarios la).
 
+Codigos (GameShark / Action Replay / CodeBreaker)
+- kn_cheat_clear / kn_cheat_add: usam o leitor de codigos do proprio mGBA (o tipo
+  e descoberto sozinho); o mGBA aplica a cada quadro. So sozinho ou no "Mesmo PC":
+  em sala o site nem mostra o botao (um codigo so num aparelho separaria a partida).
+- Testado: sem codigos, motor anterior x este com o mesmo resultado (Amazing Mirror,
+  600 quadros); codigo na memoria e na ROM entra, e ao desligar a ROM volta ao
+  original; codigo de varias linhas e codigo criptografado entram; linha invalida
+  e recusada com o numero da linha.
+
 Testes feitos
 - Motor anterior x este, mesmos botoes, 1 GBA: Kirby Nightmare, Kirby Amazing
   Mirror, Minish Cap e Pokemon Quetzal com imagem, som e save identicos quadro a

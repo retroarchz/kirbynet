@@ -698,9 +698,13 @@ function startRun(opts) {
   };
   worker.onerror = (ev) => onWorker(run, { t: "err", msg: "O motor parou: " + (ev.message || "erro") });
   const roms = opts.rom.slice();   // cópia: a original continua aqui para uma próxima partida
+  Cheats.game = romGameCode(opts.rom);
+  run.cheatList = Cheats.usable(run) ? Cheats.load() : [];   // os códigos deste jogo, ligados na partida
+  const cheats = Cheats.codes(run.cheatList);
   worker.postMessage({ t: "start", module: Play.mod, n: run.n, rom: roms, saves: opts.saves,
                        net: !!run.net && !run.free, free: !!run.free, me: run.slot | 0, slot: run.free ? 0 : run.slot,
-                       delay: run.delay || 0 }, [roms.buffer]);
+                       delay: run.delay || 0, cheats: cheats.length ? cheats : null }, [roms.buffer]);
+  $("btn-cheats").classList.toggle("hidden", !Cheats.usable(run));
   if (run.free) ghostInit(run);
   if (run.free && run.net) {
     run.net.onKill = (k) => run.worker.postMessage({ t: "kill", k });
@@ -755,14 +759,15 @@ function toggleTurbo() {
   if (Play.run) sendKeys(Play.run);
 }
 function sendKeys(run) {
-  const want = turboHeld();
+  const want = !cheatsOpen() && turboHeld();   // Espaço digitado no código não acelera
   if (run.net) {
     if (want && down.has("Space") && !Turbo.warned) { Turbo.warned = true; toast("⏩ Acelerar só funciona jogando sozinho."); }
   } else if ((want ? Turbo.speed : 0) !== (run.ff || 0)) {
     run.ff = want ? Turbo.speed : 0;
     run.worker.postMessage({ t: "speed", speed: want ? Turbo.speed : 1 });
   }
-  const k = run.net ? [maskFor(0)] : [...Array(run.n).keys()].map(p => maskFor(p));
+  // janela de códigos aberta: nenhum botão vai para o jogo (digitar o código não aperta nada)
+  const k = run.net ? [maskFor(0)] : [...Array(run.n).keys()].map(p => cheatsOpen() ? 0 : maskFor(p));
   const sig = k.join(",");
   if (sig === run.lastKeys) return;
   run.lastKeys = sig;
@@ -877,6 +882,101 @@ function presentStep(run, ts) {
   if (!drawDue(run, ts + run.vsync)) run.stat.idle++;   // aparece na próxima atualização da tela
 }
 
+// Códigos (GameShark / Action Replay / CodeBreaker): botão "?" discreto no canto da tela do jogo.
+// Só GBA, sozinho ou no "Mesmo PC" (em sala, um código só num aparelho separaria as partidas).
+// Ficam guardados neste navegador, por jogo (pelo código do cartucho, ex. B8KE), e entram sozinhos
+// na próxima partida desse jogo.
+const Cheats = {
+  game: "",   // código do cartucho da partida atual
+  key() { return "kirbynet.cheats." + this.game; },
+  load() { try { const v = JSON.parse(localStorage.getItem(this.key())); return Array.isArray(v) ? v : []; } catch (e) { return []; } },
+  save(list) { try { localStorage.setItem(this.key(), JSON.stringify(list)); } catch (e) {} },
+  usable(run) { return SYS.id === "gba" && !run.net; },
+  // o que vai para o motor: só os ligados e com algo escrito
+  codes(list) { return list.filter(c => c.on && c.code.trim()).map(c => c.code); },
+};
+function romGameCode(rom) {
+  const id = String.fromCharCode(...rom.subarray(0xAC, 0xB0)).replace(/[^0-9A-Za-z]/g, "");
+  return id || "rom";
+}
+function cheatsRead() {
+  return [...$("cheats-list").querySelectorAll(".cheat")].map(el => ({
+    name: el.querySelector(".cheat-name").value.trim(), code: el.querySelector("textarea").value,
+    on: el.querySelector("input[type=checkbox]").checked }));
+}
+function cheatsRender(list) {
+  const box = $("cheats-list");
+  box.innerHTML = "";
+  for (const c of list) {
+    const el = document.createElement("div");
+    el.className = "cheat";
+    el.innerHTML = `<div class="row"><label class="check"><input type="checkbox"> Ligado</label>
+      <input class="cheat-name" maxlength="40" placeholder="Nome (ex.: Tudo liberado)"><button class="ghost">Apagar</button></div>
+      <textarea spellcheck="false" autocomplete="off" autocapitalize="characters" placeholder="Cole o código aqui, ex.:\nXXXXXXXX YYYYYYYY"></textarea>
+      <div class="sub cheat-msg"></div>`;
+    el.querySelector("input[type=checkbox]").checked = c.on;
+    el.querySelector(".cheat-name").value = c.name || "";
+    el.querySelector("textarea").value = c.code || "";
+    el.querySelector("button").onclick = () => { el.remove(); $("cheats-msg").textContent = "Aperte Aplicar para valer."; };
+    box.appendChild(el);
+  }
+  if (!list.length) box.innerHTML = `<p class="sub">Nenhum código ainda. Aperte “+ Novo código”.</p>`;
+}
+function openCheats() {
+  const run = Play.run;
+  if (!run || !Cheats.usable(run)) return;
+  $("cheats-game").textContent = ` (${Cheats.game})`;
+  $("cheats-msg").textContent = "";
+  cheatsRender(Cheats.load());
+  $("cheats").classList.remove("hidden");
+  sendKeys(run);   // com a janela aberta, o jogo não recebe botões (digitar não aperta nada)
+}
+function closeCheats() {
+  $("cheats").classList.add("hidden");
+  if (document.activeElement) document.activeElement.blur();
+  if (Play.run) sendKeys(Play.run);
+}
+function cheatsOpen() { return !$("cheats").classList.contains("hidden"); }
+function applyCheats() {
+  const run = Play.run;
+  const list = cheatsRead().filter(c => c.name || c.code.trim());
+  Cheats.save(list);
+  cheatsRender(list);
+  if (!run || !Cheats.usable(run)) return;
+  run.cheatList = list;
+  $("cheats-msg").textContent = "Aplicando…";
+  run.worker.postMessage({ t: "cheats", cheats: Cheats.codes(list) });
+}
+// resposta do motor: para cada código ligado, 0 = entrou ou o número da linha que ele não entendeu
+function cheatsResult(run, res) {
+  if (Play.run !== run || !cheatsOpen()) {
+    if (res && res.some(r => r)) toast("❓ Algum código não foi entendido pelo motor.");
+    return;
+  }
+  if (!res) { $("cheats-msg").textContent = "Este motor não aceita códigos."; return; }
+  const list = run.cheatList || [];
+  const els = [...$("cheats-list").querySelectorAll(".cheat")];
+  let k = 0, bad = 0;
+  list.forEach((c, i) => {
+    const msg = els[i] && els[i].querySelector(".cheat-msg");
+    if (!c.on || !c.code.trim()) { if (msg) msg.textContent = ""; return; }
+    const r = res[k++];
+    if (r) bad++;
+    if (msg) { msg.textContent = r ? `Linha ${r} não foi entendida (confira se copiou certinho). Esse código não entrou no jogo.` : "✔ Ligado"; msg.classList.toggle("bad", !!r); }
+  });
+  $("cheats-msg").textContent = bad ? "" : "✔ Pronto!";
+}
+$("btn-cheats").onclick = openCheats;
+$("cheats-close").onclick = closeCheats;
+$("cheats-apply").onclick = applyCheats;
+$("cheats-add").onclick = () => {
+  const list = cheatsRead();
+  list.push({ name: "", code: "", on: true });
+  cheatsRender(list);
+  const t = $("cheats-list").querySelectorAll("textarea");
+  t[t.length - 1].focus();
+};
+$("cheats").addEventListener("click", (e) => { if (e.target === $("cheats")) closeCheats(); });   // tocou fora da janela
 function onWorker(run, m) {
   if (m.t === "frames") {
     if (Play.run !== run) { for (const fr of m.list) recycle(run, fr); return; }
@@ -908,6 +1008,7 @@ function onWorker(run, m) {
     const msg = m.msg + (run.savedAt ? ` O save automático das ${run.savedAt.toLocaleTimeString("pt-BR")} está guardado.` : "");
     if (run.net) { run.net.close(); run.net.cb.onError(msg); } else toast(msg);
   }
+  else if (m.t === "cheats") cheatsResult(run, m.res);
   else if (m.t === "snap") persistSaves(run, m.saves, false);   // o jogo gravou algo novo
   else if (m.t === "saves") finishRun(run, m.saves);
 }
@@ -926,6 +1027,7 @@ function endRun() {
   const run = Play.run;
   if (!run) return;
   Play.run = null;
+  $("cheats").classList.add("hidden");
   Turbo.locked = false; Turbo.warned = false; updateTurboButton();   // a próxima partida começa normal
   PadMode.set(false);
   clearInterval(run.keyIv);

@@ -37,7 +37,7 @@ function saveProfiles() {
 let profiles = loadProfiles();
 
 const down = new Set();
-function typing() { const a = document.activeElement; return a && (a.tagName === "INPUT" || a.tagName === "SELECT"); }
+function typing() { const a = document.activeElement; return a && (a.tagName === "INPUT" || a.tagName === "SELECT" || a.tagName === "TEXTAREA"); }
 function boundKeys() {
   const s = new Set();
   profiles.forEach(p => Object.values(p.kb).forEach(c => c && s.add(c)));

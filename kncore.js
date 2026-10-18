@@ -95,6 +95,20 @@
         // desenho do GBA i ligado/desligado: o jogo não muda, só a imagem deixa de ser feita
         // (cada aparelho desenha só os GBAs que mostra). Motor antigo sem isso: não faz nada.
         render(i, on) { if (x.kn_render) x.kn_render(ptr, i, on ? 1 : 0); },
+        // Códigos do GBA i (GameShark, Action Replay, CodeBreaker): troca todos pelos da lista (cada um
+        // é um texto com uma ou mais linhas). Devolve, para cada código, 0 = entrou ou o número da linha
+        // que o motor não entendeu. Motor antigo, sem códigos: null.
+        cheats(i, codes) {
+          if (!x.kn_cheat_add) return null;
+          x.kn_cheat_clear(ptr, i);
+          return codes.map(c => {
+            const p = put(new TextEncoder().encode(c + "\0"));
+            const r = x.kn_cheat_add(ptr, i, p);
+            x.kn_free(p);
+            return r;
+          });
+        },
+        read16(i, address) { return x.kn_read16(ptr, i, address); },   // memória do GBA i (para testes)
         // Fotografia da partida, para voltar alguns quadros e refazer com os botões certos (rollback):
         // a memória inteira do motor, menos as ROMs (a daqui e a cópia de cada GBA), que nunca mudam.
         // É exata por definição (tudo o que o motor sabe está nessa memória) e fica fora do motor.
