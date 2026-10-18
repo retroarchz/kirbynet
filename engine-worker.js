@@ -7,7 +7,8 @@
 const SNES = /[?&]sys=snes\b/.test(location.search);
 const V = (location.search.match(/[?&]v=(\w+)/) || [])[1] || "";   // mesma versão da página
 const NO_RB = /[?&]rb=0\b/.test(location.search);   // página aberta com ?semrollback
-importScripts((SNES ? "sncore.js" : "kncore.js") + "?v=" + V);
+// SNES: também o Mundo livre (fantasma dos outros e inimigos compartilhados, do snesnet v1.6)
+importScripts(...(SNES ? ["sncore.js", "ghost-core.js", "objlayout.js", "coop-sync.js"] : ["kncore.js"]).map(f => f + "?v=" + V));
 const Core = SNES ? SnCore : KnCore;
 
 const W = Core.W, H = Core.H, FRAME_BYTES = W * H * 4;
@@ -214,6 +215,13 @@ function autoDelay(now) {
   run.mw = {};
 }
 
+// Mundo livre (SNES): antes de cada quadro, aplica os golpes recebidos e copia os inimigos dos outros
+function coopBefore(s, snaps) {
+  const st = run.cs[0], g = run.lastG[0];
+  for (const h of run.pendingHits.splice(0)) CoopSync.applyHit(st, s, h);
+  if (g) CoopSync.before(st, s, g, snaps);
+}
+
 function sendNet(kind, bytes) { postMessage({ t: "net", kind, bytes }, [bytes.buffer]); }
 
 function tick() {
@@ -263,11 +271,36 @@ function tick() {
       } else {
         const k = [];
         for (let p = 0; p < run.n; p++) k.push(keys[p] | 0);
+        if (run.free) {   // Mundo livre: inimigos dos outros que sumiram há 1,5 s saem; os outros entram neste SNES
+          for (const [kk, sn] of Object.entries(run.peerSnaps)) if (run.frames - sn.at > 90) delete run.peerSnaps[kk];
+          coopBefore(run.s, Object.values(run.peerSnaps));
+        }
         run.s.runFrame(k);
       }
       // acelerando: só a imagem do último quadro da rodada vai para a tela, e o som fica mudo
       // (o som de 3 quadros por quadro não cabe na caixa; seria só ruído)
       if (speed > 1 && run.frames + 1 < due && ran + 1 < cap && performance.now() + (run.busyN ? run.busy / run.busyN : 4) < budget) { run.s.audio(0); run.frames++; ran++; run.busy += performance.now() - tf; run.busyN++; continue; }
+      // Mundo livre: onde está o MEU Higgins (e o desenho dele, se for novo) e os inimigos dos quais sou dono
+      let g = null, poofs = null;
+      if (run.free) {
+        try {
+          const c = Ghost.capture(run.s);
+          g = c.g;
+          if (c.img && !run.sentIds.has(g.id)) {
+            run.sentIds.add(g.id);
+            postMessage({ t: "gbmp", id: g.id, w: c.img.w, h: c.img.h, px: c.img.px }, [c.img.px.buffer]);
+          }
+        } catch (e) { g = null; }
+        if (g) {
+          const peers = Object.values(run.peerSnaps).map(sn => ({ slot: sn.from, room: sn.room, cam: sn.cam }));
+          const res = CoopSync.after(run.cs[0], run.s, g, peers);
+          run.lastG[0] = g;
+          if (res.snap) { const b = CoopSync.encodeSnap(res.snap, run.me); postMessage({ t: "osnap", bytes: b }, [b.buffer]); }
+          for (const h of res.hits) { const b = CoopSync.encodeHit(h, run.me); postMessage({ t: "ohit", bytes: b }, [b.buffer]); }
+          if (res.kills.length) postMessage({ t: "kills", list: res.kills });
+          if (run.frames % 60 === 0) CoopSync.prune(run.cs[0], [g.room, ...peers.map(p => p.room)]);
+        }
+      }
       // imagem + som DESTE quadro, numerados: a página mostra cada um na hora certa
       const vids = [];
       for (const i of view) {
@@ -280,10 +313,10 @@ function tick() {
       if (speed > 1) out.push({ f: run.frames, vids, audio: null });
       else if (audioPort) {   // som vai direto para a placa, sem passar pela página
         audioPort.postMessage(a, [a.samples.buffer]);
-        out.push({ f: run.frames, vids, audio: null });
+        out.push({ f: run.frames, vids, audio: null, g, poofs });
       } else {
         transfer.push(a.samples.buffer);
-        out.push({ f: run.frames, vids, audio: a });
+        out.push({ f: run.frames, vids, audio: a, g, poofs });
       }
       run.frames++; ran++;
       run.busy += performance.now() - tf; run.busyN++;
@@ -335,6 +368,9 @@ onmessage = async (ev) => {
               busy: 0, busyN: 0, marg: {}, pm: { n: 0, late: 0, tight: 0, min: 99, by: {} }, mw: {}, slew: 0, startT: performance.now(),
               // rollback: quadros antes de 'confirmed' já rodaram com os botões de verdade de todos
               confirmed: 0, used: new Map(), lastKnown: [], costAvg: 0,
+              // Mundo livre (SNES): cada um no seu SNES, sem lockstep; só o fantasma e os inimigos viajam
+              free: !!m.free, me: m.me | 0, cs: m.free ? [CoopSync.create(m.me | 0)] : null, lastG: [], peerSnaps: {},
+              pendingHits: [], sentIds: new Set(),
               rb: m.net && s.canSnapshot && !NO_RB ? { snaps: new Map(), spare: [], count: 0, resim: 0 } : null };
       run.snapT = performance.now();
       try { run.snapSig = sigOf(grabSaves()); } catch (e) { run.snapSig = null; }
@@ -363,6 +399,12 @@ onmessage = async (ev) => {
     }
   }
   else if (m.t === "view") { view = m.view; applyView(); }
+  // Mundo livre (SNES): inimigos/golpes/abates dos outros e "manda de novo os desenhos" (alguém entrou)
+  else if (m.t === "kill") { if (run && run.free && m.k) CoopSync.addKill(run.cs[0], m.k); }
+  else if (m.t === "rooms") {}
+  else if (m.t === "resend") { if (run && run.free) run.sentIds.clear(); }
+  else if (m.t === "osnap") { if (run && run.free) try { const sn = CoopSync.decodeSnap(new Uint8Array(m.bytes)); sn.at = run.frames; run.peerSnaps[sn.from] = sn; } catch (e) {} }
+  else if (m.t === "ohit") { if (run && run.free) try { const h = CoopSync.decodeHit(new Uint8Array(m.bytes)); if (h.to === run.me) run.pendingHits.push(h); } catch (e) {} }
   else if (m.t === "bufs") { for (const b of m.bufs) if (b.byteLength === FRAME_BYTES && pool.length < 48) pool.push(b); }
   else if (m.t === "vs") { if (run && iv) tick(); }   // a tela atualizou: roda o quadro que já está na hora
   else if (m.t === "aport") audioPort = m.port;

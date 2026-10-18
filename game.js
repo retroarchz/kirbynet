@@ -456,6 +456,29 @@ function netJoin(url, hello, cb) {
     net.send("R", b);
   };
   const openDcs = () => Object.values(net.peers).map(p => p.dc).filter(dc => dc.readyState === "open");
+  // Mundo livre (SNES): fantasma pelo canal rápido se estiver aberto (perder um não faz mal: vem outro
+  // no quadro seguinte); senão pela sala, um sim outro não (30 por segundo é suficiente).
+  let ghostN = 0;
+  net.ghost = (body) => {
+    const dcs = openDcs();
+    if (dcs.length && dcs.length >= (net.nPeers || 1)) {
+      const b = new Uint8Array(1 + body.length); b[0] = 71; b.set(body, 1);
+      for (const dc of dcs) try { dc.send(b); } catch (e) {}
+      if (++ghostN % 20) return;   // de vez em quando vai pela sala também (reserva)
+    } else if (++ghostN % 2) return;
+    net.send("G", body);
+  };
+  // inimigos dos quais eu sou o dono: pelo canal rápido (todo quadro), senão pela sala (1 em cada 2)
+  let objN = 0;
+  net.objs = (body) => {
+    const dcs = openDcs();
+    if (dcs.length && dcs.length >= (net.nPeers || 1)) {
+      const b = new Uint8Array(1 + body.length); b[0] = 79; b.set(body, 1);
+      for (const dc of dcs) try { dc.send(b); } catch (e) {}
+      if (++objN % 30) return;
+    } else if (++objN % 2) return;
+    net.send("O", body);
+  };
   function rtcPacket() {
     const b = new Uint8Array(7 + 2 * mine.length), dv = new DataView(b.buffer);
     b[0] = 73; b[1] = net.slot;   // "I"
@@ -488,6 +511,10 @@ function netJoin(url, hello, cb) {
         const f = last - cnt + 1 + i;
         if (f > (seen[slot] ?? -1)) { seen[slot] = f; deliver(slot, f, dv.getUint16(7 + 2 * i, true)); }
       }
+    } else if (u8[0] === 79) {   // "O": inimigos de outro jogador (Mundo livre)
+      if (net.onObjSnap) net.onObjSnap(u8.subarray(1));
+    } else if (u8[0] === 71) {   // "G": fantasma de outro jogador (Mundo livre)
+      if (net.onGhost) net.onGhost(u8.subarray(1));
     } else if (u8[0] === 80) {   // "P": ping -> devolve como "p"
       const b = u8.slice(); b[0] = 112;
       const p = net.peers[from];
@@ -595,7 +622,24 @@ function netJoin(url, hello, cb) {
     const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
     if (kind === "W") net.slot = json(data).slot;
     else if (kind === "L") cb.onLobby(json(data).players, net.slot);
-    else if (kind === "S") { const info = json(data); if (info.rtc) rtcStart(info.n); cb.onStart(info); }
+    else if (kind === "S") { const info = json(data); net.nPeers = info.names.filter(Boolean).length - 1; if (info.rtc) rtcStart(info.n); cb.onStart(info); }
+    else if (kind === "J") {   // alguém entrou/saiu no meio da partida (Mundo livre)
+      const j = json(data);
+      net.nPeers = j.names.filter(Boolean).length - 1;
+      const run = Play.run;
+      if (run) {
+        run.names = j.names; run.worldN = j.names.length;
+        S.players = j.names; renderGame(S, false);
+        run.worker.postMessage({ t: "resend" });   // manda de novo os desenhos do meu boneco para quem chegou
+        if (j.left == null) toast("Alguém entrou na partida!");
+        else toast(`P${j.left + 1} saiu. Pode entrar de novo pela sala que aparece no site.`);
+      }
+    }
+    else if (kind === "G") { if (net.onGhost) net.onGhost(data); }
+    else if (kind === "F") { if (net.onGhostBmp) net.onGhostBmp(data); }
+    else if (kind === "K") { if (net.onKill) try { net.onKill(json(data)); } catch (e) {} }
+    else if (kind === "O") { if (net.onObjSnap) net.onObjSnap(data); }
+    else if (kind === "A") { if (net.onHit) net.onHit(data); }
     else if (kind === "I") {
       // sempre entrega (mesmo se o canal rápido já trouxe): é a reserva para quando ele perde vários
       const slot = dv.getUint8(0), f = dv.getUint32(1, true);
@@ -632,6 +676,11 @@ function netJoin(url, hello, cb) {
 // opts: { n, rom, saves[], names[], net (ou null), slot, delay,
 //         onSave(saves[], fechandoAba) — grava o save; onEnd(saves[]) — partida acabou }
 function startRun(opts) {
+  if (opts.free) {
+    // Mundo livre (SNES): cada um joga o seu jogo, com o seu save; o motor anda sozinho (sem lockstep)
+    const mine = opts.saves[opts.slot];
+    opts = { ...opts, worldN: opts.n, n: 1, saves: [mine && mine.length ? mine : new Uint8Array(0)] };
+  }
   // ?semrollback no endereço da página: sala sem rollback (só espera, como antes) — para comparar
   const worker = new Worker(`engine-worker.js?sys=${SYS.id}&v=${ASSET_V}${/[?&]semrollback\b/.test(location.search) ? "&rb=0" : ""}`);
   const run = { ...opts, worker, desync: null, raf: 0, lastKeys: "",
@@ -650,15 +699,22 @@ function startRun(opts) {
   worker.onerror = (ev) => onWorker(run, { t: "err", msg: "O motor parou: " + (ev.message || "erro") });
   const roms = opts.rom.slice();   // cópia: a original continua aqui para uma próxima partida
   worker.postMessage({ t: "start", module: Play.mod, n: run.n, rom: roms, saves: opts.saves,
-                       net: !!run.net, slot: run.slot, delay: run.delay || 0 }, [roms.buffer]);
-  if (run.net) {
+                       net: !!run.net && !run.free, free: !!run.free, me: run.slot | 0, slot: run.free ? 0 : run.slot,
+                       delay: run.delay || 0 }, [roms.buffer]);
+  if (run.free) ghostInit(run);
+  if (run.free && run.net) {
+    run.net.onKill = (k) => run.worker.postMessage({ t: "kill", k });
+    run.net.onObjSnap = (u8) => { const b = u8.slice(); run.worker.postMessage({ t: "osnap", bytes: b.buffer }, [b.buffer]); };
+    run.net.onHit = (u8) => { const b = u8.slice(); run.worker.postMessage({ t: "ohit", bytes: b.buffer }, [b.buffer]); };
+  }
+  if (run.net && !run.free) {
     run.net.sink = (slot, frame, keys) => worker.postMessage({ t: "input", slot, frame, keys });
     run.net.onMarg = (r) => worker.postMessage({ t: "pm", ...r });
     for (const it of run.net.early) run.net.sink(...it);
     run.net.early = [];
   }
   S = { screen: "game", mode: run.net ? "net" : "local", n: run.n, my: run.slot, players: run.names,
-        view_all: !run.net, desync: null };
+        view_all: !run.net, desync: null, free: !!run.free };
   showOnly("game");
   renderGame(S, true);
   syncView();
@@ -782,6 +838,14 @@ function drawDue(run, showAt) {
     const c = canvases[v.i];
     if (c) c.ctx.putImageData(new ImageData(new Uint8ClampedArray(v.buf), W, H), 0, 0);
   }
+  // Mundo livre: os bonecos dos outros por cima da minha tela, e o "puf" de inimigo derrotado por outro
+  if (run.free && pick.g) { run.myG = pick.g; const c0 = canvases[0]; if (c0) drawGhosts(run, c0.ctx, pick.g); }
+  if (pick.poofs) {
+    const now = performance.now();
+    (run.puffs = run.puffs || []);
+    pick.poofs.forEach((list) => { for (const p of list || []) run.puffs.push({ e: 0, x: p.x, y: p.y, t: now }); });
+  }
+  if (run.puffs && run.puffs.length) drawPuffs(run);
   const first = pick.vids.length && canvases[pick.vids[0].i];
   if (first) Fit.paint(first.ctx.canvas);
   run.stat.shown++;
@@ -818,12 +882,18 @@ function onWorker(run, m) {
     if (Play.run !== run) { for (const fr of m.list) recycle(run, fr); return; }
     for (const fr of m.list) {
       const at = Sound.push(fr.audio);
-      run.queue.push({ f: fr.f, vids: fr.vids, due: dueFor(run, fr.f, at) });
+      run.queue.push({ f: fr.f, vids: fr.vids, g: fr.g, poofs: fr.poofs, due: dueFor(run, fr.f, at) });
+      if (run.free && fr.g) ghostSend(run, fr.g);
     }
     while (run.queue.length > 24) { recycle(run, run.queue.shift()); run.stat.skipped++; }   // aba no fundo
     drawDue(run, performance.now() + run.vsync * 0.5);   // já pronto? desenha agora (entra no próximo vsync)
   }
   else if (m.t === "net") { if (run.net) run.net.send(m.kind, m.bytes); }
+  // Mundo livre: inimigos dos quais sou dono, golpes nos dos outros, abates e o desenho do meu boneco
+  else if (m.t === "osnap") { if (run.net && run.net.objs) run.net.objs(new Uint8Array(m.bytes)); }
+  else if (m.t === "ohit") { if (run.net) run.net.send("A", new Uint8Array(m.bytes)); }
+  else if (m.t === "kills") { if (run.net) for (const k of m.list) run.net.send("K", JSON.stringify(k)); }
+  else if (m.t === "gbmp") ghostBmpOut(run, m);
   else if (m.t === "status") {
     // carga da página: parte do tempo gasta pelo kirbynet na linha principal (desenho, som, botões)
     const now = performance.now();
@@ -897,4 +967,131 @@ function toggleRunView() {
   S.view_all = !S.view_all;
   renderGame(S, false);
   syncView();
+}
+
+// ------------------------------------------------------------------ Mundo livre: o fantasma dos outros
+// Cada um roda o seu SNES. A cada quadro mandamos onde está o NOSSO Higgins (tipo de tela, sala,
+// posição no mundo e qual desenho) e, quando o desenho é novo, os pixels dele (uma vez só).
+// Quem recebe desenha o Higgins do outro por cima da própria tela, se estiverem na mesma sala.
+const GHOST_STALE_MS = 1500;   // sem notícia do outro há 1,5 s: some
+function ghostInit(run) {
+  run.ghosts = {};      // slot -> { g, t, bmps: Map(id -> canvas) }
+  run.ghostBmps = {};   // slot -> Map(id -> canvas)
+  run.myBmps = new Map();   // meus desenhos já enviados (para reenviar se alguém pedir no futuro)
+  const net = run.net;
+  if (!net) return;
+  net.onGhost = (u8) => {
+    if (u8.length < 20) return;
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength), slot = u8[0];
+    if (slot === run.slot) return;
+    const fl = u8[3];
+    run.ghosts[slot] = { t: performance.now(), g: { mode: u8[1], room: Array.from(u8.subarray(12, 20)), vis: fl & 1, dark: (fl >> 1) & 1,
+      wx: dv.getInt16(4, true), wy: dv.getInt16(6, true), id: dv.getUint32(8, true) } };
+  };
+  net.onGhostBmp = (u8) => {
+    if (u8.length < 7) return;
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    const slot = u8[0], id = dv.getUint32(1, true), w = u8[5], h = u8[6];
+    if (slot === run.slot || u8.length < 7 + w * h * 4) return;
+    const cv = (typeof OffscreenCanvas !== "undefined") ? new OffscreenCanvas(w, h) : Object.assign(document.createElement("canvas"), { width: w, height: h });
+    cv.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(u8.slice(7, 7 + w * h * 4).buffer), w, h), 0, 0);
+    const m = run.ghostBmps[slot] || (run.ghostBmps[slot] = new Map());
+    m.set(id, cv);
+    if (m.size > 400) m.delete(m.keys().next().value);
+  };
+}
+function ghostSend(run, g) {
+  if (!run.net || !run.net.ghost) return;
+  // 20 bytes: jogador, tipo de tela, -, flags, x, y, desenho, assinatura da sala (8)
+  const b = new Uint8Array(20), dv = new DataView(b.buffer);
+  b[0] = run.slot; b[1] = g.mode; b[2] = 0; b[3] = (g.vis ? 1 : 0) | (g.dark ? 2 : 0);
+  for (let i = 0; i < 8; i++) b[12 + i] = (g.room && g.room[i]) | 0;
+  dv.setInt16(4, Math.max(-32768, Math.min(32767, g.wx)), true); dv.setInt16(6, Math.max(-32768, Math.min(32767, g.wy)), true);
+  dv.setUint32(8, g.id >>> 0, true);
+  run.net.ghost(b);
+}
+function bmpCanvas(m) {
+  const cv = (typeof OffscreenCanvas !== "undefined") ? new OffscreenCanvas(m.w, m.h) : Object.assign(document.createElement("canvas"), { width: m.w, height: m.h });
+  cv.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(m.px.buffer, m.px.byteOffset, m.w * m.h * 4).slice(), m.w, m.h), 0, 0);
+  return cv;
+}
+function ghostBmpOut(run, m) {
+  // guarda o MEU desenho também: se o fantasma de alguém ficar por cima de mim, eu sou redesenhado na frente
+  const mine = run.selfBmps || (run.selfBmps = new Map());
+  mine.set(m.id, bmpCanvas(m));
+  if (mine.size > 400) mine.delete(mine.keys().next().value);
+  if (!run.net || m.w > 255 || m.h > 255) return;
+  const b = new Uint8Array(7 + m.px.length), dv = new DataView(b.buffer);
+  b[0] = run.slot; dv.setUint32(1, m.id >>> 0, true); b[5] = m.w; b[6] = m.h;
+  b.set(new Uint8Array(m.px.buffer, m.px.byteOffset, m.px.byteLength), 7);
+  run.net.send("F", b);
+}
+function drawGhosts(run, ctx, me, ghosts = run.ghosts, bmps = run.ghostBmps, selfBmps = run.selfBmps) {
+  const now = performance.now();
+  // onde está o MEU Higgins nesta tela (para ele ficar sempre na frente dos fantasmas)
+  const mine = me.vis && selfBmps && selfBmps.get(me.id);
+  const mx = me.wx - me.camX, my = me.wy - me.camY;
+  let covered = false;
+  const labels = [];
+  for (const [slot, o] of Object.entries(ghosts || {})) {
+    if (now - o.t > GHOST_STALE_MS || !Ghost.visibleHere(me, o.g)) continue;
+    const bmp = bmps[slot] && bmps[slot].get(o.g.id);
+    if (!bmp) continue;
+    const x = o.g.wx - me.camX, y = o.g.wy - me.camY, w = bmp.width, h = bmp.height;
+    const color = ["#9b87ff", "#4fd18b", "#ff5a5a", "#ffc94a"][slot] || "#fff";
+    if (x + w < 0 || y + h < 0 || x > W || y > H) {
+      // mesma sala, mas fora da tela: uma setinha na borda apontando para ele
+      const cx = Math.max(6, Math.min(W - 6, x + w / 2)), cy = Math.max(6, Math.min(H - 6, y + h / 2));
+      ctx.fillStyle = color; ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI * 2); ctx.fill();
+      continue;
+    }
+    ctx.drawImage(bmp, x, y);
+    if (mine && x < mx + mine.width && x + w > mx && y < my + mine.height && y + h > my) covered = true;
+    labels.push(["P" + (+slot + 1), Math.round(x + w / 2), Math.max(7, Math.round(y) - 3), color]);
+  }
+  // fantasma em cima de mim? eu volto para a frente (antes parecia que eu ficava "piscando")
+  if (covered) ctx.drawImage(mine, mx, my);
+  // etiquetas "P2" por último, para nunca ficarem escondidas
+  ctx.font = "bold 8px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+  for (const [label, lx, ly, color] of labels) {
+    ctx.fillStyle = "rgba(0,0,0,.6)"; ctx.fillRect(lx - 8, ly - 9, 16, 9);
+    ctx.fillStyle = color; ctx.fillText(label, lx, ly);
+  }
+}
+// Rodapé: onde estão os outros ("P2 aqui", "P2 em outra sala", "P2 numa luta")
+function ghostSummary(run) {
+  const me = run.myG, now = performance.now(), out = [];
+  for (let s = 0; s < (run.worldN || 1); s++) {
+    if (s === run.slot) continue;
+    const o = run.ghosts && run.ghosts[s];
+    let where;
+    if (!o || now - o.t > GHOST_STALE_MS) where = "sem sinal";
+    else if (o.g.mode === Ghost.MODE_BATTLE) where = "numa luta no mar";
+    else if (me && Ghost.visibleHere(me, o.g)) where = "aqui com você";
+    else if (o.g.mode === Ghost.MODE_MAP) where = "no mapa";
+    else where = "em outra sala";
+    out.push(`P${s + 1} ${where}`);
+  }
+  return out.length ? out.join(" · ") : "Mundo livre";
+}
+
+// "Puf": uma estrelinha de 8 pontas que cresce e some em ~0,35 s
+function drawPuffs(run) {
+  const now = performance.now();
+  run.puffs = run.puffs.filter(p => now - p.t < 350);
+  for (const p of run.puffs) {
+    const c = canvases[p.e]; if (!c) continue;
+    const ctx = c.ctx, k = (now - p.t) / 350, R = 4 + 10 * k;
+    ctx.save();
+    ctx.globalAlpha = 1 - k;
+    ctx.strokeStyle = "#fff6c2"; ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let a = 0; a < 8; a++) {
+      const an = a * Math.PI / 4, r1 = a % 2 ? R * 0.5 : R;
+      ctx.moveTo(p.x + Math.cos(an) * r1 * 0.3, p.y - 12 + Math.sin(an) * r1 * 0.3);
+      ctx.lineTo(p.x + Math.cos(an) * r1, p.y - 12 + Math.sin(an) * r1);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
 }

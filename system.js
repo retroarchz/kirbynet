@@ -6,7 +6,7 @@ const SYSTEMS = {
   gba: {
     id: "gba", name: "GBA", W: 240, H: 160, fps: 16777216 / 280896,
     wasm: "kncore.wasm", romRe: /\.gba$/i, romExt: ".gba", roms: "roms/",
-    maxP: 4, oneScreen: false,   // um GBA por jogador (link cable)
+    maxP: 4, roomMax: 4, oneScreen: false,   // um GBA por jogador (link cable)
     buttons: ["A", "B", "L", "R", "Start", "Select", "Cima", "Baixo", "Esquerda", "Direita"],
     bit: { A: 1, B: 2, Select: 4, Start: 8, Direita: 16, Esquerda: 32, Cima: 64, Baixo: 128, R: 256, L: 512 },
     kb: [
@@ -24,7 +24,9 @@ const SYSTEMS = {
   snes: {
     id: "snes", name: "SNES", W: 256, H: 224, fps: 60.0988,
     wasm: "sncore.wasm", romRe: /\.(sfc|smc)$/i, romExt: ".sfc", roms: "roms/snes/",
-    maxP: 2, oneScreen: true,    // um SNES só, com 2 controles: todos na mesma tela e no mesmo save
+    maxP: 2, oneScreen: true,    // "Mesmo PC": um SNES só, com 2 controles
+    // sala pelo site: Mundo livre (cada um no seu SNES, vendo os outros), como no snesnet v1.6
+    roomMax: 4, freeRooms: true,
     // botões no padrão libretro (é o que o motor espera)
     buttons: ["A", "B", "X", "Y", "L", "R", "Start", "Select", "Cima", "Baixo", "Esquerda", "Direita"],
     bit: { B: 1, Y: 2, Select: 4, Start: 8, Cima: 16, Baixo: 32, Esquerda: 64, Direita: 128, A: 256, X: 512, L: 1024, R: 2048 },

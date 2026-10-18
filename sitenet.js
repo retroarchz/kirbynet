@@ -187,9 +187,9 @@ function keepAlive(peer, alive) {
   peer.on("disconnected", () => setTimeout(() => { if (alive() && !peer.destroyed) try { peer.reconnect(); } catch (e) {} }, 3000));
   peer.on("error", () => {});
 }
-// N: "quem é você?" -> {host, game, players, running, sys}  (sys: "gba" ou "snes")
-function roomInfo(players, game, running, sys = "gba") {
-  return packMsg("N", enc(JSON.stringify({ host: players[0] || "?", game: game || "", players, running: !!running, sys })));
+// N: "quem é você?" -> {host, game, players, running, sys, free}  (sys: "gba" ou "snes"; free: Mundo livre)
+function roomInfo(players, game, running, sys = "gba", free = false) {
+  return packMsg("N", enc(JSON.stringify({ host: players[0] || "?", game: game || "", players, running: !!running, sys, free: !!free })));
 }
 let scanPeer = null;
 // salas abertas nesta internet agora: [{code, host, game, players, running}]
@@ -302,26 +302,40 @@ const SiteRoom = {
     queueMicrotask(() => { t.readyState = 1; if (t.onopen) t.onopen(); });
     return t;
   },
-  names() { return this.players.map(p => p.name); },
-  broadcast(kind, payload, skip) { for (const p of this.players) if (p.c !== skip) p.c.send(kind, payload); },
+  // vaga vazia (null) = alguém saiu no meio do Mundo livre e pode voltar para ela
+  names() { return this.players.map(p => p ? p.name : null); },
+  broadcast(kind, payload, skip) { for (const p of this.players) if (p && p.c !== skip) p.c.send(kind, payload); },
+  // Mundo livre: chegou com a partida rolando (ou voltou depois de cair): pega a 1ª vaga vazia
+  lateJoin(c, info) {
+    const p = { name: String(info.name || "?").slice(0, 16), c, save: String(info.save || "") };
+    let slot = this.players.indexOf(null);
+    if (slot < 0) { slot = this.players.length; this.players.push(p); } else this.players[slot] = p;
+    c.send("W", enc(JSON.stringify({ slot })));
+    c.send("S", enc(JSON.stringify({ n: this.players.length, delay: this.delay, names: this.names(), rtc: false, free: true,
+                                     saves: this.players.map(q => q ? q.save : ""), late: true })));
+    this.broadcast("J", enc(JSON.stringify({ names: this.names() })), c);
+    this.push();
+  },
   msg(c, u8) {
     if (c.closed || !this.on || !u8.length) return;
     const kind = String.fromCharCode(u8[0]), data = u8.subarray(1);
     const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
-    const slot = this.players.findIndex(p => p.c === c);
+    const slot = this.players.findIndex(p => p && p.c === c);
     const fail = (msg) => c.send("E", enc(JSON.stringify({ msg })));
-    if (kind === "N") c.send("N", roomInfo(this.names(), this.romName, this.running, SYS.id).subarray(1));
-    else if (kind === "G") {
+    if (kind === "N") c.send("N", roomInfo(this.names(), this.romName, this.running, SYS.id, !!SYS.freeRooms).subarray(1));
+    // G = pedido da ROM (numa conexão só para isso). Quem já está na sala usa G para o fantasma (Mundo livre)
+    else if (kind === "G" && slot < 0) {
       const have = romAsk(u8);
-      c.send("G", romPacket(this.running ? { error: "A partida já começou." }
+      c.send("G", romPacket(this.running && !this.free ? { error: "A partida já começou." }
         : { name: this.romName, sha1: this.sha1, have }, this.rom).subarray(1));
     } else if (kind === "H") {
       let info; try { info = JSON.parse(dec(data)); } catch (e) { return; }
-      if (this.running) fail("A partida já começou.");
+      if (this.running && !this.free) fail("A partida já começou.");
       else if (info.rom !== this.sha1) fail("A sua ROM é diferente da do host. Todos precisam da MESMA ROM.");
       // motor diferente (alguém com o site antigo guardado no navegador) dessincronizaria no meio do jogo
       else if ((info.eng || "1") !== SYS.engineV) fail("O site foi atualizado: recarregue a página (puxe a tela para baixo ou Ctrl+F5) e entre de novo.");
-      else if (this.players.length >= SYS.maxP) fail(`A sala está cheia (${SYS.maxP} jogadores).`);
+      else if (this.players.filter(Boolean).length >= SYS.roomMax) fail(`A sala está cheia (${SYS.roomMax} jogadores).`);
+      else if (slot < 0 && this.running) this.lateJoin(c, info);   // Mundo livre: entra com a partida rolando
       else if (slot < 0) {
         const p = { name: String(info.name || "?").slice(0, 16), c, save: String(info.save || "") };
         if (c.local) this.players.unshift(p); else this.players.push(p);   // o host é sempre o P1
@@ -329,6 +343,8 @@ const SiteRoom = {
         this.lobby();
       }
     } else if (kind === "I" && this.running) this.broadcast("I", data, c);
+    // Mundo livre: fantasma (G), desenho dele (F), abates (K), inimigos (O) e golpes (A) vão para os outros
+    else if ("GFKOA".includes(kind) && this.running && this.free) this.broadcast(kind, data, c);
     else if (kind === "P") c.send("P", data);
     else if (kind === "Q") {
       if (slot < 0) return;
@@ -342,7 +358,7 @@ const SiteRoom = {
     } else if (kind === "R" && data.length) {
       // só apresenta um navegador ao outro (canal rápido); os botões não passam por aqui
       const to = data[0];
-      if (slot >= 0 && to < this.players.length) { const b = data.slice(); b[0] = slot; this.players[to].c.send("R", b); }
+      if (slot >= 0 && to < this.players.length && this.players[to]) { const b = data.slice(); b[0] = slot; this.players[to].c.send("R", b); }
     } else if (kind === "X" && this.running && data.length >= 13) {
       const frame = dv.getUint32(1, true), h = dv.getBigUint64(5, true);
       if (!this.hashes.has(frame)) this.hashes.set(frame, h);
@@ -355,23 +371,30 @@ const SiteRoom = {
     }
   },
   lobby() {
-    this.players.forEach((p, i) => p.c.send("W", enc(JSON.stringify({ slot: i }))));
+    this.players.forEach((p, i) => { if (p) p.c.send("W", enc(JSON.stringify({ slot: i }))); });
     this.broadcast("L", enc(JSON.stringify({ players: this.names() })));
     this.push();
   },
   gone(c) {
-    const slot = this.players.findIndex(p => p.c === c);
+    const slot = this.players.findIndex(p => p && p.c === c);
     c.closed = true;
     if (slot < 0) return;
     const name = this.players[slot].name;
+    if (this.running && this.free && slot !== 0) {
+      // Mundo livre: os outros continuam; a vaga fica guardada para ele voltar (só o host não pode sair)
+      this.players[slot] = null;
+      this.broadcast("J", enc(JSON.stringify({ names: this.names(), left: slot })));
+      this.push();
+      return;
+    }
     this.players.splice(slot, 1);
     if (this.running) this.end(`P${slot + 1} (${name}) saiu. A partida parou — voltem para a sala.`);
     else this.lobby();
   },
   start(delay, rtc) {
     if (this.running || !this.players.length) return;
-    this.running = true; this.hashes = new Map();
-    const info = { n: this.players.length, delay, names: this.names(), rtc, saves: this.players.map(p => p.save) };
+    this.running = true; this.hashes = new Map(); this.delay = delay; this.free = !!SYS.freeRooms;
+    const info = { n: this.players.length, delay, names: this.names(), rtc, free: this.free, saves: this.players.map(p => p.save) };
     this.broadcast("S", enc(JSON.stringify(info)));
     this.push();
   },
@@ -384,7 +407,7 @@ const SiteRoom = {
   end(msg) {
     const players = this.players;
     this.players = [];
-    for (const p of players) { p.c.send("E", enc(JSON.stringify({ msg }))); p.c.close(); }
+    for (const p of players) if (p) { p.c.send("E", enc(JSON.stringify({ msg }))); p.c.close(); }
     this.close();
   },
   push() { if (this.on && this.onState) this.onState({ screen: this.running ? "playing" : "lobby", players: this.names(), code: this.code }); },

@@ -203,10 +203,18 @@ async function guestSolo() {
 
 // Salas desta internet: procura sozinho enquanto a tela inicial está aberta
 async function roomScanLoop() {
-  if (!$("guest").classList.contains("hidden") && !Play.net && !SiteRoom.on) {
+  // (conexão de uma partida que já acabou não conta: a lista volta a se atualizar assim que sai)
+  if (!$("guest").classList.contains("hidden") && !(Play.net && !Play.net.closed) && !SiteRoom.on) {
     renderRooms(await scanRooms().catch(() => []));
   }
   setTimeout(roomScanLoop, 5000);
+}
+// saiu de uma partida: a lista de salas é refeita na hora (a que estava na tela era de antes da partida)
+function refreshRooms() {
+  if (!SITE) return;
+  $("g-room-list").innerHTML = "";
+  $("g-rooms-box").classList.add("hidden");
+  scanRooms().then(renderRooms).catch(() => {});
 }
 function renderRooms(rooms) {
   const list = $("g-room-list");
@@ -215,8 +223,10 @@ function renderRooms(rooms) {
   for (const r of rooms) {
     const b = document.createElement("button");
     b.style.background = "var(--p4)";
-    b.textContent = `▶ Sala de ${r.host} · ${String(r.game).replace(SYS.romRe, "")} · ${r.players.length}/${SYS.maxP}${r.running ? " (jogando)" : ""}`;
-    b.disabled = r.running || r.players.length >= SYS.maxP;
+    // Mundo livre (SNES): dá para entrar com a partida rolando (inclusive quem caiu volta para a vaga dele)
+    const inside = r.players.filter(Boolean).length, late = r.running && r.free;
+    b.textContent = `▶ Sala de ${r.host} · ${String(r.game).replace(SYS.romRe, "")} · ${inside}/${SYS.roomMax}${late ? " (jogando — dá para entrar)" : r.running ? " (jogando)" : ""}`;
+    b.disabled = (r.running && !r.free) || inside >= SYS.roomMax;
     b.onclick = () => guestJoin(r.code);
     list.appendChild(b);
   }
@@ -273,17 +283,17 @@ function roomCallbacks() {
   return {
     onLobby(names, slot) {
       S = { mode: "net", my: slot };
-      badges($("g-players"), names, slot, SYS.maxP);
+      badges($("g-players"), names, slot, SYS.roomMax);
       $("g-msg").textContent = "Conectado! Esperando o host começar a partida…";
     },
     onStart(info) {
       const net = Play.net;
       try {
-        // SNES: um cartucho só para todos (o save do P1). Só o P1 grava, senão o progresso do P1
-        // iria parar no save de cada convidado.
+        // Mundo livre (SNES): cada um no seu jogo, com o seu save. Mesmo console (um SNES só para
+        // todos, o save do P1): só o P1 grava, senão o progresso do P1 iria parar no save dos outros.
         startRun({ n: info.n, rom: Guest.rom, saves: info.saves.map(b64dec), names: info.names,
-                   net, slot: net.slot, delay: info.delay,
-                   onSave: SYS.oneScreen && net.slot !== 0 ? null : guestSaveWriter() });
+                   net, slot: net.slot, delay: info.delay, free: !!info.free,
+                   onSave: info.free || !SYS.oneScreen || net.slot === 0 ? guestSaveWriter() : null });
       } catch (err) { toast(String(err.message || err)); net.close(); showGuestPage(String(err)); }
     },
     onError(msg) {
@@ -293,6 +303,7 @@ function roomCallbacks() {
       toast(msg);
       showGuestPage(wasPlaying ? msg + " Seu save ficou guardado neste navegador." : msg);
       $("g-players").innerHTML = "";
+      refreshRooms();
     },
   };
 }
@@ -329,6 +340,7 @@ function guestLeave() {
   if (Play.net) Play.net.close();
   showGuestPage("Você saiu da partida. O seu save ficou guardado neste navegador.");
   $("g-players").innerHTML = "";
+  refreshRooms();
 }
 
 if (GUEST) guestInit();

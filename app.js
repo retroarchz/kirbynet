@@ -310,7 +310,8 @@ function badges(el, names, my, total) {
     if (i < names.length) {
       b.className = "badge";
       b.style.background = COLORS[i];
-      b.textContent = `P${i + 1}  ${names[i]}${i === my && S.mode === "net" ? " (você)" : ""}`;
+      b.textContent = `P${i + 1}  ${names[i] || "(saiu)"}${i === my && S.mode === "net" ? " (você)" : ""}`;
+      if (!names[i]) b.style.opacity = ".45";
     } else { b.className = "badge free"; b.textContent = `P${i + 1}  livre`; }
     el.appendChild(b);
   }
@@ -323,7 +324,7 @@ function renderLobby(m) {
   $("guest-urls").textContent = (m.guest_urls || []).join("  ou  ");
   $("room-code").textContent = m.code || Bridge.code || "…";
   S = { mode: "net", my: 0 };
-  badges($("players"), m.players, 0, SYS.maxP);
+  badges($("players"), m.players, 0, SYS.roomMax);
 }
 function renderGame(m, fresh) {
   badges($("game-players"), m.players, m.my, m.players.length);
@@ -350,7 +351,8 @@ function renderGame(m, fresh) {
       canvases[i] = { ctx, img: ctx.createImageData(W, H) };
       const tag = document.createElement("span");
       tag.className = "tag";
-      tag.textContent = SYS.oneScreen ? (m.players || []).map((p, j) => `P${j + 1} ${p}`).join(" · ") : `P${i + 1} ${m.players[i] || ""}`;
+      tag.textContent = m.free ? `P${m.my + 1} ${m.players[m.my] || ""} · Mundo livre`
+        : SYS.oneScreen ? (m.players || []).map((p, j) => `P${j + 1} ${p}`).join(" · ") : `P${i + 1} ${m.players[i] || ""}`;
       box.append(cv, tag);
       stage.appendChild(box);
     }
@@ -386,6 +388,7 @@ function showStatus(st) {
       return x;
     }).join(" | ");
   }
+  if (Play.run && Play.run.free) t += " · 🌍 " + ghostSummary(Play.run);   // onde estão os outros
   // rollback: quantas vezes no último segundo o jogo voltou para corrigir botões que chegaram atrasados
   if (st.rb && st.rb.count) t += ` · ↺ ${st.rb.count}`;
   if (st.waiting && st.waiting.length) t = `⏳ esperando os botões de ${st.waiting.map(i => "P" + (i + 1)).join(", ")}… · ` + t;
