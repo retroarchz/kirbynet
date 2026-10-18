@@ -45,15 +45,15 @@ async function unzipGba(bytes) {
     const local = dv.getUint32(p + 42, true);
     const name = new TextDecoder().decode(bytes.subarray(p + 46, p + 46 + nameLen));
     p += 46 + nameLen + extra + comment;
-    if (!name.toLowerCase().endsWith(".gba")) continue;
+    if (!SYS.romRe.test(name)) continue;
     const start = local + 30 + dv.getUint16(local + 26, true) + dv.getUint16(local + 28, true);
     const data = bytes.subarray(start, start + csize);
     if (method === 0) return { name: name.split("/").pop(), bytes: data.slice() };
-    if (method !== 8) throw new Error("Formato de .zip não suportado. Extraia o .gba e escolha ele.");
+    if (method !== 8) throw new Error(`Formato de .zip não suportado. Extraia o ${SYS.romExt} e escolha ele.`);
     const out = await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer();
     return { name: name.split("/").pop(), bytes: new Uint8Array(out) };
   }
-  throw new Error("Não achei nenhum .gba dentro do .zip.");
+  throw new Error(`Não achei nenhum jogo de ${SYS.name} dentro do .zip.`);
 }
 
 function b64enc(u8) {
@@ -66,7 +66,7 @@ function b64dec(s) { const b = atob(s || ""); const u = new Uint8Array(b.length)
 // O motor (WebAssembly) é compilado uma vez aqui e entregue ao worker de cada partida.
 async function loadEngine() {
   if (!Play.mod) {
-    const bytes = await (await fetch("kncore.wasm")).arrayBuffer();
+    const bytes = await (await fetch(SYS.wasm)).arrayBuffer();
     await WebAssembly.compile(bytes);          // confere que o navegador aceita o motor
     Play.mod = bytes;
   }
@@ -314,7 +314,7 @@ const Fit = {
   paint(canvas) {
     if (!this.bg || !(document.fullscreenElement || document.body.classList.contains("touchui")) || (this.n++ & 1)) return;
     if (this.mode !== "blur" && !(this.mode === "stretch" && Object.keys(canvases).length > 1)) return;
-    this.bg.drawImage(canvas, 0, 0, 48, 32);
+    this.bg.drawImage(canvas, 0, 0, this.bg.canvas.width, this.bg.canvas.height);
   },
 };
 
@@ -619,7 +619,7 @@ function netJoin(url, hello, cb) {
 // opts: { n, rom, saves[], names[], net (ou null), slot, delay,
 //         onSave(saves[], fechandoAba) — grava o save; onEnd(saves[]) — partida acabou }
 function startRun(opts) {
-  const worker = new Worker("engine-worker.js");
+  const worker = new Worker("engine-worker.js?sys=" + SYS.id);
   const run = { ...opts, worker, desync: null, raf: 0, lastKeys: "",
                 queue: [], base: null, avOff: null, lagS: null, k: null, vsync: 1000 / 60, lastTs: 0,
                 stat: { shown: 0, skipped: 0, idle: 0, gaps: 0, lastF: null, audioLag: null },
@@ -710,7 +710,7 @@ function syncView() {
 // O motor anda no compasso da tela: a cada atualização (vsync) a página pede o quadro que já
 // está na hora, junto com os botões mais frescos. Cada quadro chega numerado e entra numa fila
 // curta, e nenhum é pulado por causa de timer (só o descompasso natural 59,73 × 60 Hz).
-const FRAME_MS = 1000 * 280896 / 16777216;   // 16,74 ms: um quadro do GBA (59,73 por segundo)
+const FRAME_MS = 1000 / SYS.fps;   // um quadro: 16,74 ms no GBA (59,73 por segundo), 16,64 ms no SNES (60,1)
 const JITTER_MS = 6;                          // folga para a chegada dos quadros variar um pouco
 const AV_TOL = 40;                            // ms que a imagem pode ir à frente do som (ITU: só se nota após ~125 ms)
 const MAX_WAIT_VS = 3;                        // a imagem nunca espera mais que 3 atualizações (~50 ms): resposta rápida

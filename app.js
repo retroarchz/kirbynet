@@ -2,9 +2,10 @@
 // kirbynet — interface no navegador. Todo mundo joga aqui dentro (WebAssembly);
 // o Python só serve a página e repassa os botões entre os jogadores.
 
-const W = 240, H = 160;
-const BUTTONS = ["A", "B", "L", "R", "Start", "Select", "Cima", "Baixo", "Esquerda", "Direita"];
-const BIT = { A: 1, B: 2, Select: 4, Start: 8, Direita: 16, Esquerda: 32, Cima: 64, Baixo: 128, R: 256, L: 512 };
+// tela e botões do videogame escolhido (system.js)
+const W = SYS.W, H = SYS.H;
+const BUTTONS = SYS.buttons;
+const BIT = SYS.bit;
 const COLORS = ["var(--p1)", "var(--p2)", "var(--p3)", "var(--p4)"];
 
 const $ = (id) => document.getElementById(id);
@@ -17,28 +18,21 @@ let localN = 2, delay = 3;
 const canvases = {};       // idx -> {ctx}
 
 // ------------------------------------------------------------------ controles
-const KB_DEFAULT = [
-  { A: "KeyZ", B: "KeyX", L: "KeyA", R: "KeyS", Start: "Enter", Select: "Backspace",
-    Cima: "ArrowUp", Baixo: "ArrowDown", Esquerda: "ArrowLeft", Direita: "ArrowRight" },
-  { A: "Numpad1", B: "Numpad2", L: "Numpad7", R: "Numpad9", Start: "NumpadAdd", Select: "NumpadSubtract",
-    Cima: "Numpad8", Baixo: "Numpad5", Esquerda: "Numpad4", Direita: "Numpad6" },
-  {}, {},
-];
-const PAD_DEFAULT = { A: "b1", B: "b0", L: "b4", R: "b5", Select: "b8", Start: "b9",
-  Cima: "b12", Baixo: "b13", Esquerda: "b14", Direita: "b15" };
+const KB_DEFAULT = SYS.kb;
+const PAD_DEFAULT = SYS.pad;
 
 function defaultProfile(i) {
   return { kb: { ...KB_DEFAULT[i] }, pad: i, padMap: { ...PAD_DEFAULT }, stick: true };
 }
 function loadProfiles() {
   try {
-    const p = JSON.parse(localStorage.getItem("kirbynet.profiles"));
+    const p = JSON.parse(localStorage.getItem(SYS.profiles));
     if (Array.isArray(p) && p.length === 4) return p;
   } catch (e) {}
   return [0, 1, 2, 3].map(defaultProfile);
 }
 function saveProfiles() {
-  try { localStorage.setItem("kirbynet.profiles", JSON.stringify(profiles)); } catch (e) {}
+  try { localStorage.setItem(SYS.profiles, JSON.stringify(profiles)); } catch (e) {}
 }
 let profiles = loadProfiles();
 
@@ -205,7 +199,7 @@ addEventListener("gamepadconnected", () => {
 // No navegador do Xbox o botão B do controle = "Voltar" da página. Durante a partida isso
 // não pode tirar ninguém do jogo: guardamos uma entrada extra no histórico e a recolocamos.
 const XBOX = /Xbox/i.test(navigator.userAgent);
-const DEBUG_KEYS = /[?&]teclas/.test(location.search);   // abra com ?teclas para ver o que cada botão manda
+const DEBUG_KEYS = /[?&]teclas\b/.test(location.search);   // abra com ?teclas para ver o que cada botão manda
 // Tela cheia + Keyboard Lock: Esc (e o B do Xbox) deixam de sair da tela cheia; segurar Esc ainda sai.
 addEventListener("fullscreenchange", () => {
   const kb = navigator.keyboard;
@@ -305,11 +299,12 @@ function renderLobby(m) {
   $("guest-urls").textContent = (m.guest_urls || []).join("  ou  ");
   $("room-code").textContent = m.code || Bridge.code || "…";
   S = { mode: "net", my: 0 };
-  badges($("players"), m.players, 0, 4);
+  badges($("players"), m.players, 0, SYS.maxP);
 }
 function renderGame(m, fresh) {
   badges($("game-players"), m.players, m.my, m.players.length);
-  const show = m.mode === "local" || m.view_all ? [...Array(m.n).keys()] : [m.my];
+  // SNES: um console só, uma tela para todos. GBA: um por jogador.
+  const show = SYS.oneScreen ? [0] : m.mode === "local" || m.view_all ? [...Array(m.n).keys()] : [m.my];
   const stage = $("stage");
   const key = show.join(",");
   if (fresh || stage.dataset.key !== key) {
@@ -317,28 +312,28 @@ function renderGame(m, fresh) {
     stage.className = "stage " + (show.length === 1 ? "one" : "many");
     stage.innerHTML = "";
     const bg = document.createElement("canvas");   // fundo desfocado (modo "Bordas desfocadas")
-    bg.className = "bgblur"; bg.width = 48; bg.height = 32;
+    bg.className = "bgblur"; bg.width = 48; bg.height = Math.round(48 * H / W);
     stage.appendChild(bg);
     Fit.bg = bg.getContext("2d");
     for (const k in canvases) delete canvases[k];
     for (const i of show) {
       const box = document.createElement("div");
       box.className = "screen";
-      box.style.setProperty("--c", COLORS[i]);
+      box.style.setProperty("--c", COLORS[SYS.oneScreen ? m.my || 0 : i]);
       const cv = document.createElement("canvas");
       cv.width = W; cv.height = H;
       const ctx = cv.getContext("2d", { alpha: false });
       canvases[i] = { ctx, img: ctx.createImageData(W, H) };
       const tag = document.createElement("span");
       tag.className = "tag";
-      tag.textContent = `P${i + 1} ${m.players[i] || ""}`;
+      tag.textContent = SYS.oneScreen ? (m.players || []).map((p, j) => `P${j + 1} ${p}`).join(" · ") : `P${i + 1} ${m.players[i] || ""}`;
       box.append(cv, tag);
       stage.appendChild(box);
     }
   }
   Fit.apply();
   $("btn-all").textContent = m.view_all ? "Só a minha" : "Ver todas";
-  $("btn-all").classList.toggle("hidden", m.mode === "local");
+  $("btn-all").classList.toggle("hidden", m.mode === "local" || SYS.oneScreen);
   $("btn-ff").classList.toggle("hidden", m.mode !== "local");   // acelerar: só sozinho / "Mesmo PC"
   $("btn-ffx").classList.toggle("hidden", m.mode !== "local");
   updateTurboButton();
@@ -387,7 +382,7 @@ function toast(msg) {
 function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
 // ------------------------------------------------------------------ o host joga pelo navegador também
-const stem = (rom) => rom.replace(/\.gba$/i, "");
+const stem = (rom) => rom.replace(SYS.romRe, "");
 async function fetchBytes(url) { const r = await fetch(url); if (!r.ok) throw new Error(await r.text()); return new Uint8Array(await r.arrayBuffer()); }
 async function postBytes(url, bytes) { if (bytes && bytes.length) await fetch(url, { method: "POST", body: bytes }); }
 

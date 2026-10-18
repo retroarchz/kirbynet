@@ -187,9 +187,9 @@ function keepAlive(peer, alive) {
   peer.on("disconnected", () => setTimeout(() => { if (alive() && !peer.destroyed) try { peer.reconnect(); } catch (e) {} }, 3000));
   peer.on("error", () => {});
 }
-// N: "quem é você?" -> {host, game, players, running}
-function roomInfo(players, game, running) {
-  return packMsg("N", enc(JSON.stringify({ host: players[0] || "?", game: game || "", players, running: !!running })));
+// N: "quem é você?" -> {host, game, players, running, sys}  (sys: "gba" ou "snes")
+function roomInfo(players, game, running, sys = "gba") {
+  return packMsg("N", enc(JSON.stringify({ host: players[0] || "?", game: game || "", players, running: !!running, sys })));
 }
 let scanPeer = null;
 // salas abertas nesta internet agora: [{code, host, game, players, running}]
@@ -310,7 +310,7 @@ const SiteRoom = {
     const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
     const slot = this.players.findIndex(p => p.c === c);
     const fail = (msg) => c.send("E", enc(JSON.stringify({ msg })));
-    if (kind === "N") c.send("N", roomInfo(this.names(), this.romName, this.running).subarray(1));
+    if (kind === "N") c.send("N", roomInfo(this.names(), this.romName, this.running, SYS.id).subarray(1));
     else if (kind === "G") {
       const have = romAsk(u8);
       c.send("G", romPacket(this.running ? { error: "A partida já começou." }
@@ -319,7 +319,7 @@ const SiteRoom = {
       let info; try { info = JSON.parse(dec(data)); } catch (e) { return; }
       if (this.running) fail("A partida já começou.");
       else if (info.rom !== this.sha1) fail("A sua ROM é diferente da do host. Todos precisam da MESMA ROM.");
-      else if (this.players.length >= 4) fail("A sala está cheia (4 jogadores).");
+      else if (this.players.length >= SYS.maxP) fail(`A sala está cheia (${SYS.maxP} jogadores).`);
       else if (slot < 0) {
         const p = { name: String(info.name || "?").slice(0, 16), c, save: String(info.save || "") };
         if (c.local) this.players.unshift(p); else this.players.push(p);   // o host é sempre o P1

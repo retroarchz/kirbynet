@@ -1,7 +1,7 @@
 {
-  "name": "kirbynet",
-  "short_name": "kirbynet",
-  "description": "Link cable de GBA para até 4 jogadores",
+  "name": "Retroarch",
+  "short_name": "Retroarch",
+  "description": "GBA e SNES no navegador, sozinho ou junto",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#161629",

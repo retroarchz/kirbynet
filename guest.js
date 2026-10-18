@@ -14,11 +14,12 @@ function idb() {
     r.onsuccess = () => ok(r.result); r.onerror = () => bad(r.error);
   });
 }
-async function romStore(v) { try { const db = await idb(); db.transaction("roms", "readwrite").objectStore("roms").put(v, "last"); } catch (e) {} }
+// a última ROM de cada videogame fica guardada separada (SYS.romSlot)
+async function romStore(v) { try { const db = await idb(); db.transaction("roms", "readwrite").objectStore("roms").put(v, SYS.romSlot); } catch (e) {} }
 async function romLoad() {
   try {
     const db = await idb();
-    return await new Promise(ok => { const r = db.transaction("roms").objectStore("roms").get("last"); r.onsuccess = () => ok(r.result); r.onerror = () => ok(null); });
+    return await new Promise(ok => { const r = db.transaction("roms").objectStore("roms").get(SYS.romSlot); r.onsuccess = () => ok(r.result); r.onerror = () => ok(null); });
   } catch (e) { return null; }
 }
 // O save é da PESSOA (o nome digitado; "Luan" = "luan"), e vai junto para os outros aparelhos
@@ -81,7 +82,7 @@ async function loadLibraryRom() {
   if (!name) { $("g-rom").textContent = "Nenhum jogo disponível."; return; }
   $("g-rom").textContent = "Carregando " + name + "…";
   try {
-    const response = await fetch(new URL("roms/" + encodeURIComponent(name), location.href));
+    const response = await fetch(new URL(SYS.roms + encodeURIComponent(name), location.href));
     if (!response.ok) throw new Error("Falha ao baixar o jogo (" + response.status + ").");
     const bytes = new Uint8Array(await response.arrayBuffer());
     if (request !== libraryRequest) return;
@@ -101,10 +102,10 @@ async function initLibrary() {
   const select = $("g-library");
   select.onchange = loadLibraryRom;
   try {
-    const response = await fetch(new URL("roms/index.json", location.href), { cache: "no-store" });
+    const response = await fetch(new URL(SYS.roms + "index.json", location.href), { cache: "no-store" });
     if (!response.ok) throw new Error("Catálogo indisponível.");
     const games = await response.json();
-    select.replaceChildren(...games.map(game => new Option(game.name.replace(/\.gba$/i, ""), game.file)));
+    select.replaceChildren(...games.map(game => new Option(game.name.replace(SYS.romRe, ""), game.file)));
     if (!games.length) select.add(new Option("Nenhum jogo disponível", ""));
     if (games.some(game => game.file === Guest.romName)) select.value = Guest.romName;
     await loadLibraryRom();
@@ -140,7 +141,7 @@ async function guestInit() {
     try {
       let bytes = new Uint8Array(await f.arrayBuffer()), name = f.name;
       if (name.toLowerCase().endsWith(".zip")) ({ name, bytes } = await unzipGba(bytes));
-      if (!name.toLowerCase().endsWith(".gba")) throw new Error("Escolha um .gba ou .zip.");
+      if (!SYS.romRe.test(name)) throw new Error(`Escolha um ${SYS.romExt} ou .zip.`);
       setRom(name, bytes);
       romStore({ name, bytes });
       toast(`ROM pronta: ${name}`);
@@ -154,7 +155,7 @@ async function guestInit() {
     const w = who();
     if (!w) return toast("Coloque o seu nome primeiro.");
     if (!Guest.rom) return toast("Escolha o jogo primeiro.");
-    const jogo = Guest.romName.replace(/\.gba$/i, "");
+    const jogo = Guest.romName.replace(SYS.romRe, "");
     if (!confirm(`Apagar o save de “${w}” em ${jogo}? Vale para todos os aparelhos de “${w}”.`)) return;
     if (!confirm("Tem certeza? O jogo vai começar do zero.")) return;
     try { await Cloud.reset(w, Guest.romSha1); toast("🗑 Pronto: " + jogo + " começa do zero."); }
@@ -179,7 +180,7 @@ async function guestInit() {
   }
 }
 
-// Sozinho: 1 GBA aqui mesmo, sem sala e sem o PC do host. Usa o mesmo save da rede deste navegador.
+// Sozinho: 1 videogame aqui mesmo, sem sala e sem o PC do host. Usa o mesmo save da rede deste navegador.
 async function guestSolo() {
   if (!Guest.rom) return toast("Escolha a ROM primeiro.");
   $("g-solo").disabled = true;
@@ -206,11 +207,12 @@ async function roomScanLoop() {
 function renderRooms(rooms) {
   const list = $("g-room-list");
   list.innerHTML = "";
+  rooms = rooms.filter(r => (r.sys || "gba") === SYS.id);   // só as salas do videogame escolhido
   for (const r of rooms) {
     const b = document.createElement("button");
     b.style.background = "var(--p4)";
-    b.textContent = `▶ Sala de ${r.host} · ${String(r.game).replace(/\.gba$/i, "")} · ${r.players.length}/4${r.running ? " (jogando)" : ""}`;
-    b.disabled = r.running || r.players.length >= 4;
+    b.textContent = `▶ Sala de ${r.host} · ${String(r.game).replace(SYS.romRe, "")} · ${r.players.length}/${SYS.maxP}${r.running ? " (jogando)" : ""}`;
+    b.disabled = r.running || r.players.length >= SYS.maxP;
     b.onclick = () => guestJoin(r.code);
     list.appendChild(b);
   }
@@ -267,15 +269,17 @@ function roomCallbacks() {
   return {
     onLobby(names, slot) {
       S = { mode: "net", my: slot };
-      badges($("g-players"), names, slot, 4);
+      badges($("g-players"), names, slot, SYS.maxP);
       $("g-msg").textContent = "Conectado! Esperando o host começar a partida…";
     },
     onStart(info) {
       const net = Play.net;
       try {
+        // SNES: um cartucho só para todos (o save do P1). Só o P1 grava, senão o progresso do P1
+        // iria parar no save de cada convidado.
         startRun({ n: info.n, rom: Guest.rom, saves: info.saves.map(b64dec), names: info.names,
                    net, slot: net.slot, delay: info.delay,
-                   onSave: guestSaveWriter() });
+                   onSave: SYS.oneScreen && net.slot !== 0 ? null : guestSaveWriter() });
       } catch (err) { toast(String(err.message || err)); net.close(); showGuestPage(String(err)); }
     },
     onError(msg) {

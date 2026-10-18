@@ -1,12 +1,15 @@
 "use strict";
-// Roda os GBAs numa linha separada (Web Worker), longe da página.
+// Roda os GBAs (ou o SNES) numa linha separada (Web Worker), longe da página.
 // Assim o navegador não acha que a página "travou" (aviso do Firefox) e a
 // tela/som/botões ficam leves. A página manda botões; o worker devolve imagens,
 // som, e as mensagens de rede (I = botões, X = conferência de sincronia).
-importScripts("kncore.js");
+// qual videogame: a página diz pelo endereço (engine-worker.js?sys=snes)
+const SNES = /[?&]sys=snes\b/.test(location.search);
+importScripts(SNES ? "sncore.js" : "kncore.js");
+const Core = SNES ? SnCore : KnCore;
 
-const W = 240, H = 160, FRAME_BYTES = W * H * 4;
-const GBA_FPS = 16777216 / 280896;
+const W = Core.W, H = Core.H, FRAME_BYTES = W * H * 4;
+let FPS = SNES ? 60.0988 : 16777216 / 280896;   // o SNES confirma ao abrir a ROM (NTSC/PAL)
 const HASH_EVERY = 120;
 const SNAP_MS = 1000;   // de quanto em quanto tempo confere se o jogo gravou algo novo
 
@@ -105,7 +108,7 @@ function autoDelay(now) {
   // adiantado mais de 1 quadro? fica 1 quadro para trás, bem devagar (veja tick). Só começa outro
   // quando o anterior terminou: assim o som nunca fica sem reserva.
   const lead = leadOver();
-  if (lead > 1 && run.slew <= 0) run.slew = 1000 / GBA_FPS;
+  if (lead > 1 && run.slew <= 0) run.slew = 1000 / FPS;
   if (up) {
     if (run.delay < 10) run.delay++;
     run.calmT = now;
@@ -125,7 +128,7 @@ function tick() {
   if (!run) return;
   const now = performance.now();
   // acelerar (só sozinho / "Mesmo PC"): o relógio do jogo anda 'speed' vezes mais rápido
-  const speed = run.speed || 1, fps = GBA_FPS * speed, cap = 3 * speed;
+  const speed = run.speed || 1, fps = FPS * speed, cap = 3 * speed;
   const budget = now + 10;   // acelerando: no máximo ~10 ms de trabalho por rodada
   let due = Math.floor((now - run.t0) / 1000 * fps);
   if (due - run.frames > 10 * speed) { run.t0 = now - run.frames / fps * 1000; due = run.frames + 1; }
@@ -153,7 +156,7 @@ function tick() {
           // do tick já tinha acertado o t0; somar de novo deixava o jogo parado OUTRA vez o tempo
           // todo que esperou, e o outro PC passava a esperar este: as paradas iam e voltavam.)
           const waited = now - run.waitSince;
-          run.t0 = now - (run.frames + 1) / GBA_FPS * 1000;
+          run.t0 = now - (run.frames + 1) / FPS * 1000;
           due = run.frames + 1;
           run.win.waited += waited; run.win.events++;
           run.waitSince = null;
@@ -213,7 +216,7 @@ function tick() {
       waiting = [...Array(run.n).keys()].filter(i => row[i] == null);
     }
     // carga do motor: quanto do tempo de 1 quadro (16,7 ms) ele gasta rodando os GBAs (100% = no limite)
-    const load = run.busyN ? Math.round(run.busy / run.busyN / (1000 / GBA_FPS) * 100) : null;
+    const load = run.busyN ? Math.round(run.busy / run.busyN / (1000 / FPS) * 100) : null;
     postMessage({ t: "status", fps: run.fpsN / ((now - run.fpsT) / 1000), frame: run.frames, waiting,
                   delay: run.net ? run.delay : null, load, marg: run.marg });
     run.fpsT = now; run.fpsN = 0; run.busy = 0; run.busyN = 0; run.marg = {};
@@ -226,8 +229,9 @@ onmessage = async (ev) => {
   const m = ev.data;
   if (m.t === "start") {
     try {
-      const eng = await KnCore.load(m.module);
+      const eng = await Core.load(m.module);
       const s = eng.create(m.n, m.rom, m.saves);
+      if (s.fps > 30 && s.fps < 90) FPS = s.fps;
       run = { n: m.n, net: m.net, slot: m.slot, delay: m.delay || 0, s, frames: 0, sent: m.delay || 0,
               waitSince: null, t0: performance.now(), fpsT: performance.now(), fpsN: 0, book: new Map(),
               win: { t: performance.now(), waited: 0, events: 0 }, calmT: performance.now(), minDelay: Math.min(2, m.delay || 2),
@@ -246,7 +250,7 @@ onmessage = async (ev) => {
   else if (m.t === "speed") {   // acelerar: só fora da rede (em sala, todos andam no mesmo passo)
     if (run && !run.net && m.speed !== (run.speed || 1)) {
       run.speed = m.speed;
-      run.t0 = performance.now() - run.frames / (GBA_FPS * m.speed) * 1000;   // continua do quadro atual
+      run.t0 = performance.now() - run.frames / (FPS * m.speed) * 1000;   // continua do quadro atual
     }
   }
   else if (m.t === "pm") {   // o que um dos outros achou dos MEUS botões (últimos ~2 s)

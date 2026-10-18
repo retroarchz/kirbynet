@@ -1,12 +1,15 @@
 :root {
   --bg: #161629; --panel: #20203c; --line: #34345c; --text: #e8e8f0; --sub: #9a9ab8;
   --p1: #ff6fa8; --p2: #ffd23f; --p3: #ff5a5a; --p4: #5ad16a; --ink: #1b1030;
+  --ar: 1.5;   /* proporção da tela do jogo: GBA 3:2 */
 }
+:root[data-sys="snes"] { --ar: 1.3334; }   /* SNES 4:3 */
+[data-sys="gba"] .snes-only, [data-sys="snes"] .gba-only { display: none !important; }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text);
   font: 15px/1.45 "Segoe UI", system-ui, sans-serif; }
 .hidden { display: none !important; }
-h1 { margin: 0 0 4px; font-size: 30px; color: #ff8fc0; letter-spacing: .5px; }
+h1 { margin: 0 0 4px; font-size: 30px; color: #8fb4ff; letter-spacing: .5px; }
 h2 { margin: 0 0 6px; font-size: 18px; }
 .sub { color: var(--sub); }
 .page { max-width: 1100px; margin: 0 auto; padding: 26px 28px; }
@@ -51,9 +54,9 @@ button.ghost, .ghost-btn { background: transparent; color: #d0d0ec; border: 1px 
 .stage.one { grid-template-columns: 1fr; }
 .stage.many { grid-template-columns: repeat(2, 1fr); }
 .screen { position: relative; border: 3px solid var(--c); border-radius: 8px; background: #000; overflow: hidden;
-  aspect-ratio: 3 / 2; width: 100%; }
-.stage.one .screen { width: min(100%, calc((100vh - 170px) * 1.5)); margin: 0 auto; }
-.stage.many .screen { width: min(100%, calc((100vh - 200px) / 2 * 1.5)); justify-self: center; }
+  aspect-ratio: var(--ar); width: 100%; }
+.stage.one .screen { width: min(100%, calc((100vh - 170px) * var(--ar))); margin: 0 auto; }
+.stage.many .screen { width: min(100%, calc((100vh - 200px) / 2 * var(--ar))); justify-self: center; }
 .screen canvas { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
 .screen .tag { position: absolute; left: 6px; top: 6px; background: var(--c); color: var(--ink);
   font-weight: 800; font-size: 12px; padding: 2px 8px; border-radius: 6px; opacity: .85; }
@@ -61,8 +64,8 @@ button.ghost, .ghost-btn { background: transparent; color: #d0d0ec; border: 1px 
 .bad { color: #ff7070; font-weight: 700; }
 /* tela cheia: só as telas, ocupando tudo */
 .stage:fullscreen { background: #000; padding: 0; gap: 4px; }
-.stage:fullscreen.one .screen { width: min(100vw, 150vh); border: 0; border-radius: 0; }
-.stage:fullscreen.many .screen { width: min(50vw - 4px, 75vh - 4px); border-width: 2px; }
+.stage:fullscreen.one .screen { width: min(100vw, calc(100vh * var(--ar))); border: 0; border-radius: 0; }
+.stage:fullscreen.many .screen { width: min(50vw - 4px, calc(50vh * var(--ar)) - 4px); border-width: 2px; }
 /* tela cheia "Esticar": ocupa o monitor inteiro, sem faixas pretas (imagem ~18% mais larga) */
 .stage:fullscreen.fit-stretch.one { gap: 0; }
 .stage:fullscreen.fit-stretch.one .screen { width: 100vw; height: 100vh; aspect-ratio: auto; }
@@ -124,6 +127,12 @@ button.ghost, .ghost-btn { background: transparent; color: #d0d0ec; border: 1px 
 .abz .b { left: 4%; top: 52%; }
 .abz .a { right: 0; top: 30%; }
 .abz .ab { width: 28%; height: 28%; left: 26%; top: 6%; font-size: calc(var(--d) * .085); }
+/* SNES: X, Y, A, B em losango, como no controle do Super Nintendo */
+[data-sys="snes"] .abz .round { width: 35%; height: 35%; font-size: calc(var(--d) * .12); }
+[data-sys="snes"] .abz .x { left: 32.5%; top: 0; }
+[data-sys="snes"] .abz .y { left: 0; top: 32.5%; }
+[data-sys="snes"] .abz .a { right: 0; top: 32.5%; }
+[data-sys="snes"] .abz .b { left: 32.5%; top: auto; bottom: 0; }
 /* L e R: abas com cantos arredondados */
 .sh { width: min(24cqw, 120px); height: clamp(30px, 9cqh, 46px); font-size: clamp(14px, 4.4cqh, 20px); }
 .sh.l { border-radius: 10px 22px 10px 10px; }
@@ -156,7 +165,7 @@ body.touchui .toast { top: 10px; bottom: auto; }
   body.touchui .stage.many .screen { width: 50vw; }
   body.touchui .touch { position: relative; flex: 1 1 auto; min-height: 200px;
     margin-bottom: env(safe-area-inset-bottom); }
-  body.touchui.menuopen #game .gamebar { top: calc(100vw / 1.5 + 70px); left: 50%; transform: translateX(-50%); }
+  body.touchui.menuopen #game .gamebar { top: calc(100vw / var(--ar) + 70px); left: 50%; transform: translateX(-50%); }
   .touch .sh { top: 4cqh; } .touch .sh.l { left: 4cqw; } .touch .sh.r { right: 4cqw; }
   .touch .tmenu { top: 4cqh; left: 50%; transform: translateX(-50%); }
   .touch .dpad { left: 4cqw; top: 52%; transform: translateY(-50%); }
@@ -165,7 +174,7 @@ body.touchui .toast { top: 10px; bottom: auto; }
 }
 @media (orientation: landscape) {
   body.touchui .stage { height: 100%; }
-  body.touchui .stage.one .screen { width: min(100vw, 150vh); width: min(100vw, 150dvh); }
+  body.touchui .stage.one .screen { width: min(100vw, calc(100vh * var(--ar))); width: min(100vw, calc(100dvh * var(--ar))); }
   /* "Esticar" (padrão): o jogo ocupa a tela inteira, sem faixas pretas */
   body.touchui .stage.fit-stretch.one .screen { width: 100vw; height: 100vh; height: 100dvh; aspect-ratio: auto; }
   /* "Bordas desfocadas": proporção original, laterais com o jogo desfocado */
@@ -173,7 +182,7 @@ body.touchui .toast { top: 10px; bottom: auto; }
     filter: blur(28px) brightness(0.55) saturate(1.3); z-index: 0; pointer-events: none; }
   body.touchui .stage.fit-blur .screen { z-index: 1; }
   body.touchui .screen .tag { left: calc(max(10px, env(safe-area-inset-left)) + clamp(30px, 8vmin, 40px) + 10px); top: 12px; }
-  body.touchui .stage.many .screen { width: min(50vw - 4px, 75dvh - 4px); }
+  body.touchui .stage.many .screen { width: min(50vw - 4px, calc(50dvh * var(--ar)) - 4px); }
   body.touchui .statusbar { position: fixed; top: 4px; left: 50%; transform: translateX(-50%); z-index: 16;
     background: rgba(0,0,0,.55); color: #dcdcf0; border-radius: 8px; pointer-events: none; white-space: nowrap; }
   body.touchui .touch { position: fixed; inset: 0; pointer-events: none; }
@@ -211,3 +220,9 @@ body.playing { overflow: hidden; overscroll-behavior: none; }
 button.corner-link { position: fixed; right: 12px; bottom: 10px; background: none; border: 0; padding: 4px 6px;
   color: var(--sub); font-size: 12px; font-weight: 400; opacity: .45; }
 button.corner-link:hover, button.corner-link:focus-visible { opacity: .9; filter: none; }
+
+/* escolha do videogame: no canto de cima à esquerda (em tela estreita, em cima do título) */
+.sys-pick { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+.sys-pick label { color: var(--sub); font-size: 13px; }
+.sys-pick select { min-width: 0; font-weight: 700; }
+@media (min-width: 1300px) { .sys-pick { position: fixed; left: 24px; top: 26px; flex-direction: column; align-items: flex-start; gap: 4px; } }
