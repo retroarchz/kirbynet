@@ -95,6 +95,33 @@
         // desenho do GBA i ligado/desligado: o jogo não muda, só a imagem deixa de ser feita
         // (cada aparelho desenha só os GBAs que mostra). Motor antigo sem isso: não faz nada.
         render(i, on) { if (x.kn_render) x.kn_render(ptr, i, on ? 1 : 0); },
+        // Fotografia da partida, para voltar alguns quadros e refazer com os botões certos (rollback):
+        // a memória inteira do motor, menos as ROMs (a daqui e a cópia de cada GBA), que nunca mudam.
+        // É exata por definição (tudo o que o motor sabe está nessa memória) e fica fora do motor.
+        canSnapshot: !!x.kn_rom_ptr,
+        snapshot(reuse) {
+          const size = x.memory.buffer.byteLength, skip = [[romPtr, romPtr + rom.length]];
+          for (let i = 0; i < n; i++) {
+            const p = x.kn_rom_ptr(ptr, i) >>> 0, l = x.kn_rom_len(ptr, i) >>> 0;
+            if (p && l) skip.push([p, p + l]);
+          }
+          skip.sort((a, b) => a[0] - b[0]);
+          const keep = [];
+          let at = 0;
+          for (const [a, b] of skip) { if (a > at) keep.push([at, a]); at = Math.max(at, b); }
+          if (at < size) keep.push([at, size]);
+          const total = keep.reduce((t, [a, b]) => t + b - a, 0);
+          const buf = reuse && reuse.buf.length >= total ? reuse.buf : new Uint8Array(total + (1 << 20));
+          const mem = new Uint8Array(x.memory.buffer);
+          let o = 0;
+          for (const [a, b] of keep) { buf.set(mem.subarray(a, b), o); o += b - a; }
+          return { buf, keep };
+        },
+        restore(snap) {
+          const mem = new Uint8Array(x.memory.buffer);
+          let o = 0;
+          for (const [a, b] of snap.keep) { mem.set(snap.buf.subarray(o, o + b - a), a); o += b - a; }
+        },
         // Som do GBA i: { rate, samples: Int16Array estéreo intercalado } (não mexe na emulação)
         audio(i) {
           const frames = x.kn_audio_read(ptr, i, audPtr, AUD_MAX);

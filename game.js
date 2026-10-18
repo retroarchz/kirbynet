@@ -632,7 +632,8 @@ function netJoin(url, hello, cb) {
 // opts: { n, rom, saves[], names[], net (ou null), slot, delay,
 //         onSave(saves[], fechandoAba) — grava o save; onEnd(saves[]) — partida acabou }
 function startRun(opts) {
-  const worker = new Worker(`engine-worker.js?sys=${SYS.id}&v=${ASSET_V}`);
+  // ?semrollback no endereço da página: sala sem rollback (só espera, como antes) — para comparar
+  const worker = new Worker(`engine-worker.js?sys=${SYS.id}&v=${ASSET_V}${/[?&]semrollback\b/.test(location.search) ? "&rb=0" : ""}`);
   const run = { ...opts, worker, desync: null, raf: 0, lastKeys: "",
                 queue: [], base: null, avOff: null, lagS: null, k: null, vsync: 1000 / 60, lastTs: 0,
                 stat: { shown: 0, skipped: 0, idle: 0, gaps: 0, lastF: null, audioLag: null },

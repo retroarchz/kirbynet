@@ -4,6 +4,9 @@
  * kn_audio_rate, kn_savedata, kn_game_hash, kn_destroy, kn_read16, kn_malloc, kn_free.
  * Novo: kn_render(ptr, i, ligado) — desliga o desenho de um GBA que não está na tela deste aparelho.
  * O jogo continua rodando igual (é o frameskip do próprio mGBA); só a imagem não é feita.
+ * kn_rom_ptr / kn_rom_len — onde está a cópia da ROM de cada GBA. A fotografia da partida para o rollback
+ * (kncore.js) é a memória inteira do motor menos as ROMs, que nunca mudam: exata, sem depender do
+ * salvamento de estado do mGBA (que não guarda várias coisas do cabo link, do som e do save).
  *
  * Vários GBAs (cabo link): o coordenador de lockstep do mGBA decide quem "dorme" esperando os outros.
  * Como no navegador não há threads, os GBAs revezam: cada um roda um pedaço (até o próximo evento),
@@ -46,6 +49,7 @@ struct KnGame {
 	struct GBASIOLockstepCoordinator coordinator;
 	bool linked;
 	uint32_t frames;
+	uint32_t loops;   // rodadas do último quadro
 };
 
 static void _logNothing(struct mLogger* logger, int category, enum mLogLevel level, const char* format, va_list args) {
@@ -71,20 +75,41 @@ static int _requestedId(struct mLockstepUser* user) {
 // avisa que "eventos baseados no relógio não ocorrerão mais". Sem relógio o jogo fica nesse mesmo modo
 // (mesma imagem, som e save), sem depender de lixo de memória, e a hora não entra na partida.
 // O mGBA liga o relógio sozinho em alguns jogos; aqui ele é tirado e o resto (tipo de save etc.) fica igual.
-static void _withoutRtc(struct mCore* core) {
+static void _overrideWithoutRtc(struct mCore* core) {
+	// Mesma escolha do mGBA (GBAOverrideApplyDefaults, commit 9660a668f), feita antes do reset para tirar o
+	// relógio: assim há um reset só e o mGBA não copia a ROM inteira (ele copia quando há relógio, para os
+	// pinos dele, que ficam dentro da ROM) — a fotografia do rollback fica pequena.
 	struct GBA* gba = core->board;
-	if (!(gba->memory.hw.devices & HW_RTC)) {
-		return;
+	const struct GBACartridge* cart = (const struct GBACartridge*) gba->memory.rom;
+	if (!cart || gba->memory.unl.type == GBA_UNL_CART_MULTICART) {
+		return;   // multicart: o mGBA usa SRAM e nenhum hardware
 	}
-	struct GBACartridgeOverride ov = {
-		.savetype = gba->memory.savedata.type,
-		.hardware = gba->memory.hw.devices & ~HW_RTC,
-		.idleLoop = gba->idleLoop,
-		.vbaBugCompat = gba->vbaBugCompat,
+	static const uint32_t pokemonTable[] = {
+		0x4881F3F8, 0x8C4D3108, 0x1F1C08FB, 0x34C9DF89, 0xA3FDCCB1, 0xA0AEC80A,   // Emerald
+		0x1A81EEDF, 0x3B2056E9, 0x5DC668F6, 0x73A72167, 0x84EE4776, 0x9F08064E, 0xBB640DF7, 0xDD88761C,   // FireRed
+		0x61641576, 0xAEAC73E6, 0xF0815EE7,   // Ruby
 	};
-	memcpy(ov.id, &((const struct GBACartridge*) gba->memory.rom)->id, sizeof(ov.id));
+	const char* rom = (const char*) gba->memory.rom;
+	bool isPokemon = !strncmp("pokemon red version", &rom[0x108], 20) || !strncmp("pokemon emerald version", &rom[0x108], 24)
+		|| !strncmp("AXVE", &rom[0xAC], 4);
+	bool isKnownPokemon = false;
+	for (size_t i = 0; isPokemon && !isKnownPokemon && i < sizeof(pokemonTable) / sizeof(*pokemonTable); ++i) {
+		isKnownPokemon = gba->romCrc32 == pokemonTable[i];
+	}
+	struct GBACartridgeOverride ov = { .idleLoop = GBA_IDLE_LOOP_NONE };
+	memcpy(ov.id, &cart->id, sizeof(ov.id));
+	if (isPokemon && !isKnownPokemon) {   // hacks de Pokémon: Flash 1M e relógio
+		ov.savetype = GBA_SAVEDATA_FLASH1M;
+		ov.hardware = HW_RTC;
+		ov.vbaBugCompat = true;
+	} else if (!GBAOverrideFind(NULL, &ov)) {
+		return;   // jogo sem nada especial
+	}
+	if (ov.hardware == HW_NO_OVERRIDE || !(ov.hardware & HW_RTC)) {
+		return;   // sem relógio: o mGBA faz exatamente o mesmo sozinho
+	}
+	ov.hardware &= ~HW_RTC;
 	core->setOverride(core, &ov);
-	core->reset(core);
 }
 
 // o quadro do GBA i terminou: guarda a tela completa. (Trocar os buffers sairia mais caro: o mGBA só
@@ -123,9 +148,9 @@ KN_EXPORT(kn_create_mem) struct KnGame* kn_create_mem(int n, const uint8_t* rom,
 			goto fail;
 		}
 		// o save fica numa cópia em memória que o jogo pode crescer/gravar (sem save: começa vazio)
+		_overrideWithoutRtc(core);
 		core->loadSave(core, VFileMemChunk(saveSizes[i] ? saves[i] : NULL, saveSizes[i]));
 		core->reset(core);
-		_withoutRtc(core);
 	}
 	if (n > 1) {
 		GBASIOLockstepCoordinatorInit(&game->coordinator);
@@ -142,6 +167,13 @@ KN_EXPORT(kn_create_mem) struct KnGame* kn_create_mem(int n, const uint8_t* rom,
 		}
 		game->linked = true;
 	}
+	// folga livre de 1 MB no fim da memória: o jogo pode precisar de memória no meio da partida (o save do
+	// cartucho é criado no primeiro acesso) e assim ela vem desta folga, sem a memória do motor crescer.
+	// Crescer no meio de um quadro desfeito pelo rollback deixaria um pedaço sobrando (a fotografia não
+	// encolhe a memória de volta). Menos que 2 MB: acima disso a biblioteca tentaria devolver a memória.
+	// (volatile: sem isso o compilador apaga o par malloc/free, que "não faz nada")
+	void* volatile headroom = malloc(1 << 20);
+	free(headroom);
 	return game;
 
 fail:
@@ -175,7 +207,13 @@ KN_EXPORT(kn_run_frame) int kn_run_frame(struct KnGame* game, const uint16_t* ke
 		// se afastar demais. A tela de cada um é guardada no instante em que o quadro dele termina.
 		uint32_t seen[MAX_GBAS];
 		memcpy(seen, start, sizeof(seen));
+		game->loops = 0;
 		for (;;) {
+			// segurança: um quadro normal leva no máximo uns poucos milhares de rodadas. Se passar muito disso,
+			// algo travou o cabo; melhor avisar (a página mostra o erro) do que congelar o navegador
+			if (++game->loops > 100000) {
+				return -2;
+			}
 			bool pending = false;
 			for (int i = 0; i < game->n; ++i) {
 				pending = pending || game->cores[i]->frameCounter(game->cores[i]) == start[i];
@@ -264,6 +302,17 @@ KN_EXPORT(kn_game_hash) uint64_t kn_game_hash(struct KnGame* game) {
 }
 KN_EXPORT(kn_hash) uint64_t kn_hash(struct KnGame* game) { return kn_game_hash(game); }
 KN_EXPORT(kn_frame) uint32_t kn_frame(struct KnGame* game) { return game->frames; }
+
+// cópia da ROM do GBA i dentro do motor (para a fotografia deixar de fora). 0 = a ROM foi alterada pelo
+// jogo (cartuchos especiais) e precisa entrar na fotografia
+KN_EXPORT(kn_rom_ptr) uint32_t kn_rom_ptr(struct KnGame* game, int i) {
+	struct GBA* gba = game->cores[i]->board;
+	return gba->isPristine ? (uint32_t) (uintptr_t) gba->memory.rom : 0;
+}
+KN_EXPORT(kn_rom_len) uint32_t kn_rom_len(struct KnGame* game, int i) {
+	struct GBA* gba = game->cores[i]->board;
+	return gba->isPristine ? (uint32_t) gba->pristineRomSize : 0;
+}
 
 // quantos quadros o GBA i já completou (para testes)
 KN_EXPORT(kn_core_frames) uint32_t kn_core_frames(struct KnGame* game, int i) {

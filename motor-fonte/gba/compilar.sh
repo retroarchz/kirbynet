@@ -4,6 +4,7 @@
 #   wasi-sdk: https://github.com/WebAssembly/wasi-sdk/releases (wasi-sdk-24.0)
 # Uso: WASI=/caminho/wasi-sdk-24.0 MGBA=/caminho/mgba ./compilar.sh [saida.wasm]
 set -e
+rm -rf "$(cd "$(dirname "$0")" && pwd)/obj"   # sempre do zero: um .o velho nao pode entrar no motor
 W=${WASI:?defina WASI}; M=${MGBA:?defina MGBA}
 HERE=$(cd "$(dirname "$0")" && pwd); O=$HERE/obj; OUT=${1:-$HERE/../../kncore.wasm}; mkdir -p $O $HERE/gen
 CC="$W/bin/clang --target=wasm32-wasi --sysroot=$W/share/wasi-sysroot"
@@ -36,7 +37,9 @@ $HERE/gen/version.c $HERE/kncore.c"
 # -fwrapv só no cabo link e no relógio de eventos: lá as contas de tempo passam do limite de 32 bits
 # (a cada ~2 min 8 s de jogo) e o compilador não pode "otimizar" a proteção contra isso
 WRAP="sio/lockstep.c core/timing.c gba/sio.c"
-for f in $SRCS; do case $f in $M/*) n=$(echo ${f#$M/} | tr / _);; *) n=$(basename $f);; esac; X=""; for w in $WRAP; do case $f in *$w) X=-fwrapv;; esac; done; $CC $FL $X -c $f -o $O/$n.o & done; wait
+for f in $SRCS; do case $f in $M/*) n=$(echo ${f#$M/} | tr / _);; *) n=$(basename $f);; esac; X=""; for w in $WRAP; do case $f in *$w) X=-fwrapv;; esac; done; $CC $FL $X -c $f -o $O/$n.o & PIDS="$PIDS $!"; done
+for p in $PIDS; do wait $p || FALHOU=1; done
+[ -z "$FALHOU" ] || { echo "ERRO: algum arquivo nao compilou (veja acima)"; exit 1; }
 $CC -mexec-model=reactor -O2 $O/*.o -o $OUT -lwasi-emulated-signal -lwasi-emulated-mman -lwasi-emulated-process-clocks \
-  -Wl,--initial-memory=33554432 -Wl,-z,stack-size=1048576 -Wl,--strip-all -Wl,--growable-table
+  -Wl,--initial-memory=4194304 -Wl,-z,stack-size=1048576 -Wl,--strip-all -Wl,--growable-table
 echo "ok: $OUT"

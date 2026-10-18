@@ -6,6 +6,7 @@
 // qual videogame: a página diz pelo endereço (engine-worker.js?sys=snes)
 const SNES = /[?&]sys=snes\b/.test(location.search);
 const V = (location.search.match(/[?&]v=(\w+)/) || [])[1] || "";   // mesma versão da página
+const NO_RB = /[?&]rb=0\b/.test(location.search);   // página aberta com ?semrollback
 importScripts((SNES ? "sncore.js" : "kncore.js") + "?v=" + V);
 const Core = SNES ? SnCore : KnCore;
 
@@ -50,13 +51,90 @@ const pool = [];   // buffers de imagem reaproveitados (a página devolve depois
 
 function bookPut(slot, frame, k) {
   if (run.net && slot !== run.slot) {
-    if (frame < run.frames) return;   // repetido (a reserva trouxe de novo): esse quadro já rodou
+    // já confirmado (repetido pela reserva). Com rollback, botões de quadros que já rodaram com
+    // botões supostos ainda servem: são conferidos e, se a suposição errou, o jogo volta e refaz.
+    if (frame < (run.rb ? run.confirmed : run.frames)) return;
     const old = run.book.get(frame);
-    if (!old || old[slot] === null) noteMargin(slot, frame - run.frames);
+    if (old && old[slot] !== null) return;   // repetido
+    noteMargin(slot, frame - run.frames);
   }
   let row = run.book.get(frame);
   if (!row) { row = new Array(run.n).fill(null); run.book.set(frame, row); }
   row[slot] = k;
+  const last = run.lastKnown[slot];
+  if (!last || frame >= last.frame) run.lastKnown[slot] = { frame, k };
+}
+
+// ---------------------------------------------------------------- rollback (só GBA, motor com fotografia)
+// Faltam os botões de alguém para o próximo quadro? Em vez de parar, o jogo segue supondo que a pessoa
+// continua apertando o que apertava, e tira uma fotografia antes desse quadro (memória do motor, ~0,2 ms).
+// Quando os botões de verdade chegam: se a suposição acertou (o comum), nada muda; se errou, volta para a
+// fotografia e refaz até o presente, sem repetir o som. Limites para nunca piorar: no máximo alguns quadros
+// supostos (passou disso, espera como antes) e, se o aparelho já gasta mais de 12 ms por quadro, nada de
+// suposição: fica exatamente como antes (só espera).
+const RB_MAX = 8;
+function predLimit() {
+  const c = run.costAvg;
+  if (!run.rb || !c || c > 12) return 0;
+  return Math.min(RB_MAX, Math.floor(40 / c));
+}
+// botões para um quadro em que falta alguém: os que já chegaram e, dos outros, o último que se sabe
+function predictRow(row) {
+  const out = new Array(run.n);
+  for (let i = 0; i < run.n; i++) out[i] = row && row[i] !== null ? row[i] : (run.lastKnown[i] ? run.lastKnown[i].k : 0);
+  return out;
+}
+const sameRow = (a, b) => a.every((k, i) => k === b[i]);
+function dropSnap(f) {
+  const snap = run.rb.snaps.get(f);
+  if (snap) { run.rb.snaps.delete(f); run.rb.spare.push(snap); }
+}
+// roda um quadro em rede; devolve true se ele ainda pode ser desfeito (botões supostos agora ou antes)
+function stepNet(use, full) {
+  const f = run.frames, speculative = !full || f > run.confirmed;
+  if (!full) {   // botões supostos: fotografia antes, para poder voltar
+    const old = run.rb.snaps.get(f);
+    run.rb.snaps.set(f, run.s.snapshot(old || run.rb.spare.pop()));
+  }
+  const t = performance.now();
+  run.s.runFrame(use);
+  const dt = performance.now() - t;
+  run.costAvg = run.costAvg ? run.costAvg * 0.97 + dt * 0.03 : dt;
+  if (speculative) run.used.set(f, use.slice());
+  else { run.used.delete(f); run.confirmed = f + 1; }
+  return speculative;
+}
+function sendHash() {
+  const b = new Uint8Array(13), dv = new DataView(b.buffer);
+  dv.setUint8(0, run.slot); dv.setUint32(1, run.frames, true); dv.setBigUint64(5, run.s.hash(), true);
+  sendNet("X", b);
+}
+// confere os quadros supostos com os botões que chegaram; volta e refaz no primeiro que errou
+function reconcile() {
+  while (run.confirmed < run.frames) {
+    const f = run.confirmed, real = run.book.get(f);
+    if (!real || real.some(k => k === null)) break;
+    const used = run.used.get(f);
+    if (used && !sameRow(used, real)) { rollback(f); return; }
+    run.used.delete(f); dropSnap(f); run.confirmed++;
+  }
+}
+function rollback(f) {
+  const snap = run.rb.snaps.get(f);
+  if (!snap) throw new Error("rollback sem fotografia do quadro " + f);   // não deveria acontecer
+  run.s.restore(snap);
+  const end = run.frames;
+  run.frames = f;
+  run.rb.count++;
+  // refaz até onde estava: sem imagem (a certa sai no próximo quadro) e sem som (esse já tocou)
+  while (run.frames < end) {
+    const row = run.book.get(run.frames), full = !!row && !row.some(k => k === null);
+    const spec = stepNet(full ? row : predictRow(row), full);
+    run.s.audio(run.slot);
+    run.frames++;
+    run.rb.resim++;
+    if (!spec && run.frames % HASH_EVERY === 0) sendHash();
+  }
 }
 
 // Folga com que os botões de cada jogador chegam aqui: quantos quadros ANTES de serem precisos.
@@ -101,7 +179,15 @@ function autoDelay(now) {
   const w = run.win, pm = run.pm;
   if (now - w.t < 3000) return;
   let up, calm, calmMs;
-  if (pm.n) {
+  const lim = predLimit();
+  if (pm.n && lim > 0) {
+    // com rollback, botão atrasado não trava: o atraso só precisa cobrir o que a suposição não cobre.
+    // Sobe se algum botão chegou depois do limite de suposição (ali o outro teve que esperar);
+    // desce quando todos chegaram com 2 quadros de sobra dentro desse limite.
+    up = pm.min <= -lim;
+    calm = pm.min > 2 - lim;
+    calmMs = 6000;
+  } else if (pm.n) {
     up = pm.late >= 3 || pm.tight >= 30;
     calm = pm.late === 0 && pm.min >= 3;
     calmMs = 6000;
@@ -143,6 +229,7 @@ function tick() {
   try {
     while (run.frames < due && ran < cap && (speed === 1 || ran === 0 || performance.now() < budget)) {
       const tf = performance.now();
+      let spec = false;   // quadro rodado com botões supostos (ainda pode ser desfeito)
       if (run.net) {
         const held = keys[0] | 0;
         while (run.sent <= run.frames + run.delay) {
@@ -152,8 +239,11 @@ function tick() {
           sendNet("I", b);
           run.sent++;
         }
-        const row = run.book.get(run.frames);
-        if (!row || row.some(k => k === null)) { if (run.waitSince === null) run.waitSince = now; break; }
+        if (run.rb) reconcile();
+        const row = run.book.get(run.frames), full = !!row && !row.some(k => k === null);
+        let use = full ? row : null;
+        if (!use && run.frames - run.confirmed < predLimit()) use = predictRow(row);   // rollback: supõe e segue
+        if (!use) { if (run.waitSince === null) run.waitSince = now; break; }
         if (run.waitSince !== null) {
           // Ficou esperando os botões de alguém pela rede. O tempo esperado NÃO é "recuperado"
           // rodando vários quadros de uma vez (isso dava trancos na imagem e buracos no som):
@@ -167,7 +257,8 @@ function tick() {
           run.win.waited += waited; run.win.events++;
           run.waitSince = null;
         }
-        run.s.runFrame(row);
+        if (run.rb) spec = stepNet(use, full);
+        else run.s.runFrame(row);
         run.book.delete(run.frames - 600);
       } else {
         const k = [];
@@ -200,11 +291,8 @@ function tick() {
       // ~3 s) até ficar 1 quadro para trás. Precisa ser suave: o som sai no ritmo do jogo, e com
       // 1,5 ms por quadro (9% mais devagar) a reserva de som esvaziava e o som picotava (convidado).
       if (run.slew > 0) { const d = Math.min(run.slew, 0.1); run.t0 += d; run.slew -= d; }
-      if (run.net && run.frames % HASH_EVERY === 0) {
-        const b = new Uint8Array(13), dv = new DataView(b.buffer);
-        dv.setUint8(0, run.slot); dv.setUint32(1, run.frames, true); dv.setBigUint64(5, run.s.hash(), true);
-        sendNet("X", b);
-      }
+      // conferência de sincronia entre os aparelhos: só de quadros com os botões de verdade de todos
+      if (run.net && !spec && run.frames % HASH_EVERY === 0) sendHash();
     }
   } catch (err) {
     clearInterval(iv); iv = null;
@@ -224,11 +312,14 @@ function tick() {
     // carga do motor: quanto do tempo de 1 quadro (16,7 ms) ele gasta rodando os GBAs (100% = no limite)
     const load = run.busyN ? Math.round(run.busy / run.busyN / (1000 / FPS) * 100) : null;
     postMessage({ t: "status", fps: run.fpsN / ((now - run.fpsT) / 1000), frame: run.frames, waiting,
-                  delay: run.net ? run.delay : null, load, marg: run.marg });
+                  delay: run.net ? run.delay : null, load, marg: run.marg,
+                  rb: run.rb ? { count: run.rb.count, resim: run.rb.resim, limit: predLimit() } : null });
     run.fpsT = now; run.fpsN = 0; run.busy = 0; run.busyN = 0; run.marg = {};
+    if (run.rb) { run.rb.count = 0; run.rb.resim = 0; }
   }
   if (run.net) autoDelay(now);
-  if (now - run.snapT >= SNAP_MS) snapshot();
+  // save para guardar: só sem quadros supostos (um save "do futuro suposto" poderia estar errado)
+  if (now - run.snapT >= SNAP_MS && (!run.rb || run.confirmed === run.frames)) snapshot();
 }
 
 onmessage = async (ev) => {
@@ -241,7 +332,10 @@ onmessage = async (ev) => {
       run = { n: m.n, net: m.net, slot: m.slot, delay: m.delay || 0, s, frames: 0, sent: m.delay || 0,
               waitSince: null, t0: performance.now(), fpsT: performance.now(), fpsN: 0, book: new Map(),
               win: { t: performance.now(), waited: 0, events: 0 }, calmT: performance.now(), minDelay: Math.min(2, m.delay || 2),
-              busy: 0, busyN: 0, marg: {}, pm: { n: 0, late: 0, tight: 0, min: 99, by: {} }, mw: {}, slew: 0, startT: performance.now() };
+              busy: 0, busyN: 0, marg: {}, pm: { n: 0, late: 0, tight: 0, min: 99, by: {} }, mw: {}, slew: 0, startT: performance.now(),
+              // rollback: quadros antes de 'confirmed' já rodaram com os botões de verdade de todos
+              confirmed: 0, used: new Map(), lastKnown: [], costAvg: 0,
+              rb: m.net && s.canSnapshot && !NO_RB ? { snaps: new Map(), spare: [], count: 0, resim: 0 } : null };
       run.snapT = performance.now();
       try { run.snapSig = sigOf(grabSaves()); } catch (e) { run.snapSig = null; }
       if (run.net) for (let f = 0; f < run.delay; f++) run.book.set(f, new Array(run.n).fill(0));

@@ -12,22 +12,44 @@ Como recompilar
      git clone https://github.com/mgba-emu/mgba.git && git -C mgba checkout 9660a668f
      https://github.com/WebAssembly/wasi-sdk/releases (wasi-sdk-24.0)
 2. Nesta pasta:  WASI=/caminho/wasi-sdk-24.0 MGBA=/caminho/mgba ./compilar.sh
-   O resultado vai para ../../kncore.wasm (raiz do site).
+   O resultado vai para ../../kncore.wasm (raiz do site). Se algum arquivo nao
+   compilar, o script para com erro (nao gera motor pela metade).
 
 Diferencas para o motor anterior (testadas antes de publicar)
 - Mesmas funcoes para o site, mais kn_render: cada aparelho desenha so os GBAs
   que mostra (na sala, so o proprio). O jogo continua igual; so a imagem nao e
-  feita. Na sala: 5% (2 jogadores) a 10% (4 jogadores) mais leve.
+  feita. Na sala: ~5% (2 jogadores) a ~10% (4 jogadores) mais leve.
 - Sem relogio de cartucho (RTC): no motor anterior a hora vinha de memoria nao
   preenchida e era sempre invalida (Pokemon Quetzal: "eventos baseados no relogio
   nao ocorrerao mais"). Sem relogio o jogo fica no mesmo modo, sem depender disso.
+  A escolha e feita antes do reset (mesma regra do mGBA, sem o relogio), para o
+  mGBA nao copiar a ROM inteira por causa dos pinos do relogio.
 - Cabo link: o contador de tempo passa do limite de 32 bits a cada ~2 min 8 s
   (quadro 7645). sio/lockstep.c, core/timing.c e gba/sio.c sao compilados com
   -fwrapv para isso nao travar a partida (testado ate 33.000 quadros, 2 e 4 GBAs).
+- Seguranca: se um quadro passar de 100.000 rodadas (normal: poucos milhares), o
+  motor devolve erro em vez de congelar a pagina.
 
-Testes feitos (motor anterior x este, mesmos botoes)
-- 1 GBA: Kirby Nightmare, Kirby Amazing Mirror, Minish Cap e Pokemon Quetzal com
-  imagem, som e save identicos quadro a quadro.
-- Com cabo (2 e 4 GBAs): mesma memoria de jogo e mesmos saves; cada GBA anda
-  exatamente 1 quadro por chamada.
-- Sala de verdade com dois navegadores (Quetzal, Coop): 60 fps, sem dessincronizar.
+Rollback (sala pela internet)
+- A fotografia da partida e feita pelo kncore.js (snapshot/restore): a memoria
+  inteira do motor menos as ROMs (kn_rom_ptr/kn_rom_len). E exata por definicao.
+  Nao usamos o salvamento de estado do mGBA: ele nao guarda varias coisas do cabo
+  link (fila de eventos, linhas SI/SD, dado a enviar), do som e do save, e voltar
+  no tempo com ele separava os aparelhos.
+- Memoria inicial de 4 MB (antes 32 MB, quase toda vazia) e 1 MB de folga livre
+  criada no inicio: a fotografia fica com 2-6 MB (~0,3-0,8 ms) e a memoria do motor
+  nao cresce no meio de um quadro (crescer num quadro desfeito deixaria sobra).
+- Quem decide quando supor e voltar e o engine-worker.js (veja os comentarios la).
+
+Testes feitos
+- Motor anterior x este, mesmos botoes, 1 GBA: Kirby Nightmare, Kirby Amazing
+  Mirror, Minish Cap e Pokemon Quetzal com imagem, som e save identicos quadro a
+  quadro. Com cabo (2 e 4 GBAs): mesmos saves e mesma memoria de jogo.
+- Rollback: partida em linha reta x a mesma com ~1.300-2.000 voltas no tempo
+  (botoes errados de proposito e depois os certos): memoria inteira do motor,
+  imagem e save identicos, em todos esses jogos com 1, 2 e 4 GBAs (inclui o Coop
+  do Quetzal).
+- Sala de verdade com dois navegadores e internet ruim simulada (60-180 ms):
+  sem rollback 50 fps de media e quedas a 27 fps; com rollback 59,7 fps, sem
+  travadas, atraso dos botoes ~5 quadros (antes ~8-10). Internet boa: igual.
+  CPU 6x mais lenta: com rollback 52 fps (min 42), sem rollback 46 fps (min 24).

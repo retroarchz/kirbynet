@@ -386,6 +386,8 @@ function showStatus(st) {
       return x;
     }).join(" | ");
   }
+  // rollback: quantas vezes no último segundo o jogo voltou para corrigir botões que chegaram atrasados
+  if (st.rb && st.rb.count) t += ` · ↺ ${st.rb.count}`;
   if (st.waiting && st.waiting.length) t = `⏳ esperando os botões de ${st.waiting.map(i => "P" + (i + 1)).join(", ")}… · ` + t;
   const at = Play.run && Play.run.savedAt;
   if (at) t += ` · 💾 salvo às ${at.toLocaleTimeString("pt-BR")}`;
