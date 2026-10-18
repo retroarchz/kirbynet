@@ -107,7 +107,7 @@ function openControls() { $("ctl").classList.remove("hidden"); renderControls();
 function renderControls() {
   const tabs = $("ctl-tabs");
   tabs.innerHTML = "";
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < SYS.maxP; i++) {
     const b = document.createElement("button");
     b.textContent = `Jogador ${i + 1}` + (i === 0 ? " / rede" : "");
     b.style.setProperty("--c", COLORS[i]);
@@ -125,6 +125,7 @@ function renderControls() {
   const pad = prof.pad >= 0 ? pads[prof.pad] : null;
   $("pad-info").textContent = prof.pad < 0 ? "" : pad ? `✔ ${pad.id.slice(0, 48)}` :
     "Controle não detectado — aperte qualquer botão nele.";
+  renderTouchMap();
   const map = $("ctl-map");
   map.innerHTML = "";
   for (const name of BUTTONS) {
@@ -143,6 +144,29 @@ function renderControls() {
     map.appendChild(row);
   }
 }
+// Botões da tela (celular): uma lista para cada um, porque no toque não há tecla para "apertar"
+function renderTouchMap() {
+  const box = $("ctl-touch"), touch = Touch.isTouch || Touch.shown;
+  box.classList.toggle("hidden", ctlTab !== 0 || !touch);   // os botões da tela são do Jogador 1
+  if (box.classList.contains("hidden")) return;
+  const label = (k) => k === "AB" ? "A+B" : k;
+  const opts = [...BUTTONS, ...(SYS.oneScreen ? [] : ["AB"])];
+  const map = $("ctl-touch-map");
+  map.innerHTML = "";
+  for (const k of TouchMap.keys()) {
+    const row = document.createElement("label");
+    row.className = "tmap";
+    const sel = document.createElement("select");
+    sel.innerHTML = opts.map(o => `<option value="${o}">${label(o)}</option>`).join("");
+    sel.value = TouchMap.map[k] || k;
+    sel.onchange = () => TouchMap.set(k, sel.value);
+    const b = document.createElement("b");
+    b.textContent = `Botão ${label(k)} da tela faz`;
+    row.append(b, sel);
+    map.appendChild(row);
+  }
+}
+$("ctl-touch-reset").onclick = () => { TouchMap.reset(); renderTouchMap(); };
 function startCapture(name, kind) {
   capture = { name, kind };
   padSnapshot = null;

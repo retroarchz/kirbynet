@@ -18,7 +18,7 @@ const SYSTEMS = {
     ],
     pad: { A: "b1", B: "b0", L: "b4", R: "b5", Select: "b8", Start: "b9",
       Cima: "b12", Baixo: "b13", Esquerda: "b14", Direita: "b15" },
-    profiles: "kirbynet.profiles", romSlot: "last",
+    profiles: "kirbynet.profiles", touchMap: "kirbynet.touchmap", romSlot: "last",
   },
   snes: {
     id: "snes", name: "SNES", W: 256, H: 224, fps: 60.0988,
@@ -37,7 +37,7 @@ const SYSTEMS = {
     // controle padrão (Xbox/PS): baixo = B, direita = A, esquerda = Y, cima = X — igual ao SNES
     pad: { A: "b1", B: "b0", X: "b3", Y: "b2", L: "b4", R: "b5", Select: "b8", Start: "b9",
       Cima: "b12", Baixo: "b13", Esquerda: "b14", Direita: "b15" },
-    profiles: "kirbynet.snes.profiles", romSlot: "last-snes",
+    profiles: "kirbynet.snes.profiles", touchMap: "kirbynet.snes.touchmap", romSlot: "last-snes",
   },
 };
 const SYS = SYSTEMS[(() => { try { return localStorage.getItem("kirbynet.sys"); } catch (e) { return null; } })()] || SYSTEMS.gba;

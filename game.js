@@ -342,8 +342,25 @@ function touchKeysAt(x, y) {
   const b = el.closest && el.closest("[data-k]");
   return b ? keyBits(b.dataset.k) : 0;
 }
+// Cada botão da tela pode mandar outro botão do videogame (ex.: o X da tela vira L), escolhido
+// em Controles. Fica lembrado neste navegador, separado para GBA e SNES.
+const TouchMap = {
+  map: (() => { try { return JSON.parse(localStorage.getItem(SYS.touchMap)) || {}; } catch (e) { return {}; } })(),
+  // botões da tela deste videogame (data-k), na ordem da página
+  keys() { return [...document.querySelectorAll("#touch [data-k]")].map(b => b.dataset.k).filter(k => k === "AB" ? !SYS.oneScreen : BUTTONS.includes(k)); },
+  set(k, to) {
+    if (!to || to === k) delete this.map[k]; else this.map[k] = to;
+    try { localStorage.setItem(SYS.touchMap, JSON.stringify(this.map)); } catch (e) {}
+    touchLabels();
+  },
+  reset() { this.map = {}; try { localStorage.removeItem(SYS.touchMap); } catch (e) {} touchLabels(); },
+};
 // "AB" = os dois botões juntos (atalho dos emuladores)
-function keyBits(k) { return k === "AB" ? BIT.A | BIT.B : (BIT[k] || 0); }
+function keyBits(k) { const t = TouchMap.map[k] || k; return t === "AB" ? BIT.A | BIT.B : (BIT[t] || 0); }
+// o botão da tela mostra o que ele faz (X trocado para L aparece como "L")
+function touchLabels() {
+  document.querySelectorAll("#touch .round[data-k], #touch .sh[data-k]").forEach(b => { b.textContent = TouchMap.map[b.dataset.k] || b.dataset.k; });
+}
 function toggleMenu(open) {
   document.body.classList.toggle("menuopen", open == null ? !document.body.classList.contains("menuopen") : open);
 }
@@ -380,6 +397,7 @@ function touchInit() {
   document.querySelector("#game .gamebar").addEventListener("click", (e) => { if (e.target.closest("button")) setTimeout(() => toggleMenu(false), 0); });
   $("stage").addEventListener("pointerdown", () => toggleMenu(false));
   try { const v = localStorage.getItem("kirbynet.touch"); Touch.shown = v === null ? Touch.isTouch : v === "on"; } catch (e) { Touch.shown = Touch.isTouch; }
+  touchLabels();
   applyTouch();
 }
 function applyTouch() {
