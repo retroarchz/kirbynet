@@ -242,6 +242,8 @@ button.cheat-q { right: max(4px, env(safe-area-inset-right)); bottom: max(4px, e
 .cheat { background: #18183a; border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; margin: 8px 0; }
 .cheat .row { margin: 4px 0; }
 .cheat .cheat-name { flex: 1; min-width: 0; }
+.cheat-preset { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.cheat-preset input { min-width: 0; width: 18px; height: 18px; }
 .cheat textarea { width: 100%; min-height: 64px; resize: vertical; background: #12122a; color: var(--text);
   border: 1px solid #44446c; border-radius: 9px; padding: 8px 10px; font: 14px/1.4 Consolas, monospace; }
 

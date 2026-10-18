@@ -701,6 +701,9 @@ function startRun(opts) {
   Cheats.game = romGameCode(opts.rom);
   run.cheatList = Cheats.usable(run) ? Cheats.load() : [];   // os códigos deste jogo, ligados na partida
   const cheats = Cheats.codes(run.cheatList);
+  // prontos que mudam o save (ex.: Collection Room): entram já no save e ele é guardado na hora
+  const patched = Cheats.usable(run) ? CheatPresets.apply(opts.saves) : null;
+  if (patched) { run.saves = opts.saves = patched; persistSaves(run, patched, false); toast("❓ Pronto! Já está no seu save."); }
   worker.postMessage({ t: "start", module: Play.mod, n: run.n, rom: roms, saves: opts.saves,
                        net: !!run.net && !run.free, free: !!run.free, me: run.slot | 0, slot: run.free ? 0 : run.slot,
                        delay: run.delay || 0, cheats: cheats.length ? cheats : null }, [roms.buffer]);
@@ -895,6 +898,72 @@ const Cheats = {
   // o que vai para o motor: só os ligados e com algo escrito
   codes(list) { return list.filter(c => c.on && c.code.trim()).map(c => c.code); },
 };
+// Prontos para usar, por jogo: é só ligar. Mudam o SAVE ao abrir o jogo, porque há coisas que o jogo
+// só lê do save (a Collection Room do Amazing Mirror): com código comum elas só aparecem depois que o
+// jogo grava sozinho. O save mudado é guardado na hora, então fica valendo também na sala.
+const CHEAT_PRESETS = {
+  B8KE: [{ id: "colecao", name: "Collection Room completa (tintas, músicas, mapas e vidas)", patch: amCollectionRoom }],
+};
+// Kirby & The Amazing Mirror (USA): cada arquivo tem 2 cópias no save. Em cada cópia, 3 somas de
+// conferência (+0x18: soma, ~soma, -soma das palavras de 16 bits) e a coleção em 9 palavras (+0x30E),
+// as mesmas que o código CodeBreaker "42038970 FFFF / 00000009 0002" liga. Testado: o jogo aceita o save
+// e mostra a Collection Room cheia, igual a quando ele mesmo grava com o código ligado.
+// Devolve quantas cópias mudaram (0 = já estava tudo liberado ou não é save desse jogo).
+function amCollectionRoom(save) {
+  const dv = new DataView(save.buffer, save.byteOffset, save.byteLength);
+  let changed = 0;
+  for (let base = 0; base + 0x320 <= save.length; base += 4) {
+    const c1 = dv.getUint16(base + 0x18, true);
+    if (dv.getUint16(base + 0x1A, true) !== (~c1 & 0xFFFF) || dv.getUint16(base + 0x1C, true) !== (-c1 & 0xFFFF)) continue;
+    let delta = 0;
+    for (let i = 0; i < 9; i++) {
+      const at = base + 0x30E + 2 * i;
+      delta += 0xFFFF - dv.getUint16(at, true);
+      dv.setUint16(at, 0xFFFF, true);
+    }
+    if (!delta) continue;
+    const s = (c1 + delta) & 0xFFFF;
+    dv.setUint16(base + 0x18, s, true); dv.setUint16(base + 0x1A, ~s & 0xFFFF, true); dv.setUint16(base + 0x1C, -s & 0xFFFF, true);
+    changed++;
+  }
+  return changed;
+}
+const CheatPresets = {
+  key() { return "kirbynet.cheatp." + Cheats.game; },
+  list() { return CHEAT_PRESETS[Cheats.game] || []; },
+  on() { try { return JSON.parse(localStorage.getItem(this.key())) || {}; } catch (e) { return {}; } },
+  set(id, v) { const o = this.on(); o[id] = v; try { localStorage.setItem(this.key(), JSON.stringify(o)); } catch (e) {} },
+  // ao abrir o jogo: aplica os ligados nos saves (cópias). Devolve os saves novos ou null se nada mudou.
+  apply(saves) {
+    const on = this.on();
+    let changed = 0;
+    const out = saves.map(s => {
+      if (!s || !s.length) return s;
+      const c = s.slice();
+      for (const p of this.list()) if (on[p.id]) changed += p.patch(c);
+      return c;
+    });
+    return changed ? out : null;
+  },
+};
+function cheatPresetsRender() {
+  const box = $("cheats-presets"), list = CheatPresets.list(), on = CheatPresets.on();
+  box.classList.toggle("hidden", !list.length);
+  box.innerHTML = list.length ? `<p><b>Prontos para este jogo</b></p>` : "";
+  for (const p of list) {
+    const el = document.createElement("label");
+    el.className = "check cheat-preset";
+    el.innerHTML = `<input type="checkbox"> <span></span>`;
+    el.querySelector("span").textContent = p.name;
+    const cb = el.querySelector("input");
+    cb.checked = !!on[p.id];
+    cb.onchange = () => {
+      CheatPresets.set(p.id, cb.checked);
+      $("cheats-msg").textContent = cb.checked ? "Toque em Sair e abra o jogo de novo para valer." : "";
+    };
+    box.appendChild(el);
+  }
+}
 function romGameCode(rom) {
   const id = String.fromCharCode(...rom.subarray(0xAC, 0xB0)).replace(/[^0-9A-Za-z]/g, "");
   return id || "rom";
@@ -928,6 +997,7 @@ function openCheats() {
   $("cheats-game").textContent = ` (${Cheats.game})`;
   $("cheats-msg").textContent = "";
   cheatsRender(Cheats.load());
+  cheatPresetsRender();
   $("cheats").classList.remove("hidden");
   sendKeys(run);   // com a janela aberta, o jogo não recebe botões (digitar não aperta nada)
 }
