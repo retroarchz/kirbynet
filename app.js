@@ -391,7 +391,11 @@ function showStatus(st) {
   if (Play.run && Play.run.free) t += " · 🌍 " + ghostSummary(Play.run);   // onde estão os outros
   // rollback: quantas vezes no último segundo o jogo voltou para corrigir botões que chegaram atrasados
   if (st.rb && st.rb.count) t += ` · ↺ ${st.rb.count}`;
-  if (st.waiting && st.waiting.length) t = `⏳ esperando os botões de ${st.waiting.map(i => "P" + (i + 1)).join(", ")}… · ` + t;
+  if (st.waiting && st.waiting.length) {
+    // a partir de 5 s mostra o tempo: aos 30 s a partida para com aviso (WAIT_MAX_MS)
+    const s = Math.floor((st.waitMs || 0) / 1000);
+    t = `⏳ esperando os botões de ${st.waiting.map(i => "P" + (i + 1)).join(", ")}…${s >= 5 ? ` há ${s} s (para aos 30 s)` : ""} · ` + t;
+  }
   const at = Play.run && Play.run.savedAt;
   if (at) t += ` · 💾 salvo às ${at.toLocaleTimeString("pt-BR")}`;
   if (typeof Cloud !== "undefined" && Cloud.lastUp && GUEST) t += ` · ☁ na nuvem às ${Cloud.lastUp.toLocaleTimeString("pt-BR")}`;

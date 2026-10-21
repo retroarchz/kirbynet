@@ -347,14 +347,15 @@ function tick() {
     run.fpsN += ran;
   }
   if (now - run.fpsT >= 1000) {
-    let waiting = [];
+    let waiting = [], waitMs = 0;
     if (run.net && run.waitSince !== null && now - run.waitSince > 500) {
       const row = run.book.get(run.frames) || [];
       waiting = [...Array(run.n).keys()].filter(i => row[i] == null);
+      waitMs = now - run.waitSince;   // há quanto tempo o jogo está parado esperando (a página encerra aos 30 s)
     }
     // carga do motor: quanto do tempo de 1 quadro (16,7 ms) ele gasta rodando os GBAs (100% = no limite)
     const load = run.busyN ? Math.round(run.busy / run.busyN / (1000 / FPS) * 100) : null;
-    postMessage({ t: "status", fps: run.fpsN / ((now - run.fpsT) / 1000), frame: run.frames, waiting,
+    postMessage({ t: "status", fps: run.fpsN / ((now - run.fpsT) / 1000), frame: run.frames, waiting, waitMs,
                   delay: run.net ? run.delay : null, load, marg: run.marg,
                   rb: run.rb ? { count: run.rb.count, resim: run.rb.resim, limit: predLimit() } : null });
     run.fpsT = now; run.fpsN = 0; run.busy = 0; run.busyN = 0; run.marg = {};

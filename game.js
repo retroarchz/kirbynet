@@ -1047,6 +1047,7 @@ $("cheats-add").onclick = () => {
   t[t.length - 1].focus();
 };
 $("cheats").addEventListener("click", (e) => { if (e.target === $("cheats")) closeCheats(); });   // tocou fora da janela
+const WAIT_MAX_MS = 30000;   // esperando os botões de alguém há mais que isso: a partida para com aviso
 function onWorker(run, m) {
   if (m.t === "frames") {
     if (Play.run !== run) { for (const fr of m.list) recycle(run, fr); return; }
@@ -1071,6 +1072,16 @@ function onWorker(run, m) {
     run.pageBusy = 0; run.pageT = now;
     if (run.net && run.net.status) run.net.status(m);
     if (Play.run === run) showStatus(m);
+    // alguém caiu (internet, celular bloqueado, navegador fechado) sem a conexão fechar: em vez de ficar
+    // esperando para sempre, a partida para com aviso aos 30 s (o save de cada um já está guardado).
+    // Quem criou a sala pelo site decide e avisa todos com o nome certo; os outros só param sozinhos
+    // 5 s depois (se quem caiu foi o próprio host), senão o primeiro a sair viraria o "culpado" na sala.
+    const host = typeof SiteRoom !== "undefined" && SiteRoom.on && SiteRoom.running;
+    if (Play.run === run && run.net && m.waiting.length && m.waitMs >= WAIT_MAX_MS + (host ? 0 : 5000)) {
+      const who = m.waiting.map(i => `P${i + 1}` + (run.names && run.names[i] ? ` (${run.names[i]})` : "")).join(", ");
+      const msg = `${who} parou de responder há mais de 30 s (caiu a internet ou fechou o jogo). A partida parou.`;
+      if (host) SiteRoom.end(msg); else onWorker(run, { t: "err", msg });
+    }
   }
   else if (m.t === "err") {
     if (Play.run !== run) return;
