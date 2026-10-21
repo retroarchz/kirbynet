@@ -110,7 +110,9 @@ function stepNet(use, full) {
   const dt = performance.now() - t;
   run.costAvg = run.costAvg ? run.costAvg * 0.97 + dt * 0.03 : dt;
   if (speculative) run.used.set(f, use.slice());
-  else { run.used.delete(f); run.confirmed = f + 1; }
+  // confirmado: a fotografia dele não serve mais (sem isso, cada volta no tempo deixava ~6 MB presos
+  // e a memória do navegador acabava em poucos minutos: "a página parou de funcionar")
+  else { run.used.delete(f); dropSnap(f); run.confirmed = f + 1; }
   return speculative;
 }
 function sendHash() {
@@ -356,7 +358,13 @@ function tick() {
                   delay: run.net ? run.delay : null, load, marg: run.marg,
                   rb: run.rb ? { count: run.rb.count, resim: run.rb.resim, limit: predLimit() } : null });
     run.fpsT = now; run.fpsN = 0; run.busy = 0; run.busyN = 0; run.marg = {};
-    if (run.rb) { run.rb.count = 0; run.rb.resim = 0; }
+    if (run.rb) {
+      run.rb.count = 0; run.rb.resim = 0;
+      // segurança: fotografia de quadro já confirmado nunca mais é usada; e as de sobra (para reusar) não
+      // passam do máximo de quadros supostos
+      for (const f of run.rb.snaps.keys()) if (f < run.confirmed) dropSnap(f);
+      run.rb.spare.length = Math.min(run.rb.spare.length, RB_MAX + 1);
+    }
   }
   if (run.net) autoDelay(now);
   // save para guardar: só sem quadros supostos (um save "do futuro suposto" poderia estar errado)
