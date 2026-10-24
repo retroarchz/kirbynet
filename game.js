@@ -704,6 +704,8 @@ function startRun(opts) {
   // prontos que mudam o save (ex.: Collection Room): entram já no save e ele é guardado na hora
   const patched = Cheats.usable(run) ? CheatPresets.apply(opts.saves) : null;
   if (patched) { run.saves = opts.saves = patched; persistSaves(run, patched, false); toast("❓ Pronto! Já está no seu save."); }
+  // prontos que mudam a ROM (ex.: Meta Knight): só na cópia desta partida, sozinho ou "Mesmo PC"
+  if (Cheats.usable(run)) CheatPresets.applyRom(roms);
   worker.postMessage({ t: "start", module: Play.mod, n: run.n, rom: roms, saves: opts.saves,
                        net: !!run.net && !run.free, free: !!run.free, me: run.slot | 0, slot: run.free ? 0 : run.slot,
                        delay: run.delay || 0, cheats: cheats.length ? cheats : null }, [roms.buffer]);
@@ -901,9 +903,34 @@ const Cheats = {
 // Prontos para usar, por jogo: é só ligar. Mudam o SAVE ao abrir o jogo, porque há coisas que o jogo
 // só lê do save (a Collection Room do Amazing Mirror): com código comum elas só aparecem depois que o
 // jogo grava sozinho. O save mudado é guardado na hora, então fica valendo também na sala.
+// Prontos com "rom" mudam a ROM (a cópia que vai para o motor) ao abrir o jogo, como um hack de ROM.
 const CHEAT_PRESETS = {
-  B8KE: [{ id: "colecao", name: "Collection Room completa (tintas, músicas, mapas e vidas)", patch: amCollectionRoom }],
+  B8KE: [{ id: "colecao", name: "Collection Room completa (tintas, músicas, mapas e vidas)", patch: amCollectionRoom },
+         { id: "metaknight", name: "Jogar de Meta Knight (a carinha do Kirby na Collection Room)", rom: amMetaKnight }],
 };
+// Kirby & The Amazing Mirror (USA): jogador sem tinta (a carinha do Kirby na Collection Room, que é o
+// padrão) aparece como Meta Knight (animação 0x390 do próprio jogo); com qualquer tinta volta a ser o Kirby.
+// Só muda o desenho: o fim da função que anima e mostra o Kirby (0x0803F77C) desvia para um código novo no
+// espaço livre do fim da ROM (0x08F40000), que esconde o Kirby e mostra no lugar um sprite-sombra (EWRAM
+// 0x0203FF00) com a animação do Meta Knight equivalente (tabela em 0x08F40800, uma por animação do Kirby).
+// Testado: 12.000 quadros com os mesmos botões dão a mesma posição/vida/estado do Kirby que a ROM original.
+// Fonte do código novo: hack-fonte/metaknight (build.py gera estes bytes). Devolve 1 se mudou a ROM.
+const AM_METAKNIGHT = [
+  [0x3F77C, "16f166fc01b038bc9846a146aa46f0bc", "014b1847014b18470100f4080500f408"],
+  [0xF40000, null, "012500e00025a8463c1c103c5620255c3f4909788d4259d23e49485dff2855d13d49b8680843b860a422a2189068084390603a4901204855a0688021c90008425dd128206843364e361838683060388a3082788a7082b88ab082387f3077f87ff077b8682f498843b26840231b021a401043b060d420205ab8280ad82a49095cff2906d0b2688023db005a40b260274801e0b889b97eb289824202d1b27e8a4203d0b081b176ff22f276301c204b00f02ef8002805d1ff22f276301c1d4b00f026f8301c1c4b00f022f818e01b49485d00280dd0002048551949b8688843b860a422a218906888439060ff20f876d0764046002803d0381c124b00f008f801b038bc9846a146aa46f0bc01bc0047184730ad03021cad030200000800a0ff030200ff030200400c000008f4089003000029511508295115084d601508a0ff0302000008004d601508"],
+  [0xF40800, null, "001c001c001c001c001c000201231c09150d0a0b01ff24241c04131313001a1314141414131a13160d1c0013001501010000000016171821000200000015140b00000000000000001a00ffffffffffffffffffffffffffffffffffffffffffffffffffffffffff1916171313ff15ffffffffffffffff0000000016ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"],
+];
+function amMetaKnight(rom) {
+  const hex = (h) => Uint8Array.from(h.match(/../g), (b) => parseInt(b, 16));
+  // confere antes de mudar: o trecho original no lugar do desvio e espaço livre (0xFF) onde entra o código
+  for (const [at, orig, data] of AM_METAKNIGHT) {
+    const want = orig ? hex(orig) : null, n = data.length / 2;
+    if (at + n > rom.length) return 0;
+    for (let i = 0; i < n; i++) if (rom[at + i] !== (want ? want[i] : 0xFF)) return 0;
+  }
+  for (const [at, , data] of AM_METAKNIGHT) rom.set(hex(data), at);
+  return 1;
+}
 // Kirby & The Amazing Mirror (USA): cada arquivo tem 2 cópias no save. Em cada cópia, 3 somas de
 // conferência (+0x18: soma, ~soma, -soma das palavras de 16 bits) e a coleção em 9 palavras (+0x30E),
 // as mesmas que o código CodeBreaker "42038970 FFFF / 00000009 0002" liga. Testado: o jogo aceita o save
@@ -940,10 +967,17 @@ const CheatPresets = {
     const out = saves.map(s => {
       if (!s || !s.length) return s;
       const c = s.slice();
-      for (const p of this.list()) if (on[p.id]) changed += p.patch(c);
+      for (const p of this.list()) if (on[p.id] && p.patch) changed += p.patch(c);
       return c;
     });
     return changed ? out : null;
+  },
+  // ao abrir o jogo: aplica os ligados que mudam a ROM (na cópia que vai para o motor)
+  applyRom(rom) {
+    const on = this.on();
+    let changed = 0;
+    for (const p of this.list()) if (on[p.id] && p.rom) changed += p.rom(rom);
+    return changed;
   },
 };
 function cheatPresetsRender() {

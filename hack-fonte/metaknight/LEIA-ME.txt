@@ -1,0 +1,30 @@
+Hack "Jogar de Meta Knight" - Kirby & The Amazing Mirror (USA, codigo B8KE)
+=========================================================================
+
+O que faz
+- Jogador humano sem tinta (na Collection Room, a carinha do Kirby, que e o padrao) aparece como
+  Meta Knight. Com qualquer tinta (inclusive a rosa) volta a ser o Kirby. Os ajudantes do computador
+  continuam Kirby.
+- So muda o DESENHO. O Kirby continua rodando por baixo, com a logica, os golpes e as habilidades dele.
+- Os desenhos sao do proprio Amazing Mirror (animacao 0x390, o Meta Knight da historia), nao do
+  Nightmare in Dream Land: la o formato dos sprites e outro.
+
+Como funciona (enderecos da decompilacao github.com/jiangzhengwenjz/katam, mesma ROM, sha1 274b102b...)
+- 0x0803F77C: fim de sub_0803F46C (anima e mostra o Kirby). O "bl DisplaySprite" e o epilogo viram
+  dois desvios (mostrar / nao mostrar) para o codigo novo em 0x08F40000 (espaco livre, 0xFF).
+- O codigo novo marca o sprite do Kirby e o do chapeu com o bit 0x80000 (o jogo nao copia os desenhos
+  deles para a VRAM nem os mostra) e anima/mostra um sprite-sombra por jogador em 0x0203FF00 (EWRAM
+  depois de ewram_end, sempre zerada) com a animacao do Meta Knight escolhida pela tabela em 0x08F40800
+  (animationIndex do Kirby -> variante da 0x390; 0xFF = mostra a animacao do proprio Kirby).
+- O Meta Knight e desenhado virado para o outro lado (o bit 0x400 e invertido so nele).
+
+Gerar os bytes
+  python build.py "Kirby & The Amazing Mirror (USA).gba" saida.gba patch.json
+  (patch.json tem os 3 trechos que estao em AM_METAKNIGHT no game.js)
+
+Testado (motor do site, no Node)
+- Mesma sequencia de 12.000 quadros de botoes na ROM original e na com o hack: posicao, vida, estado,
+  habilidade e sala do Kirby iguais o tempo todo; sem travar.
+- Fotos: parado, andando para os dois lados, correndo, pulando, flutuando, agachado, aspirando; trocando
+  a tinta pela memoria o Kirby volta e, sem tinta, vira Meta Knight de novo.
+- Nao testado ainda: ataques de cada habilidade (posicoes 52-54 e 103-105 viram cortes de espada).
