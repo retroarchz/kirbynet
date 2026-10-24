@@ -40,7 +40,11 @@ SWOFF = 0x0203FFA4         # 4 bytes: 1 = espada guardada
 PREVAB = 0x0203FFA8        # 4 bytes: habilidade no quadro anterior
 GUARD = 0x0203FFAC         # 4 bytes: 1 = defendendo (o hack ligou o bit 0x8000 das flags: sem dano)
 PARRYCD = 0x0203FFB0       # 4 bytes: quadros até poder tocar o "parry" de novo
+HUDSAVED = 0x0203FFB4      # 1 = HUDBAK tem o ícone/cores originais do HUD (o hack trocou)
+HUDBAK = 0x0203FD00        # 96 bytes dos blocos do ícone + 12 bytes das cores 1..6 da paleta 15 do BG
 SONG_START = 0x0815011C    # m4aSongNumStart(num)
+MASTER_FLAG = 0x0203AD34   # gUnk_0203AD34: 1 = a Master de verdade está liberada (luta final)
+KIRBY_PAL = 0x0803E558     # sub_0803E558(jogador): recarrega a paleta da cor do Kirby
 SE_DMK_PARRY = 0x1A6
 SITE6 = 0x080365A0         # "flags & 0x8000 -> não aplica dano" (r4 = flags, r5 = kirby)
 ANIM_STEP = 0x08155128     # sub_08155128(struct Sprite *) -> 0 quando a animação acabou
@@ -167,7 +171,14 @@ def hook():
     a.ldr_lit('r2', PREVAB); a.ldrb_r('r2', 'r2', 'r5')               # habilidade no quadro anterior
     a.cmpi('r3', 0); a.bc('eq', 'nosel')
     a.cmpi('r2', SWORD); a.bc('ne', 'selnotsw')
-    a.cmpi('r1', 0); a.bc('ne', 'nosel')                               # o jogo não soltou (no meio de um golpe)
+    a.cmpi('r1', 0); a.bc('eq', 'guardou')                             # o jogo soltou
+    a.cmpi('r1', SWORD); a.bc('ne', 'nosel')
+    a.mov('r0', 0xD4); a.ldrh_r('r0', 'r4', 'r0'); a.cmpi('r0', 25); a.bc('hi', 'nosel')   # no meio de um golpe: não
+    a.mov('r0', 0); a.ldr_lit('r1', 0x103); a.strb_r('r0', 'r4', 'r1')   # o jogo não solta a Master: tira aqui
+    a.movh('r0', 'r4'); a.ldr_lit('r3', SET_ANIMS | 1); a.bl('callr3')
+    a.movh('r0', 'r4'); a.ldr_lit('r3', SET_PAL | 1); a.bl('callr3')
+    a.mov('r1', 0)
+    a.label('guardou')
     a.mov('r0', 1); a.strb_i('r0', 'r6', 0); a.b('nosel')             # guardou
     a.label('selnotsw')
     a.cmpi('r2', 0); a.bc('ne', 'nosel')                               # outra habilidade: o jogo solta ela
@@ -210,6 +221,12 @@ def hook():
     a.ldr_lit('r0', LOCAL); a.ldrb_i('r0', 'r0', 0); a.alu('cmp', 'r0', 'r5'); a.bc('ne', 'nopal')
     a.ldr_lit('r0', HUDMAP); a.ldrh_i('r0', 'r0', 0); a.ldr_lit('r1', 0xF18F); a.alu('cmp', 'r0', 'r1')
     a.bc('ne', 'nopal')
+    a.ldr_lit('r2', HUDSAVED); a.ldrb_i('r0', 'r2', 0); a.cmpi('r0', 0); a.bc('ne', 'hudcopy')
+    a.mov('r0', 1); a.strb_i('r0', 'r2', 0)                                      # guarda o original uma vez
+    copyh(a, HUDBAK, HUDTILE, 32)
+    copyh(a, HUDBAK + 64, HUDTILE2, 16)
+    copyh(a, HUDBAK + 96, BGPAL + 0xF1 * 2, 6)
+    a.label('hudcopy')
     copyh(a, HUDTILE, ICON, 32)
     copyh(a, HUDTILE2, ICON + 64, 16)
     copyh(a, BGPAL + 0xF1 * 2, HUDPAL, 6)
@@ -292,6 +309,16 @@ def hook():
     a.pool()
     # --- Kirby normal ---
     a.label('notmk')
+    # Kirby (não Meta Knight) com a Master fora da luta final: foi o hack que deu (ex.: salvou como Meta Knight
+    # e abriu de novo sem a tinta). Tira a espada e volta a ser o Kirby normal.
+    a.ldr_lit('r0', 0x103); a.ldrb_r('r0', 'r4', 'r0'); a.cmpi('r0', SWORD); a.bc('ne', 'nomaster')
+    a.ldr_lit('r0', MASTER_FLAG); a.ldrb_i('r0', 'r0', 0); a.cmpi('r0', 0); a.bc('ne', 'nomaster')
+    a.mov('r0', 0xD4); a.ldrh_r('r0', 'r4', 'r0'); a.cmpi('r0', 25); a.bc('hi', 'nomaster')
+    a.mov('r0', 0); a.ldr_lit('r1', 0x103); a.strb_r('r0', 'r4', 'r1')
+    a.movh('r0', 'r4'); a.ldr_lit('r3', SET_ANIMS | 1); a.bl('callr3')
+    a.movh('r0', 'r4'); a.ldr_lit('r3', SET_PAL | 1); a.bl('callr3')
+    a.movh('r0', 'r5'); a.ldr_lit('r3', KIRBY_PAL | 1); a.bl('callr3')
+    a.label('nomaster')
     a.ldr_lit('r1', MARK); a.ldrb_r('r0', 'r1', 'r5'); a.cmpi('r0', 0); a.bc('eq', 'show')
     a.mov('r0', 0); a.strb_r('r0', 'r1', 'r5')
     a.ldr_lit('r1', 0x80000)
@@ -299,6 +326,16 @@ def hook():
     a.mov('r2', 0xA4); a.add_r('r2', 'r4', 'r2')
     a.ldr_i('r0', 'r2', 8); a.alu('bic', 'r0', 'r1'); a.str_i('r0', 'r2', 8)
     a.mov('r0', 0xFF); a.strb_i('r0', 'r7', 0x1B); a.strb_i('r0', 'r2', 0x1B)     # recarrega os desenhos
+    # devolve o ícone e as cores do HUD (se este aparelho é o desse jogador)
+    a.ldr_lit('r0', LOCAL); a.ldrb_i('r0', 'r0', 0); a.alu('cmp', 'r0', 'r5'); a.bc('ne', 'show')
+    a.ldr_lit('r2', HUDSAVED); a.ldrb_i('r0', 'r2', 0); a.cmpi('r0', 0); a.bc('eq', 'show')
+    a.mov('r0', 0); a.strb_i('r0', 'r2', 0)
+    a.ldr_lit('r0', HUDMAP); a.ldrh_i('r0', 'r0', 0); a.ldr_lit('r1', 0xF18F); a.alu('cmp', 'r0', 'r1')
+    a.bc('ne', 'show')
+    copyh(a, HUDTILE, HUDBAK, 32)
+    copyh(a, HUDTILE2, HUDBAK + 64, 16)
+    copyh(a, BGPAL + 0xF1 * 2, HUDBAK + 96, 6)
+    a.ldr_lit('r0', MAINFLAGS); a.ldr_i('r1', 'r0', 0); a.mov('r2', 1); a.alu('orr', 'r1', 'r2'); a.str_i('r1', 'r0', 0)
     a.label('show')
     a.movh('r0', 'r8'); a.cmpi('r0', 0); a.bc('eq', 'out')
     a.movh('r0', 'r7'); a.ldr_lit('r3', DISPLAY | 1); a.bl('callr3')

@@ -26,6 +26,11 @@ Como funciona (enderecos da decompilacao github.com/jiangzhengwenjz/katam, mesma
   do Meta Knight (o padrao e "parado"), entao o desenho do Kirby nunca aparece; golpes de outras
   habilidades viram cortes e os efeitos delas (fogo, martelo, raio...) sao objetos a parte e continuam. A espada usa a VRAM logo depois
   dos blocos do corpo daquela variante (tabela BODYT; corpo+espada <= 64 blocos = a area do jogador).
+- SELECT com a espada: o jogo nem sempre solta a Master; quando nao solta, o hack tira (ability = 0 +
+  sub_0806F260 / sub_0806EFF8). Kirby que nao e Meta Knight com a Master fora da luta final
+  (gUnk_0203AD34 = 0, a marca que so o pedestal da Master liga) perde a espada: acontece ao abrir o jogo
+  sem a tinta depois de salvar como Meta Knight. O icone/cores do HUD sao guardados em 0x0203FD00 na
+  primeira troca e devolvidos ao sair do Meta Knight.
 - Espada: guardada[jogador] em 0x0203FFA4, habilidade do quadro anterior em 0x0203FFA8. Dar a Sword =
   ability = 18 + sub_0806F260 / sub_0806EFF8 / sub_0806F288 (como o jogo faz).
 - 0x080A9038 (sub_080A9038, solta a estrela da habilidade) desvia para 0x08F41200: Meta Knight com a
