@@ -10,7 +10,8 @@ O que faz
   corte em meia-lua correndo, giro no ar. SELECT (Backspace no site) guarda/saca a espada sem soltar a
   estrela da habilidade; levando dano a espada volta sozinha. Com a espada guardada ele aspira e copia
   habilidades como o Kirby (SELECT solta a habilidade copiada, como no jogo).
-- Flutuar = capa virando asas. Icone de vidas do HUD com o rosto dele (e a barra de vida nas cores dele).
+- Flutuar = capa virando asas (com e sem espada). Icone de vidas do HUD = desenho do usuario
+  (ref/icone_usuario.png) adaptado para 16x16 (e a barra de vida nas cores dele).
 - Collection Room: a previa "CHANGE COLOR" da Sapphire mostra o Meta Knight.
 
 Como funciona (enderecos da decompilacao github.com/jiangzhengwenjz/katam, mesma ROM, sha1 274b102b...)

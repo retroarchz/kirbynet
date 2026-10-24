@@ -93,10 +93,16 @@ MAP_A = table(COMMON + [
     ([39, 122], 0x16),                               # soprando / cuspindo estrela -> corte
     ([52, 104], 0x16), ([53, 105], 0x17), (54, 0x18), (103, 0x19),   # ataques de outras habilidades
 ])
-MAP_S = table(COMMON + [   # golpes da Sword (posições vistas no teste): combo, correndo, no ar
-    (52, 0x16), (53, 0x17), (54, 0x18), (66, 0x16), (103, 0x19),
+# Com a Sword as posições 0..121 vêm de outra tabela do jogo (gUnk_0834C9AC): 26..30 e 39 são "parado" (não
+# aspira), 31/36/43 começam/terminam o voo, e de 103 em diante são golpes da espada.
+MAP_S = table(COMMON + [
+    ([26, 27, 28, 29, 30, 37, 38, 39, 44, 65, 122], 0x0),
+    ([31, 36, 43], 0xF),                       # começa / termina o voo: capa-asas
+    (52, 0x16), (53, 0x17), (54, 0x18), (66, 0x16), (67, 0x17), (68, 0x18), (103, 0x19),
+    (106, 0x16), (107, 0x17), (108, 0x18), (109, 0x15), (110, 0x19),
     (111, 0x6), (112, 0x5),                    # correndo: estocada e corte em meia-lua
     ([104, 105], 0x15),                        # no ar: giro
+    ([113, 114, 121], 0x14), ([115, 116, 117], 0x1B), ([118, 119, 120], 0x16),
 ])
 
 

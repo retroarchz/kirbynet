@@ -1,29 +1,31 @@
-# Rostinho 16x16 do Meta Knight para o ícone de vidas do HUD (BG, paleta 15).
+# Rostinho 16x16 do Meta Knight para o ícone de vidas do HUD (BG, paleta 15), adaptado do desenho do usuário
+# (ref/icone_usuario.png, 22x15 -> 16x16: asas 2 colunas mais estreitas de cada lado, capacete 1 coluna de
+# cada lado). A metade de baixo à direita é a da esquerda espelhada (o mapa do HUD repete esse bloco virado).
 # Cores 1..6 da paleta 15 (as da tinta do Kirby) viram as do Meta Knight no modo Meta Knight; 7..15 são fixas.
 import struct
 from PIL import Image
-MKPAL = {1: 0x7f39, 2: 0x7e31, 3: 0x6d8e, 4: 0x4c1d, 5: 0x7c00, 6: 0x5804}
-C = {'.': 0, 'a': 1, 'b': 2, 'c': 3, 'm': 4, 'u': 5, 'd': 6, 'k': 7, 'w': 8, 'y': 9, 'o': 11}
+MKPAL = {1: 0x6A52, 2: 0x5D6D, 3: 0x557F, 4: 0x2818, 5: 0x7C00, 6: 0x7E2B}   # lilás, lilás escuro, rosa, magenta, azul, azul médio
+C = {'.': 0, 'M': 1, 'D': 2, 'P': 3, 'R': 4, 'B': 5, 'U': 6, 'k': 7, 'w': 8, 'Y': 9, 'L': 10, 'O': 11, 'b': 12,
+     'N': 13, 'G': 13, 'E': 13, 'S': 15}
 ROWS = [
-    "....kkkkkkkk....",
-    "..kkduuuuuudkk..",
-    ".kyykduuuudkyyk.",
-    "kywyykdaaadkywyk",
-    "kyyyokaaaaakoyyk",
-    ".kkkkbaaaaabkkk.",
-    "...kbaaaaaaabk..",
-    "...kkkkkkkkkkk..",
-    "..kdkyykkyykdk..",
-    "..kdbkkbbkkbdk..",
-    "..kdcbbbbbbcdk..",
-    "...kdccbbccdk...",
-    "....kddddddk....",
-    "...kmmkkkkmmk...",
-    "..kmmmmk.kmmmmk.",
-    "...kkkk...kkkk..",
+    "................",
+    ".k...kkkkkk...k.",
+    "kYk.kBBBBBNk.kYk",
+    "kwLkNNMLwMwNkUwk",
+    "kYwUGwMMwLMDUUYk",
+    "kOLbMMLMwLwwbUOk",
+    ".kYbMMMMLwwwbOk.",
+    "..ObMMMMLLwwbO..",
+    "..kbMkYkkYkMbk..",
+    "..EDMkYkkYkMDE..",
+    ".kLkMLkkkkLMkLk.",
+    ".kMkkMMMMMMkkMk.",
+    "..kPRMMMMMMRPk..",
+    "..PPPkDMMDkPPP..",
+    "..RRRRkkkkRRRR..",
+    "..kkkk....kkkk..",
 ]
-# a metade de baixo à direita é o bloco de baixo à esquerda espelhado (é assim no mapa do HUD)
-ROWS = ROWS[:8] + [r[:8] + r[:8][::-1] for r in ROWS[8:]]
+
 
 def tiles():
     out = []
@@ -35,10 +37,10 @@ def tiles():
         out.append(bytes(b))
     return out
 
+
 if __name__ == '__main__':
     p = open('pal_all.bin', 'rb').read()
     pal = [struct.unpack_from('<H', p, 2 * (15 * 16 + i))[0] for i in range(16)]
-    pal.update if False else None
     for k, v in MKPAL.items(): pal[k] = v
     rgb = [((c & 31) * 8, ((c >> 5) & 31) * 8, ((c >> 10) & 31) * 8) for c in pal]
     img = Image.new('RGB', (16, 16), (40, 140, 90))
