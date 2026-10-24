@@ -7,7 +7,7 @@
 #    variante), escolhidos pelas tabelas MAPA (sem espada) / MAPS (com a espada = habilidade Sword);
 #  - espada: sacada por padrão (o jogador recebe a habilidade Master do próprio jogo, com os golpes dela:
 #    segurar B carrega e soltar dispara a onda);
-#  - defesa: segurando R (inclusive correndo ou no ar) ele para na pose de "parry" do Dark Meta Knight e não
+#  - defesa: segurando L (inclusive correndo ou no ar) ele para na pose de "parry" do Dark Meta Knight e não
 #    leva dano (bit 0x8000 das flags, que o jogo já checa); golpe bloqueado toca o som de parry dele;
 #    SELECT (Backspace no site) guarda/saca. Ao guardar, ou ao levar dano, a estrela da habilidade não sai
 #    (desvio no começo de sub_080A9038); depois de levar dano a espada volta sozinha;
@@ -128,7 +128,7 @@ MAP_S = table(COMMON + [
     ([115, 116, 117], 0x1B),                   # corte para cima
     ([118, 119, 120], 0x5),                    # investida: corte em meia-lua
 ])
-GUARD_POSE, GUARD_POSE_AIR = 0x8, 0x9            # defesa (R): as poses de "parry" do Dark Meta Knight
+GUARD_POSE, GUARD_POSE_AIR = 0x8, 0x9            # defesa (L): as poses de "parry" do Dark Meta Knight
 
 
 def body_tiles():
@@ -197,8 +197,8 @@ def hook():
     a.ldr_lit('r2', PARRYCD); a.ldrb_r('r0', 'r2', 'r5'); a.cmpi('r0', 0); a.bc('eq', 'cd0')
     a.subi('r0', 1); a.strb_r('r0', 'r2', 'r5')
     a.label('cd0')
-    # --- defesa: segurando R (parado, andando, correndo, pulando ou caindo; ele para). Flags 0x8000 = o jogo não aplica dano (ver 0x080365A6) ---
-    a.ldr_lit('r0', 0x118); a.ldrh_r('r0', 'r4', 'r0'); a.ldr_lit('r1', 0x100); a.alu('tst', 'r0', 'r1')
+    # --- defesa: segurando L (parado, andando, correndo, pulando ou caindo; ele para). Flags 0x8000 = o jogo não aplica dano (ver 0x080365A6) ---
+    a.ldr_lit('r0', 0x118); a.ldrh_r('r0', 'r4', 'r0'); a.ldr_lit('r1', 0x200); a.alu('tst', 'r0', 'r1')   # L (o R é o celular)
     a.bc('eq', 'noguard')
     a.mov('r0', 0xD4); a.ldrh_r('r0', 'r4', 'r0'); a.cmpi('r0', 25); a.bc('hi', 'noguard')   # andando, correndo, pulando...
     a.ldr_i('r0', 'r4', 8); a.ldr_lit('r1', 0x8000); a.alu('orr', 'r0', 'r1'); a.str_i('r0', 'r4', 8)
