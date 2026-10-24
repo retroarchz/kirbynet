@@ -2,9 +2,9 @@ Hack "Jogar de Meta Knight" - Kirby & The Amazing Mirror (USA, codigo B8KE)
 =========================================================================
 
 O que faz
-- Jogador humano sem tinta (na Collection Room, a carinha do Kirby, que e o padrao) aparece como
-  Meta Knight. Com qualquer tinta (inclusive a rosa) volta a ser o Kirby. Os ajudantes do computador
-  continuam Kirby.
+- Jogador humano com a tinta Sapphire (escolhida na Collection Room) aparece como Meta Knight. Sem tinta
+  (a carinha) ou com outra tinta e o Kirby. Os ajudantes do computador continuam Kirby.
+- Na Collection Room, a previa "CHANGE COLOR" da Sapphire mostra o Meta Knight no lugar do Kirby.
 - So muda o DESENHO. O Kirby continua rodando por baixo, com a logica, os golpes e as habilidades dele.
 - Os desenhos sao do proprio Amazing Mirror (animacao 0x390, o Meta Knight da historia), nao do
   Nightmare in Dream Land: la o formato dos sprites e outro.
@@ -17,6 +17,12 @@ Como funciona (enderecos da decompilacao github.com/jiangzhengwenjz/katam, mesma
   depois de ewram_end, sempre zerada) com a animacao do Meta Knight escolhida pela tabela em 0x08F40800
   (animationIndex do Kirby -> variante da 0x390; 0xFF = mostra a animacao do proprio Kirby).
 - O Meta Knight e desenhado virado para o outro lado (o bit 0x400 e invertido so nele).
+- Tinta: gUnk_0203AD1C[jogador] (0xFF = nenhuma); Sapphire = item 0x108 = cor 7.
+- Previa: 0x081459C6 (sub_08145974, "DisplaySprite(&a1->unk40[0x2B])") desvia para 0x08F40900: com o cursor
+  na Sapphire o Kirby "depois" vira a 0x390 (virado para a direita); fora dela volta a 0x389 variante 18,
+  recomecando sem trocar a paleta (bit 0x40000), porque a paleta da tinta ja foi carregada pelo jogo.
+  gUnk_08386AF0[7] (paleta da previa da Sapphire) vira a 0x390 e gUnk_083868C8[0x35] reserva 20 blocos de
+  VRAM em vez de 9 (o Meta Knight parado usa 20).
 
 Gerar os bytes
   python build.py "Kirby & The Amazing Mirror (USA).gba" saida.gba patch.json
@@ -25,6 +31,9 @@ Gerar os bytes
 Testado (motor do site, no Node)
 - Mesma sequencia de 12.000 quadros de botoes na ROM original e na com o hack: posicao, vida, estado,
   habilidade e sala do Kirby iguais o tempo todo; sem travar.
+- Collection Room: na Sapphire a previa mostra o Meta Knight; Grape/Ocean continuam Kirby com a cor certa;
+  escolhendo a Sapphire e comecando o jogo, o jogador e o Meta Knight.
+- Os mesmos 12.000 quadros com a Sapphire ligada nas duas ROMs: tudo igual.
 - Fotos: parado, andando para os dois lados, correndo, pulando, flutuando, agachado, aspirando; trocando
-  a tinta pela memoria o Kirby volta e, sem tinta, vira Meta Knight de novo.
+  a tinta pela memoria o Kirby volta e, com a Sapphire, vira Meta Knight de novo.
 - Nao testado ainda: ataques de cada habilidade (posicoes 52-54 e 103-105 viram cortes de espada).

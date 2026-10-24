@@ -906,23 +906,28 @@ const Cheats = {
 // Prontos com "rom" mudam a ROM (a cópia que vai para o motor) ao abrir o jogo, como um hack de ROM.
 const CHEAT_PRESETS = {
   B8KE: [{ id: "colecao", name: "Collection Room completa (tintas, músicas, mapas e vidas)", patch: amCollectionRoom },
-         { id: "metaknight", name: "Jogar de Meta Knight (a carinha do Kirby na Collection Room)", rom: amMetaKnight }],
+         { id: "metaknight", name: "Jogar de Meta Knight (escolha a tinta Sapphire na Collection Room)", rom: amMetaKnight }],
 };
-// Kirby & The Amazing Mirror (USA): jogador sem tinta (a carinha do Kirby na Collection Room, que é o
-// padrão) aparece como Meta Knight (animação 0x390 do próprio jogo); com qualquer tinta volta a ser o Kirby.
-// Só muda o desenho: o fim da função que anima e mostra o Kirby (0x0803F77C) desvia para um código novo no
-// espaço livre do fim da ROM (0x08F40000), que esconde o Kirby e mostra no lugar um sprite-sombra (EWRAM
-// 0x0203FF00) com a animação do Meta Knight equivalente (tabela em 0x08F40800, uma por animação do Kirby).
+// Kirby & The Amazing Mirror (USA): quem escolhe a tinta Sapphire na Collection Room aparece como Meta Knight
+// (animação 0x390 do próprio jogo), e a prévia "trocar cor" da Sapphire mostra o Meta Knight; outras tintas e a
+// carinha continuam Kirby. Só muda o desenho: o fim da função que anima e mostra o Kirby (0x0803F77C) desvia
+// para um código novo no espaço livre do fim da ROM (0x08F40000), que esconde o Kirby e mostra no lugar um
+// sprite-sombra (EWRAM 0x0203FF00) com a animação do Meta Knight equivalente (tabela em 0x08F40800). A prévia
+// da Collection Room desvia em 0x081459C6 para 0x08F40900 (troca o Kirby "depois" pelo Meta Knight).
 // Testado: 12.000 quadros com os mesmos botões dão a mesma posição/vida/estado do Kirby que a ROM original.
 // Fonte do código novo: hack-fonte/metaknight (build.py gera estes bytes). Devolve 1 se mudou a ROM.
 const AM_METAKNIGHT = [
   [0x3F77C, "16f166fc01b038bc9846a146aa46f0bc", "014b1847014b18470100f4080500f408"],
-  [0xF40000, null, "012500e00025a8463c1c103c5620255c3f4909788d4259d23e49485dff2855d13d49b8680843b860a422a2189068084390603a4901204855a0688021c90008425dd128206843364e361838683060388a3082788a7082b88ab082387f3077f87ff077b8682f498843b26840231b021a401043b060d420205ab8280ad82a49095cff2906d0b2688023db005a40b260274801e0b889b97eb289824202d1b27e8a4203d0b081b176ff22f276301c204b00f02ef8002805d1ff22f276301c1d4b00f026f8301c1c4b00f022f818e01b49485d00280dd0002048551949b8688843b860a422a218906888439060ff20f876d0764046002803d0381c124b00f008f801b038bc9846a146aa46f0bc01bc0047184730ad03021cad030200000800a0ff030200ff030200400c000008f4089003000029511508295115084d601508a0ff0302000008004d601508"],
+  [0x1459C6, "df21c900601810f03efb", "201c004b18470109f408"],
+  [0x386B0C, "15000700", "90030000"],
+  [0x386A0A, "0900", "1400"],
+  [0xF40000, null, "012500e00025a8463c1c103c5620255c3f4909788d4259d23e49485d072855d13d49b8680843b860a422a2189068084390603a4901204855a0688021c90008425dd128206843364e361838683060388a3082788a7082b88ab082387f3077f87ff077b8682f498843b26840231b021a401043b060d420205ab8280ad82a49095cff2906d0b2688023db005a40b260274801e0b889b97eb289824202d1b27e8a4203d0b081b176ff22f276301c204b00f02ef8002805d1ff22f276301c1d4b00f026f8301c1c4b00f022f818e01b49485d00280dd0002048551949b8688843b860a422a218906888439060ff20f876d0764046002803d0381c124b00f008f801b038bc9846a146aa46f0bc01bc0047184730ad03021cad030200000800a0ff030200ff030200400c000008f4089003000029511508295115084d601508a0ff0302000008004d601508"],
   [0xF40800, null, "001c001c001c001c001c000201231c09150d0a0b01ff24241c04131313001a1314141414131a13160d1c0013001501010000000016171821000200000015140b00000000000000001a00ffffffffffffffffffffffffffffffffffffffffffffffffffffffffff1916171313ff15ffffffffffffffff0000000016ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"],
+  [0xF40900, null, "df25ed0065192a20205c8000305a194988420cd1a8891849884223d0a9810020a876a8688021c9000843a8600ce0a8891249884216d11249a9811220a876a8688021c9008843a860ff20e8760d49a8680843a860281c0c4b00f00bf80b49a8688843a860281c0a4b00f003f870bc01bc00471847080100009003000090030000890300000000040029511508000004004d601508"],
 ];
 function amMetaKnight(rom) {
   const hex = (h) => Uint8Array.from(h.match(/../g), (b) => parseInt(b, 16));
-  // confere antes de mudar: o trecho original no lugar do desvio e espaço livre (0xFF) onde entra o código
+  // confere antes de mudar: os trechos originais nos lugares dos desvios/tabelas e espaço livre (0xFF) no código novo
   for (const [at, orig, data] of AM_METAKNIGHT) {
     const want = orig ? hex(orig) : null, n = data.length / 2;
     if (at + n > rom.length) return 0;

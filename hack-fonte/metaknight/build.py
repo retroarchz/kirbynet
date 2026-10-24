@@ -1,12 +1,12 @@
 # Hack "Meta Knight" para Kirby & The Amazing Mirror (USA).
-# Jogador humano sem tinta (na Collection Room, a carinha do Kirby, que é o padrão) é desenhado como Meta Knight;
-# com qualquer tinta (inclusive a rosa) volta a ser o Kirby.
+# Jogador humano com a tinta Sapphire (escolhida na Collection Room) é desenhado como Meta Knight, e a prévia
+# "trocar cor" da Sapphire mostra o Meta Knight; sem tinta ou com outra tinta é o Kirby.
 # O Kirby continua animando por baixo (a lógica do jogo não muda); só o desenho é trocado:
 #  - no fim de sub_0803F46C (anima e desenha o Kirby) entra um desvio para o código novo;
 #  - o código novo marca o sprite do Kirby (e o do chapéu) com o bit 0x80000 do unk8, que faz o jogo
 #    não copiar os desenhos dele para a VRAM nem mostrá-lo, e anima/mostra um sprite-sombra (um por
 #    jogador, na EWRAM livre) com a animação 0x390 (Meta Knight) escolhida pela tabela MAP;
-#  - quando o jogador passa a ter tinta, o bit é tirado e a animação do Kirby recomeça (recarrega os desenhos).
+#  - quando o jogador deixa a Sapphire, o bit é tirado e a animação do Kirby recomeça (recarrega os desenhos).
 # Uso: python build.py entrada.gba saida.gba [patch.json]
 import sys, struct, json
 from thumb import Asm
@@ -19,8 +19,15 @@ ANIM_STEP = 0x08155128     # sub_08155128(struct Sprite *) -> 0 quando a animaç
 DISPLAY = 0x0815604C       # DisplaySprite(struct Sprite *)
 MK_ANIM = 0x390
 NUM_HUMANS = 0x0203AD30    # gNumHumanPlayers
-PAINT = 0x0203AD1C         # gUnk_0203AD1C[jogador]: tinta escolhida; 0xFF = nenhuma (a carinha do Kirby)
+PAINT = 0x0203AD1C         # gUnk_0203AD1C[jogador]: tinta escolhida (0xFF = nenhuma, a carinha do Kirby)
+SAPPHIRE = 7               # tinta Sapphire (item 0x108 da Collection Room -> cor 0x108 - 0x101)
+PREVIEW = 0x08386AF0       # gUnk_08386AF0[cor]: prévia "trocar cor" da Collection Room ({u16 anim, u8 variante, s8})
 SITE = 0x0803F77C          # bl DisplaySprite(r7) + epílogo de sub_0803F46C
+HOOK2 = 0x08F40900         # prévia da Collection Room
+SITE2 = 0x081459C6         # sub_08145974: "DisplaySprite(&a1->unk40[0x2B])" (o Kirby "depois" da prévia)
+PREV_TILES = 0x083868C8 + 6 * 0x35 + 4   # gUnk_083868C8[0x35][2]: blocos de VRAM dos Kirbys da prévia (9)
+PREV_ANIM, PREV_VAR = 0x389, 18            # gUnk_083868C8[0x35]: animação do Kirby da prévia
+ITEM_SAPPHIRE = 0x108
 
 # animationIndex do Kirby (0..184) -> variante da animação 0x390. 0xFF = mostra a animação do próprio Kirby.
 FF = 0xFF
@@ -61,7 +68,7 @@ def hook():
     a.ldr_lit('r1', NUM_HUMANS); a.ldrb_i('r1', 'r1', 0)
     a.alu('cmp', 'r5', 'r1'); a.bc('hs', 'notmk')    # só jogador humano (os ajudantes do computador não)
     a.ldr_lit('r1', PAINT); a.ldrb_r('r0', 'r1', 'r5')
-    a.cmpi('r0', 0xFF); a.bc('ne', 'notmk')          # tinta escolhida na Collection Room: 0xFF = a carinha
+    a.cmpi('r0', SAPPHIRE); a.bc('ne', 'notmk')      # tinta escolhida na Collection Room: Sapphire
     # --- Meta Knight ---
     a.ldr_lit('r1', 0x80000)
     a.ldr_i('r0', 'r7', 8); a.alu('orr', 'r0', 'r1'); a.str_i('r0', 'r7', 8)     # Kirby: sem VRAM/sem desenho
@@ -124,6 +131,43 @@ def hook():
     return a
 
 
+def hook2():
+    # r4 = a1 (struct Unk_081434F8), r6 = gUnk_08386A50; o "depois" da prévia é a1->unk40[0x2B] (a1 + 0x6F8).
+    # Cursor na Sapphire: o "depois" vira o Meta Knight (virado para a direita, como o Kirby); fora dela, volta.
+    a = Asm(HOOK2)
+    a.mov('r5', 0xDF); a.lsl('r5', 'r5', 3); a.add_r('r5', 'r4', 'r5')
+    a.mov('r0', 0x2A); a.ldrb_r('r0', 'r4', 'r0'); a.lsl('r0', 'r0', 2); a.ldrh_r('r0', 'r6', 'r0')
+    a.ldr_lit('r1', ITEM_SAPPHIRE); a.alu('cmp', 'r0', 'r1'); a.bc('ne', 'notsap')
+    a.ldrh_i('r0', 'r5', 0xC); a.ldr_lit('r1', MK_ANIM); a.alu('cmp', 'r0', 'r1'); a.bc('eq', 'disp')
+    a.strh_i('r1', 'r5', 0xC); a.mov('r0', 0); a.strb_i('r0', 'r5', 0x1A)
+    a.ldr_i('r0', 'r5', 8); a.mov('r1', 0x80); a.lsl('r1', 'r1', 3); a.alu('orr', 'r0', 'r1'); a.str_i('r0', 'r5', 8)
+    a.b('restart')
+    a.label('notsap')
+    a.ldrh_i('r0', 'r5', 0xC); a.ldr_lit('r1', MK_ANIM); a.alu('cmp', 'r0', 'r1'); a.bc('ne', 'disp')
+    a.ldr_lit('r1', PREV_ANIM); a.strh_i('r1', 'r5', 0xC); a.mov('r0', PREV_VAR); a.strb_i('r0', 'r5', 0x1A)
+    a.ldr_i('r0', 'r5', 8); a.mov('r1', 0x80); a.lsl('r1', 'r1', 3); a.alu('bic', 'r0', 'r1'); a.str_i('r0', 'r5', 8)
+    a.label('restart')
+    a.mov('r0', 0xFF); a.strb_i('r0', 'r5', 0x1B)
+    # recomeça sem trocar a paleta (bit 0x40000): a da tinta já foi carregada pelo jogo
+    a.ldr_lit('r1', 0x40000); a.ldr_i('r0', 'r5', 8); a.alu('orr', 'r0', 'r1'); a.str_i('r0', 'r5', 8)
+    a.movh('r0', 'r5'); a.ldr_lit('r3', ANIM_STEP | 1); a.bl('callr3')
+    a.ldr_lit('r1', 0x40000); a.ldr_i('r0', 'r5', 8); a.alu('bic', 'r0', 'r1'); a.str_i('r0', 'r5', 8)
+    a.label('disp')
+    a.movh('r0', 'r5'); a.ldr_lit('r3', DISPLAY | 1); a.bl('callr3')
+    a.pop(['r4', 'r5', 'r6']); a.pop(['r0']); a.bx('r0')        # epílogo original de sub_08145974
+    a.label('callr3'); a.bx('r3')
+    a.pool()
+    return a.build()
+
+
+def site2():
+    s = Asm(SITE2)
+    s.movh('r0', 'r4')                         # 0x081459C6
+    s.ldr_lit('r3', HOOK2 | 1); s.bx('r3')     # 0x081459C8, literal em 0x081459CC (no lugar do bl)
+    s.pool()
+    return s.build()
+
+
 def site(a_addr, b_addr):
     s = Asm(SITE)
     s.ldr_lit('r3', a_addr | 1); s.bx('r3')  # literal em SITE+8
@@ -138,7 +182,12 @@ def patches():
     assert len(code) < MAPA - HOOK
     st = site(a.labels['A'], a.labels['B'])
     assert len(st) == 16, len(st)
-    return [(SITE - 0x08000000, st), (HOOK - 0x08000000, code), (MAPA - 0x08000000, bytes(MAP))]
+    prev = PREVIEW - 0x08000000 + 4 * SAPPHIRE
+    s2 = site2()
+    assert len(s2) == 10, len(s2)
+    return [(SITE - 0x08000000, st), (SITE2 - 0x08000000, s2), (prev, struct.pack('<HBb', MK_ANIM, 0, 0)),
+            (PREV_TILES - 0x08000000, struct.pack('<H', 20)),
+            (HOOK - 0x08000000, code), (MAPA - 0x08000000, bytes(MAP)), (HOOK2 - 0x08000000, hook2())]
 
 
 if __name__ == '__main__':
