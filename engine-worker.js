@@ -234,6 +234,27 @@ function coopBefore(s, snaps) {
 
 function sendNet(kind, bytes) { postMessage({ t: "net", kind, bytes }, [bytes.buffer]); }
 
+// Acelerando, o som de TODOS os quadros da rodada é comprimido no tempo real que passou (como no mGBA e no
+// My Boy: a música fica mais rápida e mais aguda, na velocidade que o aparelho conseguiu de verdade).
+// Cada amostra de saída é a média do trecho que ela cobre (sem isso, comprimir 8x vira chiado).
+function ffAudio(bufs, rate, ms) {
+  let total = 0;
+  for (const b of bufs) total += b.length >> 1;
+  const want = Math.round(ms / 1000 * rate);
+  if (!total || want <= 0) return null;
+  const all = new Int16Array(total * 2);
+  let o = 0;
+  for (const b of bufs) { all.set(b, o); o += b.length; }
+  const f = Math.max(1, total / want), n = Math.floor(total / f), out = new Int16Array(n * 2);
+  for (let j = 0; j < n; j++) {
+    const a = Math.floor(j * f), e = Math.max(a + 1, Math.min(total, Math.floor((j + 1) * f)));
+    let l = 0, r = 0;
+    for (let i = a; i < e; i++) { l += all[2 * i]; r += all[2 * i + 1]; }
+    out[2 * j] = l / (e - a); out[2 * j + 1] = r / (e - a);
+  }
+  return { rate, samples: out };
+}
+
 function tick() {
   if (!run) return;
   const now = performance.now();
@@ -244,6 +265,9 @@ function tick() {
   if (due - run.frames > 10 * speed) { run.t0 = now - run.frames / fps * 1000; due = run.frames + 1; }
   let ran = 0;
   const out = [], transfer = [];   // TODOS os quadros (antes: só o último de cada rodada → vídeo pulava)
+  const ffBufs = speed > 1 ? [] : null;   // acelerando: som de todos os quadros da rodada
+  let ffRate = 0;
+  if (speed === 1) run.ffT = null;
   try {
     while (run.frames < due && ran < cap && (speed === 1 || ran === 0 || performance.now() < budget)) {
       const tf = performance.now();
@@ -287,9 +311,11 @@ function tick() {
         }
         run.s.runFrame(k);
       }
-      // acelerando: só a imagem do último quadro da rodada vai para a tela, e o som fica mudo
-      // (o som de 3 quadros por quadro não cabe na caixa; seria só ruído)
-      if (speed > 1 && run.frames + 1 < due && ran + 1 < cap && performance.now() + (run.busyN ? run.busy / run.busyN : 4) < budget) { run.s.audio(0); run.frames++; ran++; run.busy += performance.now() - tf; run.busyN++; continue; }
+      // acelerando: só a imagem do último quadro da rodada vai para a tela; o som de todos entra no ffAudio
+      if (speed > 1 && run.frames + 1 < due && ran + 1 < cap && performance.now() + (run.busyN ? run.busy / run.busyN : 4) < budget) {
+        const a0 = run.s.audio(0); ffBufs.push(a0.samples); ffRate = a0.rate;
+        run.frames++; ran++; run.busy += performance.now() - tf; run.busyN++; continue;
+      }
       // Mundo livre: onde está o MEU Higgins (e o desenho dele, se for novo) e os inimigos dos quais sou dono
       let g = null, poofs = null;
       if (run.free) {
@@ -320,7 +346,7 @@ function tick() {
         vids.push({ i, buf }); transfer.push(buf);
       }
       const a = run.s.audio(run.net ? run.slot : 0);   // som do SEU Kirby (no "Mesmo PC", o do P1)
-      if (speed > 1) out.push({ f: run.frames, vids, audio: null });
+      if (speed > 1) { ffBufs.push(a.samples); ffRate = a.rate; out.push({ f: run.frames, vids, audio: null }); }
       else if (audioPort) {   // som vai direto para a placa, sem passar pela página
         audioPort.postMessage(a, [a.samples.buffer]);
         out.push({ f: run.frames, vids, audio: null, g, poofs });
@@ -341,6 +367,16 @@ function tick() {
     clearInterval(iv); iv = null;
     postMessage({ t: "err", msg: "O motor parou: " + (err && err.message || err) });
     return;
+  }
+  if (ffBufs && ffBufs.length) {
+    // tempo real que este som cobre: desde o último som acelerado (no máximo 50 ms: depois de uma pausa não acumula)
+    const ms = run.ffT == null ? 1000 / FPS : Math.min(50, now - run.ffT);
+    run.ffT = now;
+    const fa = ffAudio(ffBufs, ffRate, ms);
+    if (fa) {
+      if (audioPort) audioPort.postMessage(fa, [fa.samples.buffer]);
+      else if (out.length) { out[out.length - 1].audio = fa; transfer.push(fa.samples.buffer); }
+    }
   }
   if (out.length) {
     postMessage({ t: "frames", list: out }, transfer);
