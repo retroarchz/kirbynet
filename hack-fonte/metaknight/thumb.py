@@ -5,6 +5,7 @@ COND = dict(eq=0, ne=1, hs=2, lo=3, mi=4, pl=5, hi=8, ls=9, ge=10, lt=11, gt=12,
 
 
 def r(x):
+    if x == 'lr': return 14
     return int(x[1:]) if isinstance(x, str) else x
 
 
@@ -14,6 +15,7 @@ class Asm:
         self.items = []           # (tipo, dados)
         self.labels = {}
         self.lits = []            # (label, valor)
+        self.nlit = 0             # nomes únicos (há vários blocos de literais)
 
     def here(self):
         return self.base + sum(self._size(i) for i in self.items)
@@ -57,8 +59,15 @@ class Asm:
     def b(self, lab): self.items.append(('b', lab))
     def bc(self, cond, lab): self.items.append(('bc', (cond, lab)))
     def bl(self, lab): self.items.append(('bl', lab))
+    def bfar(self, cond, lab):
+        # desvio condicional sem o limite de 256 bytes: condição invertida pula um "b" comum (2 KB)
+        inv = {'eq': 'ne', 'ne': 'eq', 'hs': 'lo', 'lo': 'hs', 'hi': 'ls', 'ls': 'hi', 'mi': 'pl', 'pl': 'mi',
+               'ge': 'lt', 'lt': 'ge', 'gt': 'le', 'le': 'gt'}[cond]
+        skip = '_far%d' % len(self.items)
+        self.bc(inv, skip); self.b(lab); self.label(skip)
     def ldr_lit(self, d, value):
-        name = '_lit%d' % len(self.lits)
+        name = '_lit%d' % self.nlit
+        self.nlit += 1
         self.lits.append((name, value))
         self.items.append(('ldrlit', (r(d), name)))
     def word(self, v): self.items.append(('word', v))

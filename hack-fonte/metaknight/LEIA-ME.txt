@@ -2,38 +2,45 @@ Hack "Jogar de Meta Knight" - Kirby & The Amazing Mirror (USA, codigo B8KE)
 =========================================================================
 
 O que faz
-- Jogador humano com a tinta Sapphire (escolhida na Collection Room) aparece como Meta Knight. Sem tinta
-  (a carinha) ou com outra tinta e o Kirby. Os ajudantes do computador continuam Kirby.
-- Na Collection Room, a previa "CHANGE COLOR" da Sapphire mostra o Meta Knight no lugar do Kirby.
-- So muda o DESENHO. O Kirby continua rodando por baixo, com a logica, os golpes e as habilidades dele.
-- Os desenhos sao do proprio Amazing Mirror (animacao 0x390, o Meta Knight da historia), nao do
-  Nightmare in Dream Land: la o formato dos sprites e outro.
+- Jogador humano com a tinta Sapphire (escolhida na Collection Room) vira o Meta Knight. Sem tinta (a
+  carinha) ou com outra tinta e o Kirby. Os ajudantes do computador continuam Kirby.
+- Desenhos do proprio Amazing Mirror: corpo = animacao 0x390, espada Galaxia = 0x391 (mesma variante,
+  com os rastros rosa dos cortes). Nao vem do Nightmare in Dream Land (la o formato e outro).
+- Espada sacada = habilidade Sword do proprio jogo (os golpes dela dao o dano): combo com B, estocada e
+  corte em meia-lua correndo, giro no ar. SELECT (Backspace no site) guarda/saca a espada sem soltar a
+  estrela da habilidade; levando dano a espada volta sozinha. Com a espada guardada ele aspira e copia
+  habilidades como o Kirby (SELECT solta a habilidade copiada, como no jogo).
+- Flutuar = capa virando asas. Icone de vidas do HUD com o rosto dele (e a barra de vida nas cores dele).
+- Collection Room: a previa "CHANGE COLOR" da Sapphire mostra o Meta Knight.
 
 Como funciona (enderecos da decompilacao github.com/jiangzhengwenjz/katam, mesma ROM, sha1 274b102b...)
-- 0x0803F77C: fim de sub_0803F46C (anima e mostra o Kirby). O "bl DisplaySprite" e o epilogo viram
-  dois desvios (mostrar / nao mostrar) para o codigo novo em 0x08F40000 (espaco livre, 0xFF).
-- O codigo novo marca o sprite do Kirby e o do chapeu com o bit 0x80000 (o jogo nao copia os desenhos
-  deles para a VRAM nem os mostra) e anima/mostra um sprite-sombra por jogador em 0x0203FF00 (EWRAM
-  depois de ewram_end, sempre zerada) com a animacao do Meta Knight escolhida pela tabela em 0x08F40800
-  (animationIndex do Kirby -> variante da 0x390; 0xFF = mostra a animacao do proprio Kirby).
-- O Meta Knight e desenhado virado para o outro lado (o bit 0x400 e invertido so nele).
+- 0x0803F77C: fim de sub_0803F46C (anima e mostra o Kirby) desvia para 0x08F40000. O Kirby e o chapeu
+  ganham o bit 0x80000 (sem copiar desenhos para a VRAM, sem aparecer) e dois sprites-sombra por jogador
+  na EWRAM livre depois de ewram_end (corpo 0x0203FF00, espada 0x0203FE00) mostram o Meta Knight, pelas
+  tabelas animationIndex -> variante (MAPA sem espada, MAPS com a Sword). A espada usa a VRAM logo depois
+  dos blocos do corpo daquela variante (tabela BODYT; corpo+espada <= 64 blocos = a area do jogador).
+- Espada: guardada[jogador] em 0x0203FFA4, habilidade do quadro anterior em 0x0203FFA8. Dar a Sword =
+  ability = 18 + sub_0806F260 / sub_0806EFF8 / sub_0806F288 (como o jogo faz).
+- 0x080A9038 (sub_080A9038, solta a estrela da habilidade) desvia para 0x08F41200: Meta Knight com a
+  Sword nao solta estrela.
+- 0x08075428 (sub_080753CC, objeto do golpe da espada do Kirby) desvia para 0x08F41300: para o Meta
+  Knight o desenho do objeto some (flags 0x400) e nao copia blocos (0x80000); o acerto continua.
+- Paleta 442 (corpo) copiada a cada quadro para a do jogador, fora das transicoes de tela (o jogo recarrega
+  a do Kirby ao trocar de habilidade). HUD do jogador deste aparelho: blocos 0x18F/0x190/0x19F do BG
+  (so se o mapa do HUD tiver 0xF18F no lugar do rostinho) e cores 1..6 da paleta 15 do BG.
+- Previa: 0x081459C6 (sub_08145974) desvia para 0x08F41000; gUnk_08386AF0[7] vira a 0x390 e
+  gUnk_083868C8[0x35] reserva 20 blocos de VRAM em vez de 9.
 - Tinta: gUnk_0203AD1C[jogador] (0xFF = nenhuma); Sapphire = item 0x108 = cor 7.
-- Previa: 0x081459C6 (sub_08145974, "DisplaySprite(&a1->unk40[0x2B])") desvia para 0x08F40900: com o cursor
-  na Sapphire o Kirby "depois" vira a 0x390 (virado para a direita); fora dela volta a 0x389 variante 18,
-  recomecando sem trocar a paleta (bit 0x40000), porque a paleta da tinta ja foi carregada pelo jogo.
-  gUnk_08386AF0[7] (paleta da previa da Sapphire) vira a 0x390 e gUnk_083868C8[0x35] reserva 20 blocos de
-  VRAM em vez de 9 (o Meta Knight parado usa 20).
 
 Gerar os bytes
   python build.py "Kirby & The Amazing Mirror (USA).gba" saida.gba patch.json
-  (patch.json tem os trechos que estao em AM_METAKNIGHT no game.js)
+  (am.gba ao lado do am.py; patch.json tem os trechos que estao em AM_METAKNIGHT no game.js)
+  thumb.py = montador Thumb minimo (nao ha compilador ARM nesta maquina); icon_mk.py = rostinho 16x16.
 
 Testado (motor do site, no Node)
-- Mesma sequencia de 12.000 quadros de botoes na ROM original e na com o hack: posicao, vida, estado,
-  habilidade e sala do Kirby iguais o tempo todo; sem travar.
-- Collection Room: na Sapphire a previa mostra o Meta Knight; Grape/Ocean continuam Kirby com a cor certa;
-  escolhendo a Sapphire e comecando o jogo, o jogador e o Meta Knight.
-- Os mesmos 12.000 quadros com a Sapphire ligada nas duas ROMs: tudo igual.
-- Fotos: parado, andando para os dois lados, correndo, pulando, flutuando, agachado, aspirando; trocando
-  a tinta pela memoria o Kirby volta e, com a Sapphire, vira Meta Knight de novo.
-- Nao testado ainda: ataques de cada habilidade (posicoes 52-54 e 103-105 viram cortes de espada).
+- Sem a Sapphire: 12.000 quadros com os mesmos botoes na ROM original e na com o hack = mesmo jogo.
+- Com a Sapphire: 12.000 quadros de botoes aleatorios (golpes, SELECT, dano, troca de sala) sem travar.
+- Fotos: parado, andando, correndo, pulando, voando com asas, golpes (combo, correndo, no ar), SELECT
+  guardando e sacando, icone do HUD, previa da Collection Room e o caminho completo escolhendo a Sapphire.
+- Nao testado: multiplayer pelo cabo / "Mesmo PC" com dois Meta Knights; habilidades copiadas com a
+  espada guardada (os golpes delas viram cortes sem espada).
