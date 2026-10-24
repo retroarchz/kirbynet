@@ -41,6 +41,7 @@ SET_OBJ = 0x0806F288       # objeto da habilidade (a Sword cria o da espada)
 MK_ANIM, SW_ANIM = 0x390, 0x391
 MKPAL_ROM = 0x084BB0EC + 0x20 * 442   # paleta 442 (corpo do Meta Knight)
 SWORD = 18                 # KIRBY_ABILITY_SWORD
+GRANT = int(__import__('os').environ.get('MK_GRANT', SWORD))   # só para testes: dar outra habilidade
 NUM_HUMANS = 0x0203AD30    # gNumHumanPlayers
 PAINT = 0x0203AD1C         # gUnk_0203AD1C[jogador]: tinta escolhida (0xFF = nenhuma, a carinha do Kirby)
 LOCAL = 0x0203AD3C         # gLocalPlayerId
@@ -64,17 +65,17 @@ FF = 0xFF
 
 
 def table(entries):
-    t = [FF] * 185
+    # sem 0xFF: toda pose do Kirby tem uma do Meta Knight (o padrão é "parado"), senão o desenho do Kirby
+    # apareceria em golpes de outras habilidades, ao pegar itens etc.
+    t = [0x0] * 185
     for idx, v in entries:
         for i in ([idx] if isinstance(idx, int) else idx): t[i] = v
     return t
 
 # animationIndex do Kirby -> variante do Meta Knight (comum às duas tabelas)
 COMMON = [
-    ([0, 2, 4, 6, 8, 10, 29, 42, 44, 48, 49, 50, 51, 56, 58, 59, 60, 64, 65, 66, 67, 68, 69, 70, 71, 73,
-      118, 119, 120, 121], 0x0),               # parado
     ([1, 3, 5, 7, 9, 14, 24, 41], 0x1C),       # agachado
-    ([12, 20, 46, 47], 0x1),                   # freada / aterrissagem
+    ([12, 20, 21, 46, 47], 0x1),               # freada / aterrissagem
     ([11, 57], 0x2),                           # andando
     (25, 0x4),                                 # correndo
     (13, 0x6),                                 # deslizando (estocada)
@@ -87,20 +88,23 @@ COMMON = [
     ([30, 37, 72], 0x1A),                      # engolindo
     ([32, 33, 34, 35, 62], 0xF),               # flutuando: capa-asas
     (55, 0x1E),                                # levando dano
+    (list(range(74, 90)), 0x15),               # girando (canhão / estrela)
+    ([93, 94, 100, 101, 102], 0xB),            # segurando item / baú: braços para cima
+    (list(range(123, 141)), 0x1E),             # queimando / congelado / choque
+    # golpes de outras habilidades (posições vistas no teste com cada uma): cortes sem espada
+    (52, 0x16), (53, 0x17), (54, 0x18), (103, 0x19), (104, 0x16), (105, 0x17), (108, 0x18), (110, 0x19),
+    (111, 0x6), (112, 0x5), (list(range(113, 118)), 0x14), (147, 0x16),
 ]
 MAP_A = table(COMMON + [
     ([26, 27, 28, 31, 36, 38, 43, 106, 107], 0x13),  # aspirando
     ([39, 122], 0x16),                               # soprando / cuspindo estrela -> corte
-    ([52, 104], 0x16), ([53, 105], 0x17), (54, 0x18), (103, 0x19),   # ataques de outras habilidades
 ])
 # Com a Sword as posições 0..121 vêm de outra tabela do jogo (gUnk_0834C9AC): 26..30 e 39 são "parado" (não
 # aspira), 31/36/43 começam/terminam o voo, e de 103 em diante são golpes da espada.
 MAP_S = table(COMMON + [
-    ([26, 27, 28, 29, 30, 37, 38, 39, 44, 65, 122], 0x0),
     ([31, 36, 43], 0xF),                       # começa / termina o voo: capa-asas
-    (52, 0x16), (53, 0x17), (54, 0x18), (66, 0x16), (67, 0x17), (68, 0x18), (103, 0x19),
-    (106, 0x16), (107, 0x17), (108, 0x18), (109, 0x15), (110, 0x19),
-    (111, 0x6), (112, 0x5),                    # correndo: estocada e corte em meia-lua
+    (66, 0x16), (67, 0x17), (68, 0x18),
+    (106, 0x16), (107, 0x17), (108, 0x18), (110, 0x19),
     ([104, 105], 0x15),                        # no ar: giro
     ([113, 114, 121], 0x14), ([115, 116, 117], 0x1B), ([118, 119, 120], 0x16),
 ])
@@ -155,7 +159,7 @@ def hook():
     a.ldrb_i('r0', 'r6', 0); a.cmpi('r0', 0); a.bc('ne', 'swdone')    # guardada
     a.cmpi('r1', 0); a.bc('ne', 'swdone')                              # já tem habilidade
     a.mov('r0', 0xD4); a.ldrh_r('r0', 'r4', 'r0'); a.cmpi('r0', 25); a.bc('hi', 'swdone')  # só parado/andando/pulando
-    a.mov('r0', SWORD); a.ldr_lit('r1', 0x103); a.strb_r('r0', 'r4', 'r1')
+    a.mov('r0', GRANT); a.ldr_lit('r1', 0x103); a.strb_r('r0', 'r4', 'r1')
     a.movh('r0', 'r4'); a.ldr_lit('r3', SET_ANIMS | 1); a.bl('callr3')
     a.movh('r0', 'r4'); a.ldr_lit('r3', SET_PAL | 1); a.bl('callr3')
     a.movh('r0', 'r4'); a.ldr_lit('r3', SET_OBJ | 1); a.bl('callr3')
@@ -196,20 +200,18 @@ def hook():
     a.alu('orr', 'r0', 'r2'); a.str_i('r0', 'r6', 8)                             # + o 0x4000 (parada) da sombra
     a.mov('r0', 0); a.movh('r10', 'r0')                                          # r10 = recomeçou o corpo?
     a.mov('r0', 0xD4); a.ldrh_r('r0', 'r4', 'r0')                                # animationIndex
-    a.cmpi('r0', 184); a.bc('hi', 'pass')
+    a.cmpi('r0', 184); a.bc('ls', 'idxok')
+    a.mov('r0', 0)                                                               # fora da tabela: parado
+    a.label('idxok')
     a.ldr_lit('r1', MAPA)
     a.ldr_lit('r2', 0x103); a.ldrb_r('r2', 'r4', 'r2'); a.cmpi('r2', SWORD); a.bc('ne', 'nosw')
     a.ldr_lit('r1', MAPS)
     a.label('nosw')
     a.ldrb_r('r1', 'r1', 'r0')
-    a.cmpi('r1', 0xFF); a.bc('eq', 'pass')
     a.ldr_i('r2', 'r6', 8); a.mov('r3', 0x80); a.lsl('r3', 'r3', 3)              # o Meta Knight é desenhado
     a.alu('eor', 'r2', 'r3'); a.str_i('r2', 'r6', 8)                             # virado para o outro lado
     a.movh('r9', 'r1')                                                           # r9 = variante
-    a.ldr_lit('r0', MK_ANIM); a.b('set')
-    a.label('pass'); a.ldrh_i('r0', 'r7', 0xC); a.ldrb_i('r1', 'r7', 0x1A)       # a do próprio Kirby
-    a.mov('r2', 0xFF); a.movh('r9', 'r2')
-    a.label('set')
+    a.ldr_lit('r0', MK_ANIM)
     a.ldrh_i('r2', 'r6', 0xC); a.alu('cmp', 'r2', 'r0'); a.bc('ne', 'change')
     a.ldrb_i('r2', 'r6', 0x1A); a.alu('cmp', 'r2', 'r1'); a.bc('eq', 'step')
     a.label('change')

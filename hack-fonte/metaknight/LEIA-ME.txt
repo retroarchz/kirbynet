@@ -18,7 +18,9 @@ Como funciona (enderecos da decompilacao github.com/jiangzhengwenjz/katam, mesma
 - 0x0803F77C: fim de sub_0803F46C (anima e mostra o Kirby) desvia para 0x08F40000. O Kirby e o chapeu
   ganham o bit 0x80000 (sem copiar desenhos para a VRAM, sem aparecer) e dois sprites-sombra por jogador
   na EWRAM livre depois de ewram_end (corpo 0x0203FF00, espada 0x0203FE00) mostram o Meta Knight, pelas
-  tabelas animationIndex -> variante (MAPA sem espada, MAPS com a Sword). A espada usa a VRAM logo depois
+  tabelas animationIndex -> variante (MAPA sem espada, MAPS com a Sword). Nenhuma posicao fica sem pose
+  do Meta Knight (o padrao e "parado"), entao o desenho do Kirby nunca aparece; golpes de outras
+  habilidades viram cortes e os efeitos delas (fogo, martelo, raio...) sao objetos a parte e continuam. A espada usa a VRAM logo depois
   dos blocos do corpo daquela variante (tabela BODYT; corpo+espada <= 64 blocos = a area do jogador).
 - Espada: guardada[jogador] em 0x0203FFA4, habilidade do quadro anterior em 0x0203FFA8. Dar a Sword =
   ability = 18 + sub_0806F260 / sub_0806EFF8 / sub_0806F288 (como o jogo faz).
@@ -43,5 +45,7 @@ Testado (motor do site, no Node)
 - Com a Sapphire: 12.000 quadros de botoes aleatorios (golpes, SELECT, dano, troca de sala) sem travar.
 - Fotos: parado, andando, correndo, pulando, voando com asas, golpes (combo, correndo, no ar), SELECT
   guardando e sacando, icone do HUD, previa da Collection Room e o caminho completo escolhendo a Sapphire.
+- Cada habilidade (1..25) dada por uma ROM de teste (MK_GRANT=n python build.py ...): posicoes usadas
+  anotadas e todas ligadas a poses do Meta Knight; fotos de fogo, bomba, martelo, lutador, Smash e missil.
 - Nao testado: multiplayer pelo cabo / "Mesmo PC" com dois Meta Knights; habilidades copiadas com a
   espada guardada (os golpes delas viram cortes sem espada).
