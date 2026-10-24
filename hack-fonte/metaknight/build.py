@@ -5,7 +5,9 @@
 #    0x80000 do unk8 (o jogo não copia os desenhos deles para a VRAM nem os mostra) e anima/mostra dois
 #    sprites-sombra por jogador (EWRAM livre): o corpo (animação 0x390) e a espada Galaxia (0x391, mesma
 #    variante), escolhidos pelas tabelas MAPA (sem espada) / MAPS (com a espada = habilidade Sword);
-#  - espada: sacada por padrão (o jogador recebe a habilidade Sword do próprio jogo, com os golpes dela);
+#  - espada: sacada por padrão (o jogador recebe a habilidade Master do próprio jogo, com os golpes dela:
+#    segurar B carrega e soltar dispara a onda);
+#  - defesa: segurando R parado ou agachado, não leva dano (bit 0x8000 das flags, que o jogo já usa para isso);
 #    SELECT (Backspace no site) guarda/saca. Ao guardar, ou ao levar dano, a estrela da habilidade não sai
 #    (desvio no começo de sub_080A9038); depois de levar dano a espada volta sozinha;
 #  - o desenho do golpe da espada do Kirby (objeto à parte) some para o Meta Knight (desvio em sub_080753CC);
@@ -21,7 +23,8 @@ from icon_mk import tiles as icon_tiles, MKPAL
 HOOK = 0x08F40000          # espaço livre (0xFF) no fim da ROM, de 0x08F330A8 em diante
 HOOK2 = 0x08F41000         # prévia da Collection Room
 HOOK3 = 0x08F41200         # estrela da habilidade
-HOOK4 = 0x08F41300         # objeto do golpe da espada (sub_080753CC)
+HOOK4 = 0x08F41300         # objeto do golpe da espada da Sword (sub_080753CC)
+HOOK5 = 0x08F41380         # objeto do golpe da espada da Master (sub_08075EDC)
 DATA = 0x08F41400
 MAPA = DATA                # 185: animationIndex -> variante da 0x390 sem espada (0xFF = animação do Kirby)
 MAPS = DATA + 0x100        # 185: idem com a espada (habilidade Sword)
@@ -33,6 +36,7 @@ SWSH = 0x0203FE00          # 4 sprites de 0x28 bytes (espada)
 MARK = 0x0203FFA0          # 4 bytes: 1 = o hack marcou o sprite desse jogador
 SWOFF = 0x0203FFA4         # 4 bytes: 1 = espada guardada
 PREVAB = 0x0203FFA8        # 4 bytes: habilidade no quadro anterior
+GUARD = 0x0203FFAC         # 4 bytes: 1 = defendendo (o hack ligou o bit 0x8000 das flags: sem dano)
 ANIM_STEP = 0x08155128     # sub_08155128(struct Sprite *) -> 0 quando a animação acabou
 DISPLAY = 0x0815604C       # DisplaySprite(struct Sprite *)
 SET_ANIMS = 0x0806F260     # tabelas de animação da habilidade
@@ -40,7 +44,7 @@ SET_PAL = 0x0806EFF8       # paleta do chapéu
 SET_OBJ = 0x0806F288       # objeto da habilidade (a Sword cria o da espada)
 MK_ANIM, SW_ANIM = 0x390, 0x391
 MKPAL_ROM = 0x084BB0EC + 0x20 * 442   # paleta 442 (corpo do Meta Knight)
-SWORD = 18                 # KIRBY_ABILITY_SWORD
+SWORD = 26                 # habilidade da espada sacada: KIRBY_ABILITY_MASTER (segurar B carrega e solta a onda)
 GRANT = int(__import__('os').environ.get('MK_GRANT', SWORD))   # só para testes: dar outra habilidade
 NUM_HUMANS = 0x0203AD30    # gNumHumanPlayers
 PAINT = 0x0203AD1C         # gUnk_0203AD1C[jogador]: tinta escolhida (0xFF = nenhuma, a carinha do Kirby)
@@ -57,6 +61,7 @@ SITE = 0x0803F77C          # bl DisplaySprite(r7) + epílogo de sub_0803F46C
 SITE2 = 0x081459C6         # sub_08145974: "DisplaySprite(&a1->unk40[0x2B])" (o Kirby "depois" da prévia)
 SITE3 = 0x080A9038         # começo de sub_080A9038 (solta a estrela da habilidade)
 SITE4 = 0x08075428         # sub_080753CC: "objBase->flags |= kirby->base.flags & 0x2405" (r4 obj, r6 kirby, r7 sprite)
+SITE5 = 0x08075F36         # sub_08075EDC: o mesmo (r4 obj, r6 kirby, r8 sprite)
 PREV_TILES = 0x083868C8 + 6 * 0x35 + 4   # gUnk_083868C8[0x35][2]: blocos de VRAM dos Kirbys da prévia (9)
 PREV_ANIM, PREV_VAR = 0x389, 18            # gUnk_083868C8[0x35]: animação do Kirby da prévia
 ITEM_SAPPHIRE = 0x108
@@ -99,15 +104,21 @@ MAP_A = table(COMMON + [
     ([26, 27, 28, 31, 36, 38, 43, 106, 107], 0x13),  # aspirando
     ([39, 122], 0x16),                               # soprando / cuspindo estrela -> corte
 ])
-# Com a Sword as posições 0..121 vêm de outra tabela do jogo (gUnk_0834C9AC): 26..30 e 39 são "parado" (não
-# aspira), 31/36/43 começam/terminam o voo, e de 103 em diante são golpes da espada.
+# Com a espada (Master; mesma tabela base da Sword, gUnk_0834C9AC) as posições 26..30 e 39 são "parado" (não
+# aspira), 31/36/43 começam/terminam o voo, e de 103 em diante são golpes. Vistos no teste: B = 53/52/54/111,
+# segurar B = 121 (carregando), soltar = 113/114 (onda), cima+B = 115..117, correndo+B = 118..120,
+# baixo+B no ar = 103.
 MAP_S = table(COMMON + [
     ([31, 36, 43], 0xF),                       # começa / termina o voo: capa-asas
     (66, 0x16), (67, 0x17), (68, 0x18),
     (106, 0x16), (107, 0x17), (108, 0x18), (110, 0x19),
     ([104, 105], 0x15),                        # no ar: giro
-    ([113, 114, 121], 0x14), ([115, 116, 117], 0x1B), ([118, 119, 120], 0x16),
+    (121, 0x0),                                # carregando: parado com a espada (o jogo põe o brilho)
+    ([113, 114], 0x16),                        # solta a onda: corte para a frente
+    ([115, 116, 117], 0x1B),                   # corte para cima
+    ([118, 119, 120], 0x5),                    # investida: corte em meia-lua
 ])
+GUARD_POSE = 0x10                              # defesa (R): escudo de luz na frente da espada
 
 
 def body_tiles():
@@ -166,6 +177,17 @@ def hook():
     a.label('swdone')
     a.ldr_lit('r0', 0x103); a.ldrb_r('r0', 'r4', 'r0')
     a.ldr_lit('r2', PREVAB); a.strb_r('r0', 'r2', 'r5')
+    # --- defesa: segurando R no chão (parado, agachado, andando ou freando; ele para). Flags 0x8000 = o jogo não aplica dano (ver 0x080365A6) ---
+    a.ldr_lit('r0', 0x118); a.ldrh_r('r0', 'r4', 'r0'); a.ldr_lit('r1', 0x100); a.alu('tst', 'r0', 'r1')
+    a.bc('eq', 'noguard')
+    a.mov('r0', 0xD4); a.ldrh_r('r0', 'r4', 'r0'); a.cmpi('r0', 12); a.bc('hi', 'noguard')   # parado/agachado/andando/freando
+    a.ldr_i('r0', 'r4', 8); a.ldr_lit('r1', 0x8000); a.alu('orr', 'r0', 'r1'); a.str_i('r0', 'r4', 8)
+    a.mov('r0', 0); a.mov('r1', 0x50); a.strh_r('r0', 'r4', 'r1')                 # para de andar (base.xspeed)
+    a.ldr_lit('r1', GUARD); a.mov('r0', 1); a.strb_r('r0', 'r1', 'r5'); a.b('pal')
+    a.label('noguard')
+    a.ldr_lit('r1', GUARD); a.ldrb_r('r0', 'r1', 'r5'); a.cmpi('r0', 0); a.bc('eq', 'pal')
+    a.mov('r0', 0); a.strb_r('r0', 'r1', 'r5')
+    a.ldr_i('r0', 'r4', 8); a.ldr_lit('r1', 0x8000); a.alu('bic', 'r0', 'r1'); a.str_i('r0', 'r4', 8)
     a.b('pal')
     a.pool()
     # --- paleta do corpo a cada quadro (fora das transições de tela) ---
@@ -208,6 +230,9 @@ def hook():
     a.ldr_lit('r1', MAPS)
     a.label('nosw')
     a.ldrb_r('r1', 'r1', 'r0')
+    a.ldr_lit('r2', GUARD); a.ldrb_r('r2', 'r2', 'r5'); a.cmpi('r2', 0); a.bc('eq', 'noguardpose')
+    a.mov('r1', GUARD_POSE)
+    a.label('noguardpose')
     a.ldr_i('r2', 'r6', 8); a.mov('r3', 0x80); a.lsl('r3', 'r3', 3)              # o Meta Knight é desenhado
     a.alu('eor', 'r2', 'r3'); a.str_i('r2', 'r6', 8)                             # virado para o outro lado
     a.movh('r9', 'r1')                                                           # r9 = variante
@@ -329,29 +354,34 @@ def hook3():
     return a.build()
 
 
-def hook4():
-    # O golpe da espada do Kirby é um objeto à parte (sprite em VRAM base+0x400, em cima da Galaxia).
-    # Para o Meta Knight: some o desenho (flags 0x400, como quando o Kirby pisca) e não copia blocos
+def hide_obj(base, site, spr):
+    # O golpe da espada do Kirby (Sword ou Master) é um objeto à parte (sprite em VRAM base+0x400, em cima da
+    # Galaxia). Para o Meta Knight: some o desenho (flags 0x400, como quando o Kirby pisca) e não copia blocos
     # (sprite.unk8 0x80000); as áreas de acerto continuam (vêm da animação, que segue rodando).
-    a = Asm(HOOK4)
+    a = Asm(base)
     a.ldr_i('r0', 'r6', 8); a.ldr_lit('r2', 0x2405); a.alu('and_', 'r0', 'r2'); a.alu('orr', 'r1', 'r0')  # original
     a.mov('r0', 0x56); a.ldrb_r('r0', 'r6', 'r0')
     a.ldr_lit('r2', NUM_HUMANS); a.ldrb_i('r2', 'r2', 0); a.alu('cmp', 'r0', 'r2'); a.bc('hs', 'done')
     a.ldr_lit('r2', PAINT); a.ldrb_r('r2', 'r2', 'r0'); a.cmpi('r2', SAPPHIRE); a.bc('ne', 'done')
     a.mov('r0', 0x80); a.lsl('r0', 'r0', 3); a.alu('orr', 'r1', 'r0')
-    a.ldr_i('r0', 'r7', 8); a.ldr_lit('r2', 0x80000); a.alu('orr', 'r0', 'r2'); a.str_i('r0', 'r7', 8)
+    a.movh('r3', spr)
+    a.ldr_i('r0', 'r3', 8); a.ldr_lit('r2', 0x80000); a.alu('orr', 'r0', 'r2'); a.str_i('r0', 'r3', 8)
     a.label('done')
     a.str_i('r1', 'r4', 8)
-    a.ldr_lit('r0', (SITE4 + 10) | 1); a.bx('r0')
+    a.ldr_lit('r0', (site + 10) | 1); a.bx('r0')
     a.pool()
     return a.build()
 
 
-def site4():
-    s = Asm(SITE4)
-    s.ldr_lit('r2', HOOK4 | 1); s.bx('r2')     # literal em SITE4+4
+def site_obj(site, hook):
+    s = Asm(site)
+    if site % 4 == 0:
+        s.ldr_lit('r2', hook | 1); s.bx('r2')          # literal em site+4
+    else:
+        s.ldr_lit('r2', hook | 1); s.bx('r2'); s.h(0x46C0)   # nop; literal em site+6
     s.pool()
-    return s.build()
+    out = s.build()
+    return out + bytes([0xC0, 0x46]) * ((10 - len(out)) // 2)
 
 
 def site(a_addr, b_addr):
@@ -384,17 +414,19 @@ def patches():
     st = site(a.labels['A'], a.labels['B'])
     assert len(st) == 16, len(st)
     prev = PREVIEW - 0x08000000 + 4 * SAPPHIRE
-    s2, s3, s4, h2, h3, h4 = site2(), site3(), site4(), hook2(), hook3(), hook4()
-    assert len(s2) == 10 and len(s3) == 8 and len(s4) == 8
-    assert len(h2) <= HOOK3 - HOOK2 and len(h3) <= HOOK4 - HOOK3 and len(h4) <= DATA - HOOK4
+    s2, s3, h2, h3 = site2(), site3(), hook2(), hook3()
+    s4, h4 = site_obj(SITE4, HOOK4), hide_obj(HOOK4, SITE4, 'r7')
+    s5, h5 = site_obj(SITE5, HOOK5), hide_obj(HOOK5, SITE5, 'r8')
+    assert len(s2) == 10 and len(s3) == 8 and len(s4) == 10 and len(s5) == 10
+    assert len(h2) <= HOOK3 - HOOK2 and len(h3) <= HOOK4 - HOOK3 and len(h4) <= HOOK5 - HOOK4 and len(h5) <= DATA - HOOK5
     data = bytearray(b'\xff' * 0x2B0)
     data[0:185] = bytes(MAP_A); data[0x100:0x100 + 185] = bytes(MAP_S)
     data[0x200:0x200 + 41] = body_tiles()
     data[0x240:0x240 + 96] = b''.join(icon_tiles())
     data[0x2A0:0x2AC] = struct.pack('<6H', *[MKPAL[i] for i in range(1, 7)])
-    return [(SITE - 0x08000000, st), (SITE2 - 0x08000000, s2), (SITE3 - 0x08000000, s3), (SITE4 - 0x08000000, s4),
+    return [(SITE - 0x08000000, st), (SITE2 - 0x08000000, s2), (SITE3 - 0x08000000, s3), (SITE4 - 0x08000000, s4), (SITE5 - 0x08000000, s5),
             (prev, struct.pack('<HBb', MK_ANIM, 0, 0)), (PREV_TILES - 0x08000000, struct.pack('<H', 20)),
-            (HOOK - 0x08000000, code), (HOOK2 - 0x08000000, h2), (HOOK3 - 0x08000000, h3), (HOOK4 - 0x08000000, h4),
+            (HOOK - 0x08000000, code), (HOOK2 - 0x08000000, h2), (HOOK3 - 0x08000000, h3), (HOOK4 - 0x08000000, h4), (HOOK5 - 0x08000000, h5),
             (DATA - 0x08000000, bytes(data))]
 
 

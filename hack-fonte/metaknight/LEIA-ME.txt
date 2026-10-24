@@ -6,8 +6,10 @@ O que faz
   carinha) ou com outra tinta e o Kirby. Os ajudantes do computador continuam Kirby.
 - Desenhos do proprio Amazing Mirror: corpo = animacao 0x390, espada Galaxia = 0x391 (mesma variante,
   com os rastros rosa dos cortes). Nao vem do Nightmare in Dream Land (la o formato e outro).
-- Espada sacada = habilidade Sword do proprio jogo (os golpes dela dao o dano): combo com B, estocada e
-  corte em meia-lua correndo, giro no ar. SELECT (Backspace no site) guarda/saca a espada sem soltar a
+- Espada sacada = habilidade Master do proprio jogo (os golpes dela dao o dano): combo com B, segurar B
+  carrega e soltar dispara a onda dourada, cima+B corte para cima, correndo+B investida, baixo+B no ar.
+- R segurado no chao = defesa (escudo de luz da pose 0x10): sem dano enquanto segura (bit 0x8000 das
+  flags do Kirby, que o jogo ja checa antes de aplicar dano em 0x080365A6); ele para de andar. SELECT (Backspace no site) guarda/saca a espada sem soltar a
   estrela da habilidade; levando dano a espada volta sozinha. Com a espada guardada ele aspira e copia
   habilidades como o Kirby (SELECT solta a habilidade copiada, como no jogo).
 - Flutuar = capa virando asas (com e sem espada). Icone de vidas do HUD = desenho do usuario
@@ -26,8 +28,9 @@ Como funciona (enderecos da decompilacao github.com/jiangzhengwenjz/katam, mesma
   ability = 18 + sub_0806F260 / sub_0806EFF8 / sub_0806F288 (como o jogo faz).
 - 0x080A9038 (sub_080A9038, solta a estrela da habilidade) desvia para 0x08F41200: Meta Knight com a
   Sword nao solta estrela.
-- 0x08075428 (sub_080753CC, objeto do golpe da espada do Kirby) desvia para 0x08F41300: para o Meta
-  Knight o desenho do objeto some (flags 0x400) e nao copia blocos (0x80000); o acerto continua.
+- 0x08075428 (sub_080753CC, golpe da Sword) e 0x08075F36 (sub_08075EDC, golpe da Master) desviam para
+  0x08F41300 / 0x08F41380: para o Meta Knight o desenho do objeto some (flags 0x400) e nao copia blocos
+  (0x80000); o acerto continua.
 - Paleta 442 (corpo) copiada a cada quadro para a do jogador, fora das transicoes de tela (o jogo recarrega
   a do Kirby ao trocar de habilidade). HUD do jogador deste aparelho: blocos 0x18F/0x190/0x19F do BG
   (so se o mapa do HUD tiver 0xF18F no lugar do rostinho) e cores 1..6 da paleta 15 do BG.
@@ -42,7 +45,8 @@ Gerar os bytes
 
 Testado (motor do site, no Node)
 - Sem a Sapphire: 12.000 quadros com os mesmos botoes na ROM original e na com o hack = mesmo jogo.
-- Com a Sapphire: 12.000 quadros de botoes aleatorios (golpes, SELECT, dano, troca de sala) sem travar.
+- Com a Sapphire: 12.000 quadros de botoes aleatorios (golpes, SELECT, R, dano, troca de sala) sem travar.
+- Defesa: andando ate um inimigo, sem R leva dano no mesmo quadro que o Kirby; com R nao leva.
 - Fotos: parado, andando, correndo, pulando, voando com asas, golpes (combo, correndo, no ar), SELECT
   guardando e sacando, icone do HUD, previa da Collection Room e o caminho completo escolhendo a Sapphire.
 - Cada habilidade (1..25) dada por uma ROM de teste (MK_GRANT=n python build.py ...): posicoes usadas

@@ -44,6 +44,7 @@ class Asm:
     def ldrb_r(self, d, n, m): self.h(0x5C00 | r(m) << 6 | r(n) << 3 | r(d))
     def strb_r(self, d, n, m): self.h(0x5400 | r(m) << 6 | r(n) << 3 | r(d))
     def ldrh_r(self, d, n, m): self.h(0x5A00 | r(m) << 6 | r(n) << 3 | r(d))
+    def strh_r(self, d, n, m): self.h(0x5200 | r(m) << 6 | r(n) << 3 | r(d))
     def add_r(self, d, n, m): self.h(0x1800 | r(m) << 6 | r(n) << 3 | r(d))
     def alu(self, op, d, m):
         self.h(0x4000 | dict(and_=0, eor=1, orr=12, bic=14, tst=8, mul=13, cmp=10)[op] << 6 | r(m) << 3 | r(d))
