@@ -7,7 +7,8 @@
 #    variante), escolhidos pelas tabelas MAPA (sem espada) / MAPS (com a espada = habilidade Sword);
 #  - espada: sacada por padrão (o jogador recebe a habilidade Master do próprio jogo, com os golpes dela:
 #    segurar B carrega e soltar dispara a onda);
-#  - defesa: segurando R parado ou agachado, não leva dano (bit 0x8000 das flags, que o jogo já usa para isso);
+#  - defesa: segurando R (inclusive correndo ou no ar) ele para na pose de "parry" do Dark Meta Knight e não
+#    leva dano (bit 0x8000 das flags, que o jogo já checa); golpe bloqueado toca o som de parry dele;
 #    SELECT (Backspace no site) guarda/saca. Ao guardar, ou ao levar dano, a estrela da habilidade não sai
 #    (desvio no começo de sub_080A9038); depois de levar dano a espada volta sozinha;
 #  - o desenho do golpe da espada do Kirby (objeto à parte) some para o Meta Knight (desvio em sub_080753CC);
@@ -25,6 +26,7 @@ HOOK2 = 0x08F41000         # prévia da Collection Room
 HOOK3 = 0x08F41200         # estrela da habilidade
 HOOK4 = 0x08F41300         # objeto do golpe da espada da Sword (sub_080753CC)
 HOOK5 = 0x08F41380         # objeto do golpe da espada da Master (sub_08075EDC)
+HOOK6 = 0x08F41100         # golpe bloqueado pela defesa: som de "parry" do Dark Meta Knight
 DATA = 0x08F41400
 MAPA = DATA                # 185: animationIndex -> variante da 0x390 sem espada (0xFF = animação do Kirby)
 MAPS = DATA + 0x100        # 185: idem com a espada (habilidade Sword)
@@ -37,6 +39,10 @@ MARK = 0x0203FFA0          # 4 bytes: 1 = o hack marcou o sprite desse jogador
 SWOFF = 0x0203FFA4         # 4 bytes: 1 = espada guardada
 PREVAB = 0x0203FFA8        # 4 bytes: habilidade no quadro anterior
 GUARD = 0x0203FFAC         # 4 bytes: 1 = defendendo (o hack ligou o bit 0x8000 das flags: sem dano)
+PARRYCD = 0x0203FFB0       # 4 bytes: quadros até poder tocar o "parry" de novo
+SONG_START = 0x0815011C    # m4aSongNumStart(num)
+SE_DMK_PARRY = 0x1A6
+SITE6 = 0x080365A0         # "flags & 0x8000 -> não aplica dano" (r4 = flags, r5 = kirby)
 ANIM_STEP = 0x08155128     # sub_08155128(struct Sprite *) -> 0 quando a animação acabou
 DISPLAY = 0x0815604C       # DisplaySprite(struct Sprite *)
 SET_ANIMS = 0x0806F260     # tabelas de animação da habilidade
@@ -118,7 +124,7 @@ MAP_S = table(COMMON + [
     ([115, 116, 117], 0x1B),                   # corte para cima
     ([118, 119, 120], 0x5),                    # investida: corte em meia-lua
 ])
-GUARD_POSE = 0x10                              # defesa (R): escudo de luz na frente da espada
+GUARD_POSE, GUARD_POSE_AIR = 0x8, 0x9            # defesa (R): as poses de "parry" do Dark Meta Knight
 
 
 def body_tiles():
@@ -177,10 +183,13 @@ def hook():
     a.label('swdone')
     a.ldr_lit('r0', 0x103); a.ldrb_r('r0', 'r4', 'r0')
     a.ldr_lit('r2', PREVAB); a.strb_r('r0', 'r2', 'r5')
-    # --- defesa: segurando R no chão (parado, agachado, andando ou freando; ele para). Flags 0x8000 = o jogo não aplica dano (ver 0x080365A6) ---
+    a.ldr_lit('r2', PARRYCD); a.ldrb_r('r0', 'r2', 'r5'); a.cmpi('r0', 0); a.bc('eq', 'cd0')
+    a.subi('r0', 1); a.strb_r('r0', 'r2', 'r5')
+    a.label('cd0')
+    # --- defesa: segurando R (parado, andando, correndo, pulando ou caindo; ele para). Flags 0x8000 = o jogo não aplica dano (ver 0x080365A6) ---
     a.ldr_lit('r0', 0x118); a.ldrh_r('r0', 'r4', 'r0'); a.ldr_lit('r1', 0x100); a.alu('tst', 'r0', 'r1')
     a.bc('eq', 'noguard')
-    a.mov('r0', 0xD4); a.ldrh_r('r0', 'r4', 'r0'); a.cmpi('r0', 12); a.bc('hi', 'noguard')   # parado/agachado/andando/freando
+    a.mov('r0', 0xD4); a.ldrh_r('r0', 'r4', 'r0'); a.cmpi('r0', 25); a.bc('hi', 'noguard')   # andando, correndo, pulando...
     a.ldr_i('r0', 'r4', 8); a.ldr_lit('r1', 0x8000); a.alu('orr', 'r0', 'r1'); a.str_i('r0', 'r4', 8)
     a.mov('r0', 0); a.mov('r1', 0x50); a.strh_r('r0', 'r4', 'r1')                 # para de andar (base.xspeed)
     a.ldr_lit('r1', GUARD); a.mov('r0', 1); a.strb_r('r0', 'r1', 'r5'); a.b('pal')
@@ -232,6 +241,8 @@ def hook():
     a.ldrb_r('r1', 'r1', 'r0')
     a.ldr_lit('r2', GUARD); a.ldrb_r('r2', 'r2', 'r5'); a.cmpi('r2', 0); a.bc('eq', 'noguardpose')
     a.mov('r1', GUARD_POSE)
+    a.cmpi('r0', 15); a.bc('lo', 'noguardpose'); a.cmpi('r0', 19); a.bc('hi', 'noguardpose')
+    a.mov('r1', GUARD_POSE_AIR)                                                  # 15..19: no ar
     a.label('noguardpose')
     a.ldr_i('r2', 'r6', 8); a.mov('r3', 0x80); a.lsl('r3', 'r3', 3)              # o Meta Knight é desenhado
     a.alu('eor', 'r2', 'r3'); a.str_i('r2', 'r6', 8)                             # virado para o outro lado
@@ -384,6 +395,33 @@ def site_obj(site, hook):
     return out + bytes([0xC0, 0x46]) * ((10 - len(out)) // 2)
 
 
+def hook6():
+    # Em 0x080365A0 o jogo testa "flags & 0x8000" para não aplicar dano. Se quem não tomou dano foi o Meta
+    # Knight defendendo, toca o "parry" do Dark Meta Knight (no máximo a cada 30 quadros; só no aparelho dele).
+    a = Asm(HOOK6)
+    a.mov('r0', 0x80); a.lsl('r0', 'r0', 8); a.alu('and_', 'r4', 'r0'); a.cmpi('r4', 0); a.bc('ne', 'blocked')
+    a.ldr_lit('r0', (SITE6 + 10) | 1); a.bx('r0')                    # segue para o dano, como antes
+    a.label('blocked')
+    a.mov('r0', 0x56); a.ldrb_r('r1', 'r5', 'r0')
+    a.ldr_lit('r2', GUARD); a.ldrb_r('r0', 'r2', 'r1'); a.cmpi('r0', 0); a.bc('eq', 'skip')
+    a.ldr_lit('r2', PARRYCD); a.ldrb_r('r0', 'r2', 'r1'); a.cmpi('r0', 0); a.bc('ne', 'skip')
+    a.mov('r0', 30); a.strb_r('r0', 'r2', 'r1')
+    a.ldr_lit('r2', LOCAL); a.ldrb_i('r2', 'r2', 0); a.alu('cmp', 'r1', 'r2'); a.bc('ne', 'skip')
+    a.ldr_lit('r0', SE_DMK_PARRY); a.ldr_lit('r3', SONG_START | 1); a.bl('callr3')
+    a.label('skip')
+    a.ldr_lit('r0', 0x080365BA | 1); a.bx('r0')                     # não aplica o dano
+    a.label('callr3'); a.bx('r3')
+    a.pool()
+    return a.build()
+
+
+def site6():
+    s = Asm(SITE6)
+    s.ldr_lit('r0', HOOK6 | 1); s.bx('r0')     # literal em SITE6+4
+    s.pool()
+    return s.build()
+
+
 def site(a_addr, b_addr):
     s = Asm(SITE)
     s.ldr_lit('r3', a_addr | 1); s.bx('r3')  # literal em SITE+8
@@ -417,16 +455,18 @@ def patches():
     s2, s3, h2, h3 = site2(), site3(), hook2(), hook3()
     s4, h4 = site_obj(SITE4, HOOK4), hide_obj(HOOK4, SITE4, 'r7')
     s5, h5 = site_obj(SITE5, HOOK5), hide_obj(HOOK5, SITE5, 'r8')
+    s6, h6 = site6(), hook6()
+    assert len(s6) == 8 and len(h6) <= HOOK3 - HOOK6
     assert len(s2) == 10 and len(s3) == 8 and len(s4) == 10 and len(s5) == 10
-    assert len(h2) <= HOOK3 - HOOK2 and len(h3) <= HOOK4 - HOOK3 and len(h4) <= HOOK5 - HOOK4 and len(h5) <= DATA - HOOK5
+    assert len(h2) <= HOOK6 - HOOK2 and len(h3) <= HOOK4 - HOOK3 and len(h4) <= HOOK5 - HOOK4 and len(h5) <= DATA - HOOK5
     data = bytearray(b'\xff' * 0x2B0)
     data[0:185] = bytes(MAP_A); data[0x100:0x100 + 185] = bytes(MAP_S)
     data[0x200:0x200 + 41] = body_tiles()
     data[0x240:0x240 + 96] = b''.join(icon_tiles())
     data[0x2A0:0x2AC] = struct.pack('<6H', *[MKPAL[i] for i in range(1, 7)])
-    return [(SITE - 0x08000000, st), (SITE2 - 0x08000000, s2), (SITE3 - 0x08000000, s3), (SITE4 - 0x08000000, s4), (SITE5 - 0x08000000, s5),
+    return [(SITE - 0x08000000, st), (SITE2 - 0x08000000, s2), (SITE3 - 0x08000000, s3), (SITE4 - 0x08000000, s4), (SITE5 - 0x08000000, s5), (SITE6 - 0x08000000, s6),
             (prev, struct.pack('<HBb', MK_ANIM, 0, 0)), (PREV_TILES - 0x08000000, struct.pack('<H', 20)),
-            (HOOK - 0x08000000, code), (HOOK2 - 0x08000000, h2), (HOOK3 - 0x08000000, h3), (HOOK4 - 0x08000000, h4), (HOOK5 - 0x08000000, h5),
+            (HOOK - 0x08000000, code), (HOOK2 - 0x08000000, h2), (HOOK3 - 0x08000000, h3), (HOOK4 - 0x08000000, h4), (HOOK5 - 0x08000000, h5), (HOOK6 - 0x08000000, h6),
             (DATA - 0x08000000, bytes(data))]
 
 

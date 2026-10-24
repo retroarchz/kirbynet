@@ -8,8 +8,10 @@ O que faz
   com os rastros rosa dos cortes). Nao vem do Nightmare in Dream Land (la o formato e outro).
 - Espada sacada = habilidade Master do proprio jogo (os golpes dela dao o dano): combo com B, segurar B
   carrega e soltar dispara a onda dourada, cima+B corte para cima, correndo+B investida, baixo+B no ar.
-- R segurado no chao = defesa (escudo de luz da pose 0x10): sem dano enquanto segura (bit 0x8000 das
-  flags do Kirby, que o jogo ja checa antes de aplicar dano em 0x080365A6); ele para de andar. SELECT (Backspace no site) guarda/saca a espada sem soltar a
+- R segurado (parado, andando, correndo, pulando ou caindo) = defesa com as poses de "parry" do Dark
+  Meta Knight (0x8 no chao, 0x9 no ar): sem dano enquanto segura (bit 0x8000 das flags do Kirby, que o
+  jogo ja checa antes de aplicar dano); ele para. 0x080365A0 desvia para 0x08F41100: golpe bloqueado
+  toca SE_DMK_PARRY (no maximo a cada 30 quadros, so no aparelho do jogador). SELECT (Backspace no site) guarda/saca a espada sem soltar a
   estrela da habilidade; levando dano a espada volta sozinha. Com a espada guardada ele aspira e copia
   habilidades como o Kirby (SELECT solta a habilidade copiada, como no jogo).
 - Flutuar = capa virando asas (com e sem espada). Icone de vidas do HUD = desenho do usuario
@@ -46,7 +48,8 @@ Gerar os bytes
 Testado (motor do site, no Node)
 - Sem a Sapphire: 12.000 quadros com os mesmos botoes na ROM original e na com o hack = mesmo jogo.
 - Com a Sapphire: 12.000 quadros de botoes aleatorios (golpes, SELECT, R, dano, troca de sala) sem travar.
-- Defesa: andando ate um inimigo, sem R leva dano no mesmo quadro que o Kirby; com R nao leva.
+- Defesa: andando ate um inimigo, sem R leva dano no mesmo quadro que o Kirby; com R nao leva. Correndo
+  com R segurado tambem nao leva, e o parry e acionado.
 - Fotos: parado, andando, correndo, pulando, voando com asas, golpes (combo, correndo, no ar), SELECT
   guardando e sacando, icone do HUD, previa da Collection Room e o caminho completo escolhendo a Sapphire.
 - Cada habilidade (1..25) dada por uma ROM de teste (MK_GRANT=n python build.py ...): posicoes usadas
