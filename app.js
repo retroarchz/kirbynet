@@ -344,7 +344,7 @@ function renderGame(m, fresh) {
   badges($("game-players"), m.players, m.my, m.players.length);
   // SNES: um console só, uma tela para todos. GBA: um por jogador. Mundo livre: este aparelho roda só o
   // próprio jogo, que no motor é sempre o 0
-  const show = SYS.oneScreen || m.free || m.shared ? [0] : m.mode === "local" || m.view_all ? [...Array(m.n).keys()] : [m.my];
+  const show = SYS.oneScreen || m.free ? [0] : m.mode === "local" || m.view_all ? [...Array(m.n).keys()] : [m.my];
   const stage = $("stage");
   const key = show.join(",");
   if (fresh || stage.dataset.key !== key) {
@@ -359,15 +359,14 @@ function renderGame(m, fresh) {
     for (const i of show) {
       const box = document.createElement("div");
       box.className = "screen";
-      box.style.setProperty("--c", COLORS[SYS.oneScreen || m.free || m.shared ? m.my || 0 : i]);
+      box.style.setProperty("--c", COLORS[SYS.oneScreen || m.free ? m.my || 0 : i]);
       const cv = document.createElement("canvas");
       cv.width = W; cv.height = H;
       const ctx = cv.getContext("2d", { alpha: false });
       canvases[i] = { ctx, img: ctx.createImageData(W, H) };
       const tag = document.createElement("span");
       tag.className = "tag";
-      tag.textContent = m.shared ? `P${m.my + 1} ${m.players[m.my] || ""} · você comanda o Pokémon da ${["esquerda", "meio", "direita"][m.my] || "—"}`
-        : m.free ? `P${m.my + 1} ${m.players[m.my] || ""} · ${m.cabo ? "Coop pelo cabo" : "Mundo livre"}`
+      tag.textContent = m.free ? `P${m.my + 1} ${m.players[m.my] || ""} · ${m.cabo ? "Coop pelo cabo" : "Mundo livre"}`
         : SYS.oneScreen ? (m.players || []).map((p, j) => `P${j + 1} ${p}`).join(" · ") : `P${i + 1} ${m.players[i] || ""}`;
       box.append(cv, tag);
       stage.appendChild(box);
@@ -375,7 +374,7 @@ function renderGame(m, fresh) {
   }
   Fit.apply();
   $("btn-all").textContent = m.view_all ? "Só a minha" : "Ver todas";
-  $("btn-all").classList.toggle("hidden", m.mode === "local" || SYS.oneScreen || !!m.free || !!m.shared);
+  $("btn-all").classList.toggle("hidden", m.mode === "local" || SYS.oneScreen || !!m.free);
   $("btn-ff").classList.toggle("hidden", m.mode !== "local");   // acelerar: só sozinho / "Mesmo PC"
   $("btn-ffx").classList.toggle("hidden", m.mode !== "local");
   updateTurboButton();
