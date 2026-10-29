@@ -223,7 +223,8 @@ function renderRooms(rooms) {
   for (const r of rooms) {
     const b = document.createElement("button");
     b.style.background = "var(--p4)";
-    // Mundo livre (SNES): dá para entrar com a partida rolando (inclusive quem caiu volta para a vaga dele)
+    // Mundo livre (SNES, e GBA com cabo pela internet): dá para entrar com a partida rolando (inclusive quem
+    // caiu volta para a vaga dele)
     const inside = r.players.filter(Boolean).length, late = r.running && r.free;
     b.textContent = `▶ Sala de ${r.host} · ${String(r.game).replace(SYS.romRe, "")} · ${inside}/${SYS.roomMax}${late ? " (jogando — dá para entrar)" : r.running ? " (jogando)" : ""}`;
     b.disabled = (r.running && !r.free) || inside >= SYS.roomMax;
@@ -291,7 +292,7 @@ function roomCallbacks() {
       try {
         // Mundo livre (SNES): cada um no seu jogo, com o seu save. Mesmo console (um SNES só para
         // todos, o save do P1): só o P1 grava, senão o progresso do P1 iria parar no save dos outros.
-        startRun({ n: info.n, rom: Guest.rom, saves: info.saves.map(b64dec), names: info.names,
+        startRun({ n: info.n, rom: Guest.rom, romSha1: Guest.romSha1, saves: info.saves.map(b64dec), names: info.names,
                    net, slot: net.slot, delay: info.delay, free: !!info.free,
                    onSave: info.free || !SYS.oneScreen || net.slot === 0 ? guestSaveWriter() : null });
       } catch (err) { toast(String(err.message || err)); net.close(); showGuestPage(String(err)); }

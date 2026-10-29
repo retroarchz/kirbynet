@@ -8,7 +8,8 @@ const SNES = /[?&]sys=snes\b/.test(location.search);
 const V = (location.search.match(/[?&]v=(\w+)/) || [])[1] || "";   // mesma versão da página
 const NO_RB = /[?&]rb=0\b/.test(location.search);   // página aberta com ?semrollback
 // SNES: também o Mundo livre (fantasma dos outros e inimigos compartilhados, do snesnet v1.6)
-importScripts(...(SNES ? ["sncore.js", "ghost-core.js", "objlayout.js", "coop-sync.js"] : ["kncore.js"]).map(f => f + "?v=" + V));
+// GBA: o cabo link pela internet (linkhle.js) para o coop do Pokémon Quetzal
+importScripts(...(SNES ? ["sncore.js", "ghost-core.js", "objlayout.js", "coop-sync.js"] : ["kncore.js", "linkhle.js"]).map(f => f + "?v=" + V));
 const Core = SNES ? SnCore : KnCore;
 
 const W = Core.W, H = Core.H, FRAME_BYTES = W * H * 4;
@@ -305,11 +306,23 @@ function tick() {
       } else {
         const k = [];
         for (let p = 0; p < run.n; p++) k.push(keys[p] | 0);
-        if (run.free) {   // Mundo livre: inimigos dos outros que sumiram há 1,5 s saem; os outros entram neste SNES
+        if (run.free && SNES) {   // Mundo livre: inimigos dos outros que sumiram há 1,5 s saem; os outros entram neste SNES
           for (const [kk, sn] of Object.entries(run.peerSnaps)) if (run.frames - sn.at > 90) delete run.peerSnaps[kk];
           coopBefore(run.s, Object.values(run.peerSnaps));
         }
+        // GBA com o cabo pela internet: o cabo entrega o que chegou antes do quadro e recolhe o que o jogo
+        // mandou depois dele (a memória do GBA só é achada quando ela já tem conteúdo, logo no começo)
+        if (run.cabo && !run.hle) {
+          const ram = run.s.ram(0);
+          if (ram) run.hle = LinkHLE.create(run.cabo, ram, run.me, (msg) => {
+            const b = LinkHLE.encode(run.me, msg);
+            if (b) postMessage({ t: "cabo", bytes: b }, [b.buffer]);
+          });
+          if (run.hle) for (const d of run.caboEarly.splice(0)) d.left != null ? run.hle.left(d.left) : run.hle.recv(d.from, d.m);
+        }
+        if (run.hle) run.hle.pre();
         run.s.runFrame(k);
+        if (run.hle) run.hle.post();
       }
       // acelerando: só a imagem do último quadro da rodada vai para a tela; o som de todos entra no ffAudio
       if (speed > 1 && run.frames + 1 < due && ran + 1 < cap && performance.now() + (run.busyN ? run.busy / run.busyN : 4) < budget) {
@@ -318,7 +331,7 @@ function tick() {
       }
       // Mundo livre: onde está o MEU Higgins (e o desenho dele, se for novo) e os inimigos dos quais sou dono
       let g = null, poofs = null;
-      if (run.free) {
+      if (run.free && SNES) {
         try {
           const c = Ghost.capture(run.s);
           g = c.g;
@@ -422,8 +435,10 @@ onmessage = async (ev) => {
               // rollback: quadros antes de 'confirmed' já rodaram com os botões de verdade de todos
               confirmed: 0, used: new Map(), lastKnown: [], costAvg: 0,
               // Mundo livre (SNES): cada um no seu SNES, sem lockstep; só o fantasma e os inimigos viajam
-              free: !!m.free, me: m.me | 0, cs: m.free ? [CoopSync.create(m.me | 0)] : null, lastG: [], peerSnaps: {},
+              free: !!m.free, me: m.me | 0, cs: m.free && SNES ? [CoopSync.create(m.me | 0)] : null, lastG: [], peerSnaps: {},
               pendingHits: [], sentIds: new Set(),
+              // GBA: cabo link pela internet (só nos jogos que o linkhle.js conhece)
+              cabo: m.free && !SNES ? m.cabo || null : null, hle: null, caboEarly: [],
               rb: m.net && s.canSnapshot && !NO_RB ? { snaps: new Map(), spare: [], count: 0, resim: 0 } : null };
       run.snapT = performance.now();
       try { run.snapSig = sigOf(grabSaves()); } catch (e) { run.snapSig = null; }
@@ -460,6 +475,12 @@ onmessage = async (ev) => {
   else if (m.t === "resend") { if (run && run.free) run.sentIds.clear(); }
   else if (m.t === "osnap") { if (run && run.free) try { const sn = CoopSync.decodeSnap(new Uint8Array(m.bytes)); sn.at = run.frames; run.peerSnaps[sn.from] = sn; } catch (e) {} }
   else if (m.t === "ohit") { if (run && run.free) try { const h = CoopSync.decodeHit(new Uint8Array(m.bytes)); if (h.to === run.me) run.pendingHits.push(h); } catch (e) {} }
+  // cabo pela internet: mensagem de outro jogador, alguém saiu da sala
+  else if (m.t === "cabo") {
+    const d = run && run.cabo && LinkHLE.decode(new Uint8Array(m.bytes));
+    if (d) { if (run.hle) run.hle.recv(d.from, d.m); else if (run.caboEarly.length < 500) run.caboEarly.push(d); }
+  }
+  else if (m.t === "caboLeft") { if (run && run.cabo) { if (run.hle) run.hle.left(m.from); else run.caboEarly.push({ left: m.from }); } }
   else if (m.t === "bufs") { for (const b of m.bufs) if (b.byteLength === FRAME_BYTES && pool.length < 48) pool.push(b); }
   else if (m.t === "vs") { if (run && iv) tick(); }   // a tela atualizou: roda o quadro que já está na hora
   else if (m.t === "aport") audioPort = m.port;

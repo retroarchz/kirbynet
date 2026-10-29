@@ -456,29 +456,33 @@ function netJoin(url, hello, cb) {
     net.send("R", b);
   };
   const openDcs = () => Object.values(net.peers).map(p => p.dc).filter(dc => dc.readyState === "open");
-  // Mundo livre (SNES): fantasma pelo canal rápido se estiver aberto (perder um não faz mal: vem outro
-  // no quadro seguinte); senão pela sala, um sim outro não (30 por segundo é suficiente).
+  // Mundo livre (SNES): fantasma pelo canal rápido para quem tem o canal aberto (perder um não faz mal:
+  // vem outro no quadro seguinte). Se falta o canal com alguém (entrou depois, outra rede), a sala leva
+  // também, um sim outro não (30 por segundo é suficiente); quem tem o canal ignora essa cópia (dcFresh).
+  // Assim um jogador sem canal não deixa os outros mais lentos entre si (3 ou 4 na sala).
+  const fast = (tag, body) => {
+    const dcs = openDcs();
+    if (dcs.length) {
+      const b = new Uint8Array(1 + body.length); b[0] = tag; b.set(body, 1);
+      for (const dc of dcs) try { dc.send(b); } catch (e) {}
+    }
+    return dcs.length >= (net.nPeers || 1);   // todos têm canal?
+  };
   let ghostN = 0;
   net.ghost = (body) => {
-    const dcs = openDcs();
-    if (dcs.length && dcs.length >= (net.nPeers || 1)) {
-      const b = new Uint8Array(1 + body.length); b[0] = 71; b.set(body, 1);
-      for (const dc of dcs) try { dc.send(b); } catch (e) {}
-      if (++ghostN % 20) return;   // de vez em quando vai pela sala também (reserva)
-    } else if (++ghostN % 2) return;
+    if (fast(71, body) ? ++ghostN % 20 : ++ghostN % 2) return;   // todos com canal: pela sala só de vez em quando (reserva)
     net.send("G", body);
   };
-  // inimigos dos quais eu sou o dono: pelo canal rápido (todo quadro), senão pela sala (1 em cada 2)
+  // inimigos dos quais eu sou o dono: pelo canal rápido (todo quadro), pela sala 1 em cada 2 se falta canal
   let objN = 0;
   net.objs = (body) => {
-    const dcs = openDcs();
-    if (dcs.length && dcs.length >= (net.nPeers || 1)) {
-      const b = new Uint8Array(1 + body.length); b[0] = 79; b.set(body, 1);
-      for (const dc of dcs) try { dc.send(b); } catch (e) {}
-      if (++objN % 30) return;
-    } else if (++objN % 2) return;
+    if (fast(79, body) ? ++objN % 30 : ++objN % 2) return;
     net.send("O", body);
   };
+  // a cópia da sala chega depois da do canal rápido: se o canal com esse jogador está trazendo, ela é
+  // velha e faria o boneco/inimigo voltar para trás por um instante
+  const dcAt = { 71: [], 79: [] };   // tipo -> slot -> quando chegou pelo canal rápido
+  const dcFresh = (tag, slot) => performance.now() - (dcAt[tag][slot] || -1e9) < 300;
   function rtcPacket() {
     const b = new Uint8Array(7 + 2 * mine.length), dv = new DataView(b.buffer);
     b[0] = 73; b[1] = net.slot;   // "I"
@@ -512,8 +516,10 @@ function netJoin(url, hello, cb) {
         if (f > (seen[slot] ?? -1)) { seen[slot] = f; deliver(slot, f, dv.getUint16(7 + 2 * i, true)); }
       }
     } else if (u8[0] === 79) {   // "O": inimigos de outro jogador (Mundo livre)
+      dcAt[79][from] = performance.now();
       if (net.onObjSnap) net.onObjSnap(u8.subarray(1));
     } else if (u8[0] === 71) {   // "G": fantasma de outro jogador (Mundo livre)
+      dcAt[71][from] = performance.now();
       if (net.onGhost) net.onGhost(u8.subarray(1));
     } else if (u8[0] === 80) {   // "P": ping -> devolve como "p"
       const b = u8.slice(); b[0] = 112;
@@ -543,8 +549,16 @@ function netJoin(url, hello, cb) {
       .catch(e => console.warn("canal rápido", e));
     return peer;
   }
+  function dropPeer(slot) {
+    const p = net.peers[slot];
+    if (!p) return;
+    delete net.peers[slot];
+    try { p.pc.close(); } catch (e) {}
+  }
   async function onSignal(from, msg) {
     try {
+      // proposta nova de quem já tinha canal = ele saiu e voltou (Mundo livre): começa do zero
+      if (msg.sdp.type === "offer") dropPeer(from);
       const peer = net.peers[from] || makePeer(from, false);
       await peer.pc.setRemoteDescription(msg.sdp);
       if (msg.sdp.type === "offer") {
@@ -553,10 +567,11 @@ function netJoin(url, hello, cb) {
       }
     } catch (e) { console.warn("canal rápido", e); }
   }
-  // Na partida: quem tem o número menor chama cada um dos outros
-  function rtcStart(n) {
+  // Na partida: quem tem o número menor chama cada um dos outros. Quem entra no meio (Mundo livre)
+  // chama todos que já estão jogando.
+  function rtcStart(info) {
     if (typeof RTCPeerConnection === "undefined") return;
-    for (let s = net.slot + 1; s < n; s++) makePeer(s, true);
+    for (let s = info.late ? 0 : net.slot + 1; s < info.n; s++) if (s !== net.slot && info.names[s] != null) makePeer(s, true);
   }
 
   // Medidor da rede: ping 4x por segundo até o P1 pelo canal rápido (se aberto), senão até o
@@ -622,23 +637,26 @@ function netJoin(url, hello, cb) {
     const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
     if (kind === "W") net.slot = json(data).slot;
     else if (kind === "L") cb.onLobby(json(data).players, net.slot);
-    else if (kind === "S") { const info = json(data); net.nPeers = info.names.filter(Boolean).length - 1; if (info.rtc) rtcStart(info.n); cb.onStart(info); }
+    else if (kind === "S") { const info = json(data); net.nPeers = info.names.filter(Boolean).length - 1; if (info.rtc) rtcStart(info); cb.onStart(info); }
     else if (kind === "J") {   // alguém entrou/saiu no meio da partida (Mundo livre)
       const j = json(data);
       net.nPeers = j.names.filter(Boolean).length - 1;
+      if (j.left != null) { dropPeer(j.left); delete seen[j.left]; }
       const run = Play.run;
       if (run) {
         run.names = j.names; run.worldN = j.names.length;
         S.players = j.names; renderGame(S, false);
         run.worker.postMessage({ t: "resend" });   // manda de novo os desenhos do meu boneco para quem chegou
+        if (run.cabo && j.left != null) run.worker.postMessage({ t: "caboLeft", from: j.left });   // o jogo sai do coop com ele
         if (j.left == null) toast("Alguém entrou na partida!");
         else toast(`P${j.left + 1} saiu. Pode entrar de novo pela sala que aparece no site.`);
       }
     }
-    else if (kind === "G") { if (net.onGhost) net.onGhost(data); }
+    else if (kind === "G") { if (net.onGhost && !dcFresh(71, data[0])) net.onGhost(data); }
     else if (kind === "F") { if (net.onGhostBmp) net.onGhostBmp(data); }
     else if (kind === "K") { if (net.onKill) try { net.onKill(json(data)); } catch (e) {} }
-    else if (kind === "O") { if (net.onObjSnap) net.onObjSnap(data); }
+    else if (kind === "O") { if (net.onObjSnap && !dcFresh(79, data[0])) net.onObjSnap(data); }
+    else if (kind === "C") { if (net.onCabo) net.onCabo(data); }   // cabo link pela internet (GBA)
     else if (kind === "A") { if (net.onHit) net.onHit(data); }
     else if (kind === "I") {
       // sempre entrega (mesmo se o canal rápido já trouxe): é a reserva para quando ele perde vários
@@ -673,13 +691,15 @@ function netJoin(url, hello, cb) {
 
 // ------------------------------------------------------------------ partida
 // Os GBAs rodam em engine-worker.js (linha separada). Aqui só ficam tela, som e botões.
-// opts: { n, rom, saves[], names[], net (ou null), slot, delay,
+// opts: { n, rom, romSha1, saves[], names[], net (ou null), slot, delay,
 //         onSave(saves[], fechandoAba) — grava o save; onEnd(saves[]) — partida acabou }
 function startRun(opts) {
   if (opts.free) {
-    // Mundo livre (SNES): cada um joga o seu jogo, com o seu save; o motor anda sozinho (sem lockstep)
+    // Mundo livre: cada um joga o seu jogo, com o seu save; o motor anda sozinho (sem lockstep).
+    // SNES: vê o fantasma dos outros. GBA (Pokémon Quetzal): o cabo link vai pela internet (linkhle.js)
     const mine = opts.saves[opts.slot];
     opts = { ...opts, worldN: opts.n, n: 1, saves: [mine && mine.length ? mine : new Uint8Array(0)] };
+    if (SYS.id === "gba" && typeof LinkHLE !== "undefined" && LinkHLE.supports(opts.romSha1)) opts.cabo = opts.romSha1;
   }
   // ?semrollback no endereço da página: sala sem rollback (só espera, como antes) — para comparar
   const worker = new Worker(`engine-worker.js?sys=${SYS.id}&v=${ASSET_V}${/[?&]semrollback\b/.test(location.search) ? "&rb=0" : ""}`);
@@ -708,10 +728,12 @@ function startRun(opts) {
   if (Cheats.usable(run)) CheatPresets.applyRom(roms);
   worker.postMessage({ t: "start", module: Play.mod, n: run.n, rom: roms, saves: opts.saves,
                        net: !!run.net && !run.free, free: !!run.free, me: run.slot | 0, slot: run.free ? 0 : run.slot,
+                       cabo: run.cabo || null,
                        delay: run.delay || 0, cheats: cheats.length ? cheats : null }, [roms.buffer]);
   $("btn-cheats").classList.toggle("hidden", !Cheats.usable(run));
-  if (run.free) ghostInit(run);
-  if (run.free && run.net) {
+  if (run.cabo && run.net) run.net.onCabo = (u8) => { const b = u8.slice(); run.worker.postMessage({ t: "cabo", bytes: b.buffer }, [b.buffer]); };
+  if (run.free && !run.cabo) ghostInit(run);
+  if (run.free && !run.cabo && run.net) {
     run.net.onKill = (k) => run.worker.postMessage({ t: "kill", k });
     run.net.onObjSnap = (u8) => { const b = u8.slice(); run.worker.postMessage({ t: "osnap", bytes: b.buffer }, [b.buffer]); };
     run.net.onHit = (u8) => { const b = u8.slice(); run.worker.postMessage({ t: "ohit", bytes: b.buffer }, [b.buffer]); };
@@ -723,7 +745,7 @@ function startRun(opts) {
     run.net.early = [];
   }
   S = { screen: "game", mode: run.net ? "net" : "local", n: run.n, my: run.slot, players: run.names,
-        view_all: !run.net, desync: null, free: !!run.free };
+        view_all: !run.net, desync: null, free: !!run.free, cabo: !!run.cabo };
   showOnly("game");
   renderGame(S, true);
   syncView();
@@ -1110,6 +1132,7 @@ function onWorker(run, m) {
     drawDue(run, performance.now() + run.vsync * 0.5);   // já pronto? desenha agora (entra no próximo vsync)
   }
   else if (m.t === "net") { if (run.net) run.net.send(m.kind, m.bytes); }
+  else if (m.t === "cabo") { if (run.net) run.net.send("C", new Uint8Array(m.bytes)); }   // cabo pela internet
   // Mundo livre: inimigos dos quais sou dono, golpes nos dos outros, abates e o desenho do meu boneco
   else if (m.t === "osnap") { if (run.net && run.net.objs) run.net.objs(new Uint8Array(m.bytes)); }
   else if (m.t === "ohit") { if (run.net) run.net.send("A", new Uint8Array(m.bytes)); }

@@ -27,7 +27,11 @@ function defaultProfile(i) {
 function loadProfiles() {
   try {
     const p = JSON.parse(localStorage.getItem(SYS.profiles));
-    if (Array.isArray(p) && p.length === 4) return p;
+    if (Array.isArray(p) && p.length === 4) {
+      // guardado quando o P3/P4 ainda não tinham teclas: ganha as de agora (se ninguém escolheu nenhuma)
+      p.forEach((q, i) => { if (q && q.kb && !Object.values(q.kb).some(Boolean)) q.kb = { ...KB_DEFAULT[i] }; });
+      return p;
+    }
   } catch (e) {}
   return [0, 1, 2, 3].map(defaultProfile);
 }
@@ -328,13 +332,14 @@ function renderLobby(m) {
 }
 function renderGame(m, fresh) {
   badges($("game-players"), m.players, m.my, m.players.length);
-  // SNES: um console só, uma tela para todos. GBA: um por jogador.
-  const show = SYS.oneScreen ? [0] : m.mode === "local" || m.view_all ? [...Array(m.n).keys()] : [m.my];
+  // SNES: um console só, uma tela para todos. GBA: um por jogador. Mundo livre: este aparelho roda só o
+  // próprio jogo, que no motor é sempre o 0
+  const show = SYS.oneScreen || m.free ? [0] : m.mode === "local" || m.view_all ? [...Array(m.n).keys()] : [m.my];
   const stage = $("stage");
   const key = show.join(",");
   if (fresh || stage.dataset.key !== key) {
     stage.dataset.key = key;
-    stage.className = "stage " + (show.length === 1 ? "one" : "many");
+    stage.className = "stage " + (show.length === 1 ? "one" : "many") + (show.length === 3 ? " n3" : "");
     stage.innerHTML = "";
     const bg = document.createElement("canvas");   // fundo desfocado (modo "Bordas desfocadas")
     bg.className = "bgblur"; bg.width = 48; bg.height = Math.round(48 * H / W);
@@ -344,14 +349,14 @@ function renderGame(m, fresh) {
     for (const i of show) {
       const box = document.createElement("div");
       box.className = "screen";
-      box.style.setProperty("--c", COLORS[SYS.oneScreen ? m.my || 0 : i]);
+      box.style.setProperty("--c", COLORS[SYS.oneScreen || m.free ? m.my || 0 : i]);
       const cv = document.createElement("canvas");
       cv.width = W; cv.height = H;
       const ctx = cv.getContext("2d", { alpha: false });
       canvases[i] = { ctx, img: ctx.createImageData(W, H) };
       const tag = document.createElement("span");
       tag.className = "tag";
-      tag.textContent = m.free ? `P${m.my + 1} ${m.players[m.my] || ""} · Mundo livre`
+      tag.textContent = m.free ? `P${m.my + 1} ${m.players[m.my] || ""} · ${m.cabo ? "Coop pelo cabo" : "Mundo livre"}`
         : SYS.oneScreen ? (m.players || []).map((p, j) => `P${j + 1} ${p}`).join(" · ") : `P${i + 1} ${m.players[i] || ""}`;
       box.append(cv, tag);
       stage.appendChild(box);
@@ -359,7 +364,7 @@ function renderGame(m, fresh) {
   }
   Fit.apply();
   $("btn-all").textContent = m.view_all ? "Só a minha" : "Ver todas";
-  $("btn-all").classList.toggle("hidden", m.mode === "local" || SYS.oneScreen);
+  $("btn-all").classList.toggle("hidden", m.mode === "local" || SYS.oneScreen || !!m.free);
   $("btn-ff").classList.toggle("hidden", m.mode !== "local");   // acelerar: só sozinho / "Mesmo PC"
   $("btn-ffx").classList.toggle("hidden", m.mode !== "local");
   updateTurboButton();
@@ -388,7 +393,9 @@ function showStatus(st) {
       return x;
     }).join(" | ");
   }
-  if (Play.run && Play.run.free) t += " · 🌍 " + ghostSummary(Play.run);   // onde estão os outros
+  if (Play.run && Play.run.free && !Play.run.cabo) t += " · 🌍 " + ghostSummary(Play.run);   // onde estão os outros
+  // cabo pela internet (GBA): quem está na sala; o coop em si se liga pelo menu do jogo (START > COOP)
+  if (Play.run && Play.run.cabo) t += " · 🔗 cabo: " + (Play.run.names || []).map((n, i) => n != null ? `P${i + 1} ${n}` : null).filter(Boolean).join(", ");
   // rollback: quantas vezes no último segundo o jogo voltou para corrigir botões que chegaram atrasados
   if (st.rb && st.rb.count) t += ` · ↺ ${st.rb.count}`;
   if (st.waiting && st.waiting.length) {

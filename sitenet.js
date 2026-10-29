@@ -302,6 +302,9 @@ const SiteRoom = {
     queueMicrotask(() => { t.readyState = 1; if (t.onopen) t.onopen(); });
     return t;
   },
+  // Mundo livre: cada um no seu jogo (dá para entrar e sair com a partida rolando). SNES: sempre.
+  // GBA: nos jogos com cabo link pela internet (linkhle.js, ex.: Pokémon Quetzal)
+  isFree() { return !!SYS.freeRooms || (SYS.id === "gba" && typeof LinkHLE !== "undefined" && LinkHLE.supports(this.sha1)); },
   // vaga vazia (null) = alguém saiu no meio do Mundo livre e pode voltar para ela
   names() { return this.players.map(p => p ? p.name : null); },
   broadcast(kind, payload, skip) { for (const p of this.players) if (p && p.c !== skip) p.c.send(kind, payload); },
@@ -311,18 +314,19 @@ const SiteRoom = {
     let slot = this.players.indexOf(null);
     if (slot < 0) { slot = this.players.length; this.players.push(p); } else this.players[slot] = p;
     c.send("W", enc(JSON.stringify({ slot })));
-    c.send("S", enc(JSON.stringify({ n: this.players.length, delay: this.delay, names: this.names(), rtc: false, free: true,
+    c.send("S", enc(JSON.stringify({ n: this.players.length, delay: this.delay, names: this.names(), rtc: this.rtc, free: true,
                                      saves: this.players.map(q => q ? q.save : ""), late: true })));
     this.broadcast("J", enc(JSON.stringify({ names: this.names() })), c);
     this.push();
   },
   msg(c, u8) {
     if (c.closed || !this.on || !u8.length) return;
+    c.seen = performance.now();
     const kind = String.fromCharCode(u8[0]), data = u8.subarray(1);
     const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
     const slot = this.players.findIndex(p => p && p.c === c);
     const fail = (msg) => c.send("E", enc(JSON.stringify({ msg })));
-    if (kind === "N") c.send("N", roomInfo(this.names(), this.romName, this.running, SYS.id, !!SYS.freeRooms).subarray(1));
+    if (kind === "N") c.send("N", roomInfo(this.names(), this.romName, this.running, SYS.id, this.isFree()).subarray(1));
     // G = pedido da ROM (numa conexão só para isso). Quem já está na sala usa G para o fantasma (Mundo livre)
     else if (kind === "G" && slot < 0) {
       const have = romAsk(u8);
@@ -343,8 +347,8 @@ const SiteRoom = {
         this.lobby();
       }
     } else if (kind === "I" && this.running) this.broadcast("I", data, c);
-    // Mundo livre: fantasma (G), desenho dele (F), abates (K), inimigos (O) e golpes (A) vão para os outros
-    else if ("GFKOA".includes(kind) && this.running && this.free) this.broadcast(kind, data, c);
+    // Mundo livre: fantasma (G), desenho dele (F), abates (K), inimigos (O), golpes (A) e o cabo link (C) vão para os outros
+    else if ("GFKOAC".includes(kind) && this.running && this.free) this.broadcast(kind, data, c);
     else if (kind === "P") c.send("P", data);
     else if (kind === "Q") {
       if (slot < 0) return;
@@ -393,10 +397,21 @@ const SiteRoom = {
   },
   start(delay, rtc) {
     if (this.running || !this.players.length) return;
-    this.running = true; this.hashes = new Map(); this.delay = delay; this.free = !!SYS.freeRooms;
+    this.running = true; this.hashes = new Map(); this.delay = delay; this.free = this.isFree(); this.rtc = rtc;
     const info = { n: this.players.length, delay, names: this.names(), rtc, free: this.free, saves: this.players.map(p => p.save) };
     this.broadcast("S", enc(JSON.stringify(info)));
     this.push();
+    // Mundo livre: quem some sem a conexão avisar (navegador fechado à força, internet caiu) continuaria
+    // ocupando a vaga. Todo aparelho na partida manda ping 4x por segundo: calado por 45 s = saiu.
+    // (folgado de propósito: celular com o site no fundo por um instante não pode cair)
+    if (this.free) {
+      const gen = this.gen;
+      for (const p of this.players) if (p) p.c.seen = performance.now();
+      const iv = setInterval(() => {
+        if (!this.on || this.gen !== gen) return clearInterval(iv);
+        for (const p of this.players) if (p && !p.c.local && performance.now() - (p.c.seen || 0) > 45000) { this.gone(p.c); try { p.c.close(); } catch (e) {} }
+      }, 5000);
+    }
   },
   // os mesmos comandos que a tela do host mandaria ao Python
   handle(m) {
