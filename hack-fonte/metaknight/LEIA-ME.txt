@@ -18,7 +18,8 @@ O que faz
   0x0203FFB8 + jogador se ele esta apertado (engine-worker.js, antes de cada quadro) e o hack le dali.
 - Correr + B = um corte so (vai direto para a freada). Apertando B de novo durante o corte vem o giro da
   Master como no jogo (0x0805F944 desvia para 0x08F41700; o gancho de cada quadro marca o B de novo em 0x0203FFBC).
-  O Kirby normal com a Master continua com o golpe original.
+  Peso no corte unico: na freada a pose do corte continua ate o fim (meia-lua e espada baixa, deslizando) e a
+  tela treme de leve (RequestScreenShake 0x0806FE64, forca 1). O Kirby normal com a Master continua com o golpe original.
 - Cores: alem de pintar a paleta do corpo a cada quadro (na reserva 0x02022320 sempre, na paleta em uso fora das
   transicoes), sub_0803D280 (todo efeito que troca a cor do Kirby termina nela: dano, piscar, recarregar a tinta)
   desvia para 0x08F41800 e repinta o Meta Knight. Antes, por alguns quadros ele aparecia com a cor da tinta
