@@ -106,8 +106,10 @@ COMMON = [
     (list(range(74, 90)), 0x15),               # girando (canhão / estrela)
     ([93, 94, 100, 101, 102], 0xB),            # segurando item / baú: braços para cima
     (list(range(123, 141)), 0x1E),             # queimando / congelado / choque
-    # golpes de outras habilidades (posições vistas no teste com cada uma): cortes sem espada
-    (52, 0x16), (53, 0x17), (54, 0x18), (103, 0x19), (104, 0x16), (105, 0x17), (108, 0x18), (110, 0x19),
+    # golpes de outras habilidades (posições vistas no teste com cada uma): cortes sem espada.
+    # 53 -> 52 -> 54 são os passos de UM golpe (4+4+5 quadros): a mesma variante para os três, senão o corte
+    # do Meta Knight (preparação + meia-lua rosa só no ~8º quadro) recomeçava a cada passo e nunca aparecia
+    ([52, 53, 54], 0x16), (103, 0x19), (104, 0x16), (105, 0x17), (108, 0x18), (110, 0x19),
     (111, 0x6), (112, 0x5), (list(range(113, 118)), 0x14), (147, 0x16),
 ]
 MAP_A = table(COMMON + [
@@ -126,7 +128,10 @@ MAP_S = table(COMMON + [
     (121, 0x0),                                # carregando: parado com a espada (o jogo põe o brilho)
     ([113, 114], 0x16),                        # solta a onda: corte para a frente
     ([115, 116, 117], 0x1B),                   # corte para cima
-    ([118, 119, 120], 0x5),                    # investida: corte em meia-lua
+    (118, 0x5),                                # investida: corte em meia-lua (uma vez só)
+    # depois do corte a Master gira acertando (119, ~33 quadros) e freia (120): a meia-lua (~27 quadros)
+    # recomeçava em laço e parecia um segundo golpe. Desliza com a espada à frente e freia
+    (119, 0x6), (120, 0x1),
 ])
 GUARD_POSE, GUARD_POSE_AIR = 0x8, 0x9            # defesa (L): as poses de "parry" do Dark Meta Knight
 
