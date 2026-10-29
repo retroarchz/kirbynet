@@ -14,7 +14,11 @@ const SYSTEMS = {
         Cima: "ArrowUp", Baixo: "ArrowDown", Esquerda: "ArrowLeft", Direita: "ArrowRight" },
       { A: "Numpad1", B: "Numpad2", L: "Numpad7", R: "Numpad9", Start: "NumpadAdd", Select: "NumpadSubtract",
         Cima: "Numpad8", Baixo: "Numpad5", Esquerda: "Numpad4", Direita: "Numpad6" },
-      {}, {},
+      // P3 e P4 no "Mesmo PC": cada um num pedaço do teclado que P1 e P2 não usam (dá para trocar em Controles)
+      { A: "KeyO", B: "KeyU", L: "Digit7", R: "Digit9", Start: "KeyP", Select: "KeyY",
+        Cima: "KeyI", Baixo: "KeyK", Esquerda: "KeyJ", Direita: "KeyL" },
+      { A: "KeyE", B: "KeyW", L: "Digit1", R: "Digit3", Start: "KeyV", Select: "KeyC",
+        Cima: "KeyT", Baixo: "KeyG", Esquerda: "KeyF", Direita: "KeyH" },
     ],
     pad: { A: "b1", B: "b0", L: "b4", R: "b5", Select: "b8", Start: "b9",
       Cima: "b12", Baixo: "b13", Esquerda: "b14", Direita: "b15" },

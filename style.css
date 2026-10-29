@@ -67,6 +67,9 @@ body:not(.touchui) #game-players { margin-right: auto; }
   aspect-ratio: var(--ar); width: 100%; }
 .stage.one .screen { width: min(100%, calc((100vh - 170px) * var(--ar))); margin: 0 auto; }
 .stage.many .screen { width: min(100%, calc((100vh - 200px) / 2 * var(--ar))); justify-self: center; }
+/* 3 telas ("Mesmo PC" com 3): numa linha só, em vez de 2 em cima e 1 sozinha embaixo */
+body:not(.touchui) .stage.many.n3 { grid-template-columns: repeat(3, 1fr); }
+body:not(.touchui) .stage.many.n3 .screen { width: min(100%, calc((100vh - 170px) * var(--ar))); }
 .screen canvas { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
 .screen .tag { position: absolute; left: 6px; top: 6px; background: var(--c); color: var(--ink);
   font-weight: 800; font-size: 12px; padding: 2px 8px; border-radius: 6px; opacity: .85; }
