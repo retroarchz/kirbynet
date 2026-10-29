@@ -16,10 +16,11 @@ O que faz
   habilidades como o Kirby (SELECT solta a habilidade copiada, como no jogo).
 - O Especial nao e botao do GBA (L = estrela do jogo, R = celular, SELECT = espada): o site escreve em
   0x0203FFB8 + jogador se ele esta apertado (engine-worker.js, antes de cada quadro) e o hack le dali.
-- Correr + B = um corte so (vai direto para a freada). Apertando B de novo durante o corte vem o giro da
+- Correr + B = um corte so: o corte (0x76) quase nao alcanca, quem acerta e o giro (0x77), que segue avancando e
+  religa o acerto a cada 5 quadros. No corte unico o giro roda so os ultimos 12 quadros, na pose do fim do corte
+  (avanca acertando, sem girar), e depois freia. Apertando B de novo durante o corte vem o giro da
   Master como no jogo (0x0805F944 desvia para 0x08F41700; o gancho de cada quadro marca o B de novo em 0x0203FFBC).
-  Peso no corte unico: na freada a pose do corte continua ate o fim (meia-lua e espada baixa, deslizando) e a
-  tela treme de leve (RequestScreenShake 0x0806FE64, forca 1). O Kirby normal com a Master continua com o golpe original.
+  Peso no corte unico: a pose do corte vai ate o fim (meia-lua e espada estendida) e a tela treme de leve (RequestScreenShake 0x0806FE64, forca 1). O Kirby normal com a Master continua com o golpe original.
 - Cores: alem de pintar a paleta do corpo a cada quadro (na reserva 0x02022320 sempre, na paleta em uso fora das
   transicoes), sub_0803D280 (todo efeito que troca a cor do Kirby termina nela: dano, piscar, recarregar a tinta)
   desvia para 0x08F41800 e repinta o Meta Knight. Antes, por alguns quadros ele aparecia com a cor da tinta

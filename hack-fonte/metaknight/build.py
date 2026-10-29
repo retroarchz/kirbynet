@@ -43,8 +43,8 @@ PREVAB = 0x0203FFA8        # 4 bytes: habilidade no quadro anterior
 GUARD = 0x0203FFAC         # 4 bytes: 1 = defendendo (o hack ligou o bit 0x8000 das flags: sem dano)
 PARRYCD = 0x0203FFB0       # 4 bytes: quadros até poder tocar o "parry" de novo
 HUDSAVED = 0x0203FFB4      # 1 = HUDBAK tem o ícone/cores originais do HUD (o hack trocou)
-AGAIN = 0x0203FFBC         # 4 bytes: 1 = apertou B de novo durante o corte da investida (aí vem o giro);
-                           # 2 = corte único (na freada a pose do corte continua até o fim)
+AGAIN = 0x0203FFBC         # 4 bytes: 1 = apertou B de novo durante o corte da investida (giro inteiro);
+                           # 2 = corte único (giro curto, na pose do fim do corte)
 DEFKEY = 0x0203FFB8        # 4 bytes: 1 = botão de defesa apertado. Não é botão do GBA (o L é a estrela, o R o
                            # celular, o SELECT a espada): o site escreve aqui o botão "Especial" (tecla C)
 HUDBAK = 0x0203FD00        # 96 bytes dos blocos do ícone + 12 bytes das cores 1..6 da paleta 15 do BG
@@ -54,7 +54,7 @@ KIRBY_PAL = 0x0803E558     # sub_0803E558(jogador): recarrega a paleta da cor do
 SE_DMK_PARRY = 0x1A6
 SITE6 = 0x080365A0         # "flags & 0x8000 -> não aplica dano" (r4 = flags, r5 = kirby)
 # Investida correndo da Master (estado 0x0805F878, kirby->unk78): o corte (anim 0x76) acaba e o jogo põe o giro
-# (0x77, ~32 quadros acertando) e depois a freada (0x78, em 0x0805F9AA). Aqui: contador = 0 e anim = 0x77
+# (0x77, ~32 quadros acertando) e depois a freada (0x78). Aqui: contador = 0 e anim = 0x77
 SITE7 = 0x0805F944         # r4 = kirby, r6 = &kirby->animationIndex
 # sub_0803D280(início, quantas): copia gObjPalette[início..] para a reserva (0x081592F4(origem, destino, n)). Todo
 # efeito que muda a cor do Kirby (dano, piscar, recarregar a tinta) termina aqui, depois do gancho que pinta o Meta
@@ -62,9 +62,11 @@ SITE7 = 0x0805F944         # r4 = kirby, r6 = &kirby->animationIndex
 SITE8 = 0x0803D280
 PAL_COPY = 0x081592F4
 SPIN_CONT = 0x0805F94C     # segue o giro (flags do 0x77)
-BRAKE = 0x0805F9AA         # freada (usa r5 = &kirby->base.xspeed)
 SHAKE = 0x0806FE64         # RequestScreenShake(força 0..3, objeto): tremor da tela
 SLASH_SHAKE = 1            # tremor no fim do corte único (o dano do jogo usa 2)
+# O corte (0x76) quase não alcança: quem acerta é o giro (0x77), que segue avançando e religa o acerto a cada 5
+# quadros. No corte único o giro roda só os últimos quadros (o jogo freia quando o contador passa de 0x20)
+SHORT_SPIN = 0x20 - 12
 ANIM_STEP = 0x08155128     # sub_08155128(struct Sprite *) -> 0 quando a animação acabou
 DISPLAY = 0x0815604C       # DisplaySprite(struct Sprite *)
 SET_ANIMS = 0x0806F260     # tabelas de animação da habilidade
@@ -297,8 +299,8 @@ def hook():
     a.ldr_lit('r1', MAPS)
     a.label('nosw')
     a.ldrb_r('r1', 'r1', 'r0')
-    # freada depois do corte único: continua a pose do corte (meia-lua e espada baixa), sem trocar
-    a.cmpi('r0', 120); a.bc('ne', 'nofollow')
+    # giro curto do corte único: continua a pose do corte (meia-lua e espada baixa), sem girar
+    a.cmpi('r0', 119); a.bc('ne', 'nofollow')
     a.ldr_lit('r2', AGAIN); a.ldrb_r('r2', 'r2', 'r5'); a.cmpi('r2', 2); a.bc('ne', 'nofollow')
     a.mov('r1', 0x5)
     a.label('nofollow')
@@ -499,8 +501,9 @@ def hook6():
 
 
 def hook7():
-    # Meta Knight: correr + B = um corte só (vai direto para a freada). Apertando B de novo durante o corte, o
-    # giro da Master vem como antes. O Kirby (e os ajudantes) continuam com o golpe original.
+    # Meta Knight: correr + B = um corte só (o giro fica curto e na pose do fim do corte: avança acertando, sem
+    # girar). Apertando B de novo durante o corte, o giro inteiro da Master vem como antes. O Kirby (e os
+    # ajudantes) continuam com o golpe original.
     a = Asm(HOOK7)
     a.mov('r0', 0); a.strh_i('r0', 'r4', 4)                                   # original: contador = 0
     a.mov('r0', 0x56); a.ldrb_r('r0', 'r4', 'r0')
@@ -509,8 +512,7 @@ def hook7():
     a.ldr_lit('r1', AGAIN); a.ldrb_r('r1', 'r1', 'r0'); a.cmpi('r1', 0); a.bc('ne', 'spin')
     a.ldr_lit('r1', AGAIN); a.mov('r2', 2); a.strb_r('r2', 'r1', 'r0')        # corte único
     a.mov('r0', SLASH_SHAKE); a.movh('r1', 'r4'); a.ldr_lit('r3', SHAKE | 1); a.bl('callr3')   # peso: tranco na tela
-    a.mov('r5', 0x50); a.add_r('r5', 'r4', 'r5')                             # r5 = &xspeed, como a freada espera
-    a.ldr_lit('r0', BRAKE | 1); a.bx('r0')
+    a.mov('r0', SHORT_SPIN); a.strh_i('r0', 'r4', 4)                         # giro curto: ainda acerta na frente
     a.label('spin')
     a.mov('r0', 0x77); a.strh_i('r0', 'r6', 0)                                # original: anim = giro
     a.ldr_lit('r0', SPIN_CONT | 1); a.bx('r0')
