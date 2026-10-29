@@ -27,6 +27,8 @@ HOOK3 = 0x08F41200         # estrela da habilidade
 HOOK4 = 0x08F41300         # objeto do golpe da espada da Sword (sub_080753CC)
 HOOK5 = 0x08F41380         # objeto do golpe da espada da Master (sub_08075EDC)
 HOOK6 = 0x08F41100         # golpe bloqueado pela defesa: som de "parry" do Dark Meta Knight
+HOOK7 = 0x08F41700         # fim do corte da investida (Master): giro só se apertou B de novo
+HOOK8 = 0x08F41800         # sub_0803D280 (confirma uma faixa da paleta de objetos): mantém as cores do Meta Knight
 DATA = 0x08F41400
 MAPA = DATA                # 185: animationIndex -> variante da 0x390 sem espada (0xFF = animação do Kirby)
 MAPS = DATA + 0x100        # 185: idem com a espada (habilidade Sword)
@@ -41,6 +43,7 @@ PREVAB = 0x0203FFA8        # 4 bytes: habilidade no quadro anterior
 GUARD = 0x0203FFAC         # 4 bytes: 1 = defendendo (o hack ligou o bit 0x8000 das flags: sem dano)
 PARRYCD = 0x0203FFB0       # 4 bytes: quadros até poder tocar o "parry" de novo
 HUDSAVED = 0x0203FFB4      # 1 = HUDBAK tem o ícone/cores originais do HUD (o hack trocou)
+AGAIN = 0x0203FFBC         # 4 bytes: 1 = apertou B de novo durante o corte da investida (aí vem o giro)
 DEFKEY = 0x0203FFB8        # 4 bytes: 1 = botão de defesa apertado. Não é botão do GBA (o L é a estrela, o R o
                            # celular, o SELECT a espada): o site escreve aqui o botão "Especial" (tecla C)
 HUDBAK = 0x0203FD00        # 96 bytes dos blocos do ícone + 12 bytes das cores 1..6 da paleta 15 do BG
@@ -49,6 +52,16 @@ MASTER_FLAG = 0x0203AD34   # gUnk_0203AD34: 1 = a Master de verdade está libera
 KIRBY_PAL = 0x0803E558     # sub_0803E558(jogador): recarrega a paleta da cor do Kirby
 SE_DMK_PARRY = 0x1A6
 SITE6 = 0x080365A0         # "flags & 0x8000 -> não aplica dano" (r4 = flags, r5 = kirby)
+# Investida correndo da Master (estado 0x0805F878, kirby->unk78): o corte (anim 0x76) acaba e o jogo põe o giro
+# (0x77, ~32 quadros acertando) e depois a freada (0x78, em 0x0805F9AA). Aqui: contador = 0 e anim = 0x77
+SITE7 = 0x0805F944         # r4 = kirby, r6 = &kirby->animationIndex
+# sub_0803D280(início, quantas): copia gObjPalette[início..] para a reserva (0x081592F4(origem, destino, n)). Todo
+# efeito que muda a cor do Kirby (dano, piscar, recarregar a tinta) termina aqui, depois do gancho que pinta o Meta
+# Knight a cada quadro: sem isso, por alguns quadros ele aparecia com a cor da tinta (Sapphire = azul)
+SITE8 = 0x0803D280
+PAL_COPY = 0x081592F4
+SPIN_CONT = 0x0805F94C     # segue o giro (flags do 0x77)
+BRAKE = 0x0805F9AA         # freada (usa r5 = &kirby->base.xspeed)
 ANIM_STEP = 0x08155128     # sub_08155128(struct Sprite *) -> 0 quando a animação acabou
 DISPLAY = 0x0815604C       # DisplaySprite(struct Sprite *)
 SET_ANIMS = 0x0806F260     # tabelas de animação da habilidade
@@ -63,6 +76,8 @@ PAINT = 0x0203AD1C         # gUnk_0203AD1C[jogador]: tinta escolhida (0xFF = nen
 LOCAL = 0x0203AD3C         # gLocalPlayerId
 MAINFLAGS = 0x03002440     # gMainFlags (1/2 = sincronizar paleta BG/OBJ; 0x30000 = paletas em transição)
 OBJPAL = 0x03002C60        # gObjPalette
+OBJPAL_BAK = 0x02022320    # reserva das paletas de objetos (sub_0803D280 copia para cá): de onde os efeitos (dano,
+                           # ser carregado, transições de tela) restauram as cores
 BGPAL = 0x030037A0         # gBgPalette
 HUDMAP = 0x0600E000 + (18 * 32 + 7) * 2   # entrada do mapa do HUD onde fica o rostinho (0xF18F)
 HUDTILE = 0x06004000 + 0x18F * 0x20
@@ -171,6 +186,17 @@ def hook():
     a.mov('r2', 0xA4); a.add_r('r2', 'r4', 'r2')
     a.ldr_i('r0', 'r2', 8); a.alu('orr', 'r0', 'r1'); a.str_i('r0', 'r2', 8)
     a.ldr_lit('r1', MARK); a.mov('r0', 1); a.strb_r('r0', 'r1', 'r5')
+    # --- investida correndo: B apertado de novo durante o corte (passados 2 quadros) = quer o giro (ver hook7) ---
+    a.mov('r0', 0xD4); a.ldrh_r('r0', 'r4', 'r0')
+    a.ldr_lit('r2', AGAIN); a.add_r('r2', 'r2', 'r5')
+    a.cmpi('r0', 0x76); a.bc('eq', 'dash')
+    a.cmpi('r0', 0x77); a.bc('eq', 'dashok')
+    a.mov('r0', 0); a.strb_i('r0', 'r2', 0); a.b('dashok')            # fora da investida: zera
+    a.label('dash')
+    a.ldrh_i('r0', 'r4', 4); a.cmpi('r0', 2); a.bc('lo', 'dashok')    # o B que começou a investida não conta
+    a.ldr_lit('r0', 0x11A); a.ldrh_r('r0', 'r4', 'r0'); a.mov('r1', 2); a.alu('tst', 'r0', 'r1'); a.bc('eq', 'dashok')
+    a.mov('r0', 1); a.strb_i('r0', 'r2', 0)
+    a.label('dashok')
     # --- espada: SELECT guarda/saca; sacada = habilidade Sword ---
     a.ldr_lit('r0', 0x103); a.ldrb_r('r1', 'r4', 'r0')                 # r1 = habilidade
     a.ldr_lit('r6', SWOFF); a.add_r('r6', 'r6', 'r5')                  # r6 = &guardada[jogador]
@@ -217,8 +243,12 @@ def hook():
     a.ldr_i('r0', 'r4', 8); a.ldr_lit('r1', 0x8000); a.alu('bic', 'r0', 'r1'); a.str_i('r0', 'r4', 8)
     a.b('pal')
     a.pool()
-    # --- paleta do corpo a cada quadro (fora das transições de tela) ---
+    # --- paleta do corpo a cada quadro ---
+    # Na reserva sempre (senão o efeito de dano, ser carregado ou a transição de tela restauram as cores do
+    # Kirby: com a tinta Sapphire, o Meta Knight ficava azul); na paleta em uso, fora das transições de tela
     a.label('pal')
+    a.ldrb_i('r0', 'r7', 0x1F); a.lsl('r0', 'r0', 5); a.ldr_lit('r1', OBJPAL_BAK); a.add_r('r0', 'r0', 'r1')
+    a.ldr_lit('r1', MKPAL_ROM); a.mov('r2', 16); a.bl('copyh')
     a.ldr_lit('r0', MAINFLAGS); a.ldr_i('r0', 'r0', 0); a.ldr_lit('r1', 0x30000); a.alu('tst', 'r0', 'r1')
     a.bc('ne', 'nopal')
     a.ldrb_i('r0', 'r7', 0x1F); a.lsl('r0', 'r0', 5); a.ldr_lit('r1', OBJPAL); a.add_r('r0', 'r0', 'r1')
@@ -459,6 +489,68 @@ def hook6():
     return a.build()
 
 
+def hook7():
+    # Meta Knight: correr + B = um corte só (vai direto para a freada). Apertando B de novo durante o corte, o
+    # giro da Master vem como antes. O Kirby (e os ajudantes) continuam com o golpe original.
+    a = Asm(HOOK7)
+    a.mov('r0', 0); a.strh_i('r0', 'r4', 4)                                   # original: contador = 0
+    a.mov('r0', 0x56); a.ldrb_r('r0', 'r4', 'r0')
+    a.ldr_lit('r1', NUM_HUMANS); a.ldrb_i('r1', 'r1', 0); a.alu('cmp', 'r0', 'r1'); a.bc('hs', 'spin')
+    a.ldr_lit('r1', PAINT); a.ldrb_r('r1', 'r1', 'r0'); a.cmpi('r1', SAPPHIRE); a.bc('ne', 'spin')
+    a.ldr_lit('r1', AGAIN); a.ldrb_r('r1', 'r1', 'r0'); a.cmpi('r1', 0); a.bc('ne', 'spin')
+    a.mov('r5', 0x50); a.add_r('r5', 'r4', 'r5')                             # r5 = &xspeed, como a freada espera
+    a.ldr_lit('r0', BRAKE | 1); a.bx('r0')
+    a.label('spin')
+    a.mov('r0', 0x77); a.strh_i('r0', 'r6', 0)                                # original: anim = giro
+    a.ldr_lit('r0', SPIN_CONT | 1); a.bx('r0')
+    a.pool()
+    return a.build()
+
+
+def hook8():
+    a = Asm(HOOK8)
+    a.push(['r4', 'r5'], lr=True)
+    a.lsl('r0', 'r0', 24); a.h(0x0E04)           # lsrs r4, r0, #24 (início)
+    a.lsl('r1', 'r1', 24); a.h(0x0E0D)           # lsrs r5, r1, #24 (quantas)
+    a.lsl('r3', 'r4', 1)
+    a.ldr_lit('r0', OBJPAL); a.add_r('r0', 'r0', 'r3')
+    a.ldr_lit('r1', OBJPAL_BAK); a.add_r('r1', 'r1', 'r3')
+    a.alu('mov', 'r2', 'r5') if False else a.add_r('r2', 'r5', 'r5'); a.h(0x0852)   # r2 = r5 (r5*2 >> 1)
+    a.ldr_lit('r3', PAL_COPY | 1); a.bl('callr3')                                # o que a função fazia
+    # a faixa é a paleta inteira de um jogador Meta Knight? (início = 16 * jogador)
+    a.h(0x0920)                                  # lsrs r0, r4, #4 (jogador)
+    a.lsl('r1', 'r0', 4); a.alu('cmp', 'r1', 'r4'); a.bc('ne', 'done')
+    a.cmpi('r0', 4); a.bc('hs', 'done')
+    a.ldr_lit('r1', NUM_HUMANS); a.ldrb_i('r1', 'r1', 0); a.alu('cmp', 'r0', 'r1'); a.bc('hs', 'done')
+    a.ldr_lit('r1', PAINT); a.ldrb_r('r1', 'r1', 'r0'); a.cmpi('r1', SAPPHIRE); a.bc('ne', 'done')
+    a.ldr_lit('r1', MARK); a.ldrb_r('r1', 'r1', 'r0'); a.cmpi('r1', 0); a.bc('eq', 'done')
+    a.lsl('r4', 'r0', 5)
+    a.ldr_lit('r0', OBJPAL); a.add_r('r0', 'r0', 'r4'); a.ldr_lit('r1', MKPAL_ROM); a.mov('r2', 16); a.bl('copy')
+    a.ldr_lit('r0', OBJPAL_BAK); a.add_r('r0', 'r0', 'r4'); a.ldr_lit('r1', MKPAL_ROM); a.mov('r2', 16); a.bl('copy')
+    a.label('done')
+    a.pop(['r4', 'r5']); a.pop(['r0']); a.bx('r0')
+    a.label('callr3'); a.bx('r3')
+    a.label('copy')
+    a.ldrh_i('r3', 'r1', 0); a.strh_i('r3', 'r0', 0); a.addi('r0', 2); a.addi('r1', 2)
+    a.subi('r2', 1); a.bc('ne', 'copy'); a.bx('lr')
+    a.pool()
+    return a.build()
+
+
+def site8():
+    s = Asm(SITE8)
+    s.ldr_lit('r3', HOOK8 | 1); s.bx('r3')     # literal em SITE8+4 (a função inteira vai para o HOOK8)
+    s.pool()
+    return s.build()
+
+
+def site7():
+    s = Asm(SITE7)
+    s.ldr_lit('r0', HOOK7 | 1); s.bx('r0')     # literal em SITE7+4
+    s.pool()
+    return s.build()
+
+
 def site6():
     s = Asm(SITE6)
     s.ldr_lit('r0', HOOK6 | 1); s.bx('r0')     # literal em SITE6+4
@@ -500,6 +592,10 @@ def patches():
     s4, h4 = site_obj(SITE4, HOOK4), hide_obj(HOOK4, SITE4, 'r7')
     s5, h5 = site_obj(SITE5, HOOK5), hide_obj(HOOK5, SITE5, 'r8')
     s6, h6 = site6(), hook6()
+    s7, h7 = site7(), hook7()
+    s8, h8 = site8(), hook8()
+    assert len(s8) == 8 and len(h8) <= 0x100
+    assert len(s7) == 8 and HOOK7 >= DATA + 0x2B0 and len(h7) <= 0x100
     assert len(s6) == 8 and len(h6) <= HOOK3 - HOOK6
     assert len(s2) == 10 and len(s3) == 8 and len(s4) == 10 and len(s5) == 10
     assert len(h2) <= HOOK6 - HOOK2 and len(h3) <= HOOK4 - HOOK3 and len(h4) <= HOOK5 - HOOK4 and len(h5) <= DATA - HOOK5
@@ -508,9 +604,9 @@ def patches():
     data[0x200:0x200 + 41] = body_tiles()
     data[0x240:0x240 + 96] = b''.join(icon_tiles())
     data[0x2A0:0x2AC] = struct.pack('<6H', *[MKPAL[i] for i in range(1, 7)])
-    return [(SITE - 0x08000000, st), (SITE2 - 0x08000000, s2), (SITE3 - 0x08000000, s3), (SITE4 - 0x08000000, s4), (SITE5 - 0x08000000, s5), (SITE6 - 0x08000000, s6),
+    return [(SITE - 0x08000000, st), (SITE2 - 0x08000000, s2), (SITE3 - 0x08000000, s3), (SITE4 - 0x08000000, s4), (SITE5 - 0x08000000, s5), (SITE6 - 0x08000000, s6), (SITE7 - 0x08000000, s7), (SITE8 - 0x08000000, s8),
             (prev, struct.pack('<HBb', MK_ANIM, 0, 0)), (PREV_TILES - 0x08000000, struct.pack('<H', 20)),
-            (HOOK - 0x08000000, code), (HOOK2 - 0x08000000, h2), (HOOK3 - 0x08000000, h3), (HOOK4 - 0x08000000, h4), (HOOK5 - 0x08000000, h5), (HOOK6 - 0x08000000, h6),
+            (HOOK - 0x08000000, code), (HOOK2 - 0x08000000, h2), (HOOK3 - 0x08000000, h3), (HOOK4 - 0x08000000, h4), (HOOK5 - 0x08000000, h5), (HOOK6 - 0x08000000, h6), (HOOK7 - 0x08000000, h7), (HOOK8 - 0x08000000, h8),
             (DATA - 0x08000000, bytes(data))]
 
 
