@@ -41,6 +41,8 @@ PREVAB = 0x0203FFA8        # 4 bytes: habilidade no quadro anterior
 GUARD = 0x0203FFAC         # 4 bytes: 1 = defendendo (o hack ligou o bit 0x8000 das flags: sem dano)
 PARRYCD = 0x0203FFB0       # 4 bytes: quadros até poder tocar o "parry" de novo
 HUDSAVED = 0x0203FFB4      # 1 = HUDBAK tem o ícone/cores originais do HUD (o hack trocou)
+DEFKEY = 0x0203FFB8        # 4 bytes: 1 = botão de defesa apertado. Não é botão do GBA (o L é a estrela, o R o
+                           # celular, o SELECT a espada): o site escreve aqui o botão "Especial" (tecla C)
 HUDBAK = 0x0203FD00        # 96 bytes dos blocos do ícone + 12 bytes das cores 1..6 da paleta 15 do BG
 SONG_START = 0x0815011C    # m4aSongNumStart(num)
 MASTER_FLAG = 0x0203AD34   # gUnk_0203AD34: 1 = a Master de verdade está liberada (luta final)
@@ -202,8 +204,8 @@ def hook():
     a.ldr_lit('r2', PARRYCD); a.ldrb_r('r0', 'r2', 'r5'); a.cmpi('r0', 0); a.bc('eq', 'cd0')
     a.subi('r0', 1); a.strb_r('r0', 'r2', 'r5')
     a.label('cd0')
-    # --- defesa: segurando L (parado, andando, correndo, pulando ou caindo; ele para). Flags 0x8000 = o jogo não aplica dano (ver 0x080365A6) ---
-    a.ldr_lit('r0', 0x118); a.ldrh_r('r0', 'r4', 'r0'); a.ldr_lit('r1', 0x200); a.alu('tst', 'r0', 'r1')   # L (o R é o celular)
+    # --- defesa: segurando o botão de defesa (parado, andando, correndo, pulando ou caindo; ele para). Flags 0x8000 = o jogo não aplica dano (ver 0x080365A6) ---
+    a.ldr_lit('r1', DEFKEY); a.ldrb_r('r0', 'r1', 'r5'); a.cmpi('r0', 0)             # DEFKEY[jogador]
     a.bc('eq', 'noguard')
     a.mov('r0', 0xD4); a.ldrh_r('r0', 'r4', 'r0'); a.cmpi('r0', 25); a.bc('hi', 'noguard')   # andando, correndo, pulando...
     a.ldr_i('r0', 'r4', 8); a.ldr_lit('r1', 0x8000); a.alu('orr', 'r0', 'r1'); a.str_i('r0', 'r4', 8)

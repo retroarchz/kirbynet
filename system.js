@@ -7,10 +7,12 @@ const SYSTEMS = {
     id: "gba", name: "GBA", W: 240, H: 160, fps: 16777216 / 280896,
     wasm: "kncore.wasm", romRe: /\.gba$/i, romExt: ".gba", roms: "roms/",
     maxP: 4, roomMax: 4, oneScreen: false,   // um GBA por jogador (link cable)
-    buttons: ["A", "B", "L", "R", "Start", "Select", "Cima", "Baixo", "Esquerda", "Direita"],
-    bit: { A: 1, B: 2, Select: 4, Start: 8, Direita: 16, Esquerda: 32, Cima: 64, Baixo: 128, R: 256, L: 512 },
+    // Especial: não é botão do GBA (o motor só vê os 10 de verdade). Os prontos que precisam de um botão a
+    // mais leem ele de um byte da memória do jogo (ex.: a defesa do Meta Knight, no Amazing Mirror)
+    buttons: ["A", "B", "L", "R", "Start", "Select", "Cima", "Baixo", "Esquerda", "Direita", "Especial"],
+    bit: { A: 1, B: 2, Select: 4, Start: 8, Direita: 16, Esquerda: 32, Cima: 64, Baixo: 128, R: 256, L: 512, Especial: 1024 },
     kb: [
-      { A: "KeyZ", B: "KeyX", L: "KeyA", R: "KeyS", Start: "Enter", Select: "Backspace",
+      { A: "KeyZ", B: "KeyX", L: "KeyA", R: "KeyS", Start: "Enter", Select: "Backspace", Especial: "KeyC",
         Cima: "ArrowUp", Baixo: "ArrowDown", Esquerda: "ArrowLeft", Direita: "ArrowRight" },
       { A: "Numpad1", B: "Numpad2", L: "Numpad7", R: "Numpad9", Start: "NumpadAdd", Select: "NumpadSubtract",
         Cima: "Numpad8", Baixo: "Numpad5", Esquerda: "Numpad4", Direita: "Numpad6" },
@@ -21,7 +23,7 @@ const SYSTEMS = {
         Cima: "KeyT", Baixo: "KeyG", Esquerda: "KeyF", Direita: "KeyH" },
     ],
     pad: { A: "b1", B: "b0", L: "b4", R: "b5", Select: "b8", Start: "b9",
-      Cima: "b12", Baixo: "b13", Esquerda: "b14", Direita: "b15" },
+      Cima: "b12", Baixo: "b13", Esquerda: "b14", Direita: "b15", Especial: "b6" },   // Especial = LT (o RT acelera)
     profiles: "kirbynet.profiles", touchMap: "kirbynet.touchmap", romSlot: "last",
     engineV: "3",   // motor (kncore.wasm): todos da sala precisam do mesmo. 3 = mGBA de 2026-10, desenho só do que aparece e rollback
   },

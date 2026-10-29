@@ -306,6 +306,12 @@ function tick() {
       } else {
         const k = [];
         for (let p = 0; p < run.n; p++) k.push(keys[p] | 0);
+        // botão Especial (não é do GBA; o motor só vê os 10 de verdade): o pronto que usa ele lê da memória
+        // do jogo, um byte por jogador, escrito aqui em cada GBA antes do quadro
+        if (run.especial) for (let i = 0; i < run.n; i++) {
+          const ram = run.s.ram(i);
+          if (ram) for (let p = 0; p < run.n; p++) ram.w8(run.especial + p, k[p] & 0x400 ? 1 : 0);
+        }
         if (run.free && SNES) {   // Mundo livre: inimigos dos outros que sumiram há 1,5 s saem; os outros entram neste SNES
           for (const [kk, sn] of Object.entries(run.peerSnaps)) if (run.frames - sn.at > 90) delete run.peerSnaps[kk];
           coopBefore(run.s, Object.values(run.peerSnaps));
@@ -439,6 +445,7 @@ onmessage = async (ev) => {
               pendingHits: [], sentIds: new Set(),
               // GBA: cabo link pela internet (só nos jogos que o linkhle.js conhece)
               cabo: m.free && !SNES ? m.cabo || null : null, hle: null, caboEarly: [],
+              especial: !m.net && !SNES && m.especial ? m.especial : 0,
               rb: m.net && s.canSnapshot && !NO_RB ? { snaps: new Map(), spare: [], count: 0, resim: 0 } : null };
       run.snapT = performance.now();
       try { run.snapSig = sigOf(grabSaves()); } catch (e) { run.snapSig = null; }

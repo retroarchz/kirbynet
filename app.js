@@ -30,6 +30,16 @@ function loadProfiles() {
     if (Array.isArray(p) && p.length === 4) {
       // guardado quando o P3/P4 ainda não tinham teclas: ganha as de agora (se ninguém escolheu nenhuma)
       p.forEach((q, i) => { if (q && q.kb && !Object.values(q.kb).some(Boolean)) q.kb = { ...KB_DEFAULT[i] }; });
+      // guardado antes do botão Especial existir: ganha o padrão dele, se a tecla/botão não estiver em uso.
+      // Quem tinha posto o L do GBA na tecla C (para a defesa do Meta Knight) passa o L para a tecla L e o C
+      // vira o Especial (a defesa agora é dele; o L volta a ser o L do jogo)
+      if (BUTTONS.includes("Especial")) p.forEach((q, i) => {
+        if (!q || !q.kb || "Especial" in q.kb) return;
+        if (q.kb.L === "KeyC" && !Object.values(q.kb).includes("KeyL")) q.kb.L = "KeyL";
+        const k = (KB_DEFAULT[i] || {}).Especial || "";
+        q.kb.Especial = k && !Object.values(q.kb).includes(k) ? k : "";
+        if (q.padMap && !("Especial" in q.padMap)) q.padMap.Especial = Object.values(q.padMap).includes(PAD_DEFAULT.Especial) ? "" : PAD_DEFAULT.Especial;
+      });
       return p;
     }
   } catch (e) {}

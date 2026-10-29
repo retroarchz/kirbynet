@@ -150,61 +150,60 @@
           return copy;
         },
         // Acesso direto à memória do GBA i (IWRAM/EWRAM) e ao registrador SIOCNT do mGBA, sem passar pelo
-        // motor: para o "cabo pela internet" (veja linkhle.js). Acha os lugares uma vez: na struct GBAMemory
-        // do mGBA vêm os ponteiros bios, wram, iwram, rom e logo depois io[512]; a struct GBA começa 16 bytes
-        // antes (mCPUComponent + cpu) e a GBASIO é uma das structs depois da memória com p = a struct GBA;
-        // nela siocnt fica 14 bytes depois de p. Tudo conferido com kn_read16.
-        // A IWRAM é achada pelo conteúdo (256 bytes dela) e depois o ponteiro para ela.
+        // motor: para o cabo pela internet (linkhle.js) e o botão Especial dos prontos. Na struct GBAMemory do
+        // mGBA vêm os ponteiros bios, wram, iwram, rom e logo depois io[512]; a struct GBA começa 16 bytes antes
+        // (mCPUComponent + cpu) e a GBASIO é uma das structs depois da memória com p = a struct GBA; nela
+        // siocnt fica 14 bytes depois de p. Candidatos (o campo memory.rom de cada GBA do motor):
+        //   - quem aponta para a ROM deste GBA (se o motor sabe dela; no "Mesmo PC" os GBAs dividem a mesma);
+        //   - quem aponta para um bloco com o conteúdo da IWRAM deste GBA (256 bytes variados dela).
+        // Vale o candidato cujo SIOCNT, mudado, aparece no kn_read16 DESTE GBA: único mesmo com vários GBAs
+        // de memória igual. Achado uma vez; sem achar, tenta de novo daqui a 60 chamadas (a busca leva ~0,1 s).
         ram(i) {
           if (!this._ram) this._ram = [];
           if (this._ram[i]) return this._ram[i];
-          // a busca varre a memória do motor (~0,2 s): se não achou, só tenta de novo daqui a 60 chamadas
           if (this._ramWait && this._ramWait[i] > 0) { this._ramWait[i]--; return null; }
-          const u32 = new Uint32Array(x.memory.buffer), rd32 = (a) => (x.kn_read16(ptr, i, a) | (x.kn_read16(ptr, i, a + 2) << 16)) >>> 0;
-          // um trecho da IWRAM com conteúdo variado: logo depois de ligar ela ainda está vazia e um trecho
-          // zerado "bateria" com qualquer pedaço zerado da memória (aí tenta de novo nos próximos quadros)
+          const miss = () => { (this._ramWait || (this._ramWait = []))[i] = 60; return null; };
+          const u32 = new Uint32Array(x.memory.buffer), mem = () => new DataView(x.memory.buffer);
+          const rd32 = (a) => (x.kn_read16(ptr, i, a) | (x.kn_read16(ptr, i, a + 2) << 16)) >>> 0;
+          const cands = [];
+          const romP = x.kn_rom_ptr ? x.kn_rom_ptr(ptr, i) >>> 0 : 0;
+          if (romP) for (let k = 3; k < u32.length; k++) if (u32[k] === romP && u32[k - 1] && u32[k - 2] && u32[k - 3]) cands.push(k * 4);
+          // logo depois de ligar a IWRAM ainda está vazia: um trecho zerado "bateria" com qualquer pedaço
+          // zerado da memória, então só vale um trecho variado
           let sig = null, off = 0;
           for (off = 0; off < 0x8000 && !sig; off += 0x400) {
             const s = []; for (let k = 0; k < 64; k++) s.push(rd32(0x03000000 + off + 4 * k));
             if (new Set(s).size >= 32) sig = s;
           }
-          if (!sig) return null;
           off -= 0x400;
-          const sameAt = (w) => sig.every((v, k) => u32[w + k] === v);
-          let at = -1;
-          for (let w = off >> 2; w < u32.length - 64 && at < 0; w++) {
-            if (u32[w] !== sig[0] || !sameAt(w)) continue;
+          if (sig) for (let w = off >> 2; w < u32.length - 64; w++) {
+            if (u32[w] !== sig[0] || !sig.every((v, k) => u32[w + k] === v)) continue;
             const iw = w * 4 - off;   // um bloco com o conteúdo da IWRAM: quem aponta para ele é memory.iwram
-            for (let k = 2; k < u32.length; k++) if (u32[k] === iw && u32[k - 1] && u32[k - 2]) {
-              const wr = u32[k - 1], dv = new DataView(x.memory.buffer);
-              let ok = wr + 0x40000 <= dv.byteLength;
-              for (let a = 0; ok && a < 0x40000; a += 0x1000 + 2) ok = dv.getUint16(wr + a, true) === x.kn_read16(ptr, i, 0x02000000 + a);
-              if (ok) { at = (k + 1) * 4; break; }
-            }
+            for (let k = 2; k < u32.length; k++) if (u32[k] === iw && u32[k - 1] && u32[k - 2] && !cands.includes((k + 1) * 4)) cands.push((k + 1) * 4);
           }
-          const miss = () => { (this._ramWait || (this._ramWait = []))[i] = 60; return null; };
-          if (at < 0) return miss();
-          const io = at + 4, gbaP = at - 12 - 16;
-          // GBASIO: p (a struct GBA), mode, driver, rcnt, siocnt. Várias structs começam com p = a GBA: vale a
-          // que tem rcnt e siocnt iguais aos registradores e muda o SIOCNT de verdade ao ser escrita
-          let sio = -1;
           const sc0 = x.kn_read16(ptr, i, 0x04000128), rc0 = x.kn_read16(ptr, i, 0x04000134);
-          for (let k = io >> 2; k < (io >> 2) + 16384 && sio < 0; k++) {
-            if (u32[k] !== gbaP) continue;
-            const dv = new DataView(x.memory.buffer), a = k * 4;
-            if (dv.getUint16(a + 12, true) !== rc0 || dv.getUint16(a + 14, true) !== sc0) continue;
-            dv.setUint16(a + 14, sc0 ^ 0x0030, true);
-            if (x.kn_read16(ptr, i, 0x04000128) === (sc0 ^ 0x0030)) sio = a;
-            dv.setUint16(a + 14, sc0, true);
+          let at = -1, sio = -1;
+          for (const c of cands) {
+            const gbaP = c - 12 - 16, io = c + 4;
+            for (let k = io >> 2; k < (io >> 2) + 16384 && sio < 0; k++) {
+              if (u32[k] !== gbaP) continue;
+              const dv = mem(), a = k * 4;
+              if (dv.getUint16(a + 12, true) !== rc0 || dv.getUint16(a + 14, true) !== sc0) continue;
+              dv.setUint16(a + 14, sc0 ^ 0x0030, true);
+              if (x.kn_read16(ptr, i, 0x04000128) === (sc0 ^ 0x0030)) sio = a;
+              dv.setUint16(a + 14, sc0, true);
+            }
+            if (sio >= 0) { at = c; break; }
           }
-          if (sio < 0) return miss();
+          if (at < 0) return miss();
           const base = { 2: u32[(at >> 2) - 2], 3: u32[(at >> 2) - 1] }, mask = { 2: 0x3FFFF, 3: 0x7FFF };
+          // confere: a memória achada é a deste GBA
+          for (let a = 0; a < 0x8000; a += 0x400 + 2) if (mem().getUint16(base[3] + a, true) !== x.kn_read16(ptr, i, 0x03000000 + a)) return miss();
           const where = (a) => base[a >>> 24] + (a & mask[a >>> 24]);
-          const dv = () => new DataView(x.memory.buffer);
           return (this._ram[i] = {
-            r8: (a) => dv().getUint8(where(a)), r16: (a) => dv().getUint16(where(a), true), r32: (a) => dv().getUint32(where(a), true),
-            w8: (a, v) => dv().setUint8(where(a), v), w16: (a, v) => dv().setUint16(where(a), v, true),
-            siocnt: () => dv().getUint16(sio + 14, true), setSiocnt: (v) => dv().setUint16(sio + 14, v, true),
+            r8: (a) => mem().getUint8(where(a)), r16: (a) => mem().getUint16(where(a), true), r32: (a) => mem().getUint32(where(a), true),
+            w8: (a, v) => mem().setUint8(where(a), v), w16: (a, v) => mem().setUint16(where(a), v, true),
+            siocnt: () => mem().getUint16(sio + 14, true), setSiocnt: (v) => mem().setUint16(sio + 14, v, true),
           });
         },
         destroy() {
