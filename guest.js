@@ -207,7 +207,7 @@ async function roomScanLoop() {
   if (!$("guest").classList.contains("hidden") && !(Play.net && !Play.net.closed) && !SiteRoom.on) {
     renderRooms(await scanRooms().catch(() => []));
   }
-  setTimeout(roomScanLoop, 5000);
+  setTimeout(roomScanLoop, 2500);   // sala nova aparece em ~3 s (a procura em si leva menos de 1 s)
 }
 // saiu de uma partida: a lista de salas é refeita na hora (a que estava na tela era de antes da partida)
 function refreshRooms() {

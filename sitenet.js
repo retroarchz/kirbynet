@@ -192,26 +192,36 @@ function roomInfo(players, game, running, sys = "gba", free = false) {
   return packMsg("N", enc(JSON.stringify({ host: players[0] || "?", game: game || "", players, running: !!running, sys, free: !!free })));
 }
 let scanPeer = null;
+// código sem sala: o PeerJS avisa no Peer (não na conexão) "Could not connect to peer <id>" quase na hora.
+// Sem escutar isso, cada código vazio esperava os 6 s inteiros e a lista demorava a mostrar uma sala nova
+const scanMiss = new Map();   // id -> encerra a sondagem desse código
 // salas abertas nesta internet agora: [{code, host, game, players, running}]
 async function scanRooms() {
   if (typeof Peer === "undefined") return [];
   const pre = await netPrefix();
   if (!pre) return [];
   if (!scanPeer || scanPeer.destroyed || scanPeer.disconnected) {
-    try { scanPeer = await openPeer(null); scanPeer.on("error", () => {}); } catch (e) { scanPeer = null; return []; }
+    try {
+      scanPeer = await openPeer(null);
+      scanPeer.on("error", (e) => {
+        if (e && e.type === "peer-unavailable") { const f = scanMiss.get(String(e.message || "").split(" ").pop()); if (f) f(); }
+      });
+    } catch (e) { scanPeer = null; return []; }
   }
   const probe = (code) => new Promise(ok => {
-    const c = scanPeer.connect(SITE_PREFIX + code, { serialization: "raw", reliable: true });
-    const t = setTimeout(() => { try { c.close(); } catch (e) {} ok(null); }, 6000);
+    const id = SITE_PREFIX + code;
+    const c = scanPeer.connect(id, { serialization: "raw", reliable: true });
+    const end = (v) => { clearTimeout(t); scanMiss.delete(id); ok(v); };
+    const t = setTimeout(() => { try { c.close(); } catch (e) {} end(null); }, 6000);
+    scanMiss.set(id, () => { try { c.close(); } catch (e) {} end(null); });
     c.on("open", () => chunkSend(c, packMsg("N")));
     c.on("data", chunkReader(buf => {
       const u8 = new Uint8Array(buf);
       if (u8[0] !== 78) return;
-      clearTimeout(t);
       setTimeout(() => { try { c.close(); } catch (e) {} }, 200);
-      try { ok({ code, ...JSON.parse(dec(u8.subarray(1))) }); } catch (e) { ok(null); }
+      try { end({ code, ...JSON.parse(dec(u8.subarray(1))) }); } catch (e) { end(null); }
     }));
-    c.on("error", () => { clearTimeout(t); ok(null); });
+    c.on("error", () => end(null));
   });
   return (await Promise.all([...ROOM_DIGITS].map(d => probe(pre + d)))).filter(Boolean);
 }
