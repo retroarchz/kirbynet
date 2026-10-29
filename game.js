@@ -691,6 +691,14 @@ function netJoin(url, hello, cb) {
 
 // ------------------------------------------------------------------ partida
 // Os GBAs rodam em engine-worker.js (linha separada). Aqui só ficam tela, som e botões.
+// Controle compartilhado na sala: um GBA só para todos (o de quem criou a sala, com o save dele); na batalha
+// tripla cada um comanda um Pokémon (esquerda P1, meio P2, direita P3; na dupla, direita P2). addr = byte do
+// jogo com a posição do Pokémon que ele está perguntando (ver engine-worker.js, gbaKeys)
+const SHARED_GAMES = {
+  "6dfd1924ab327b26b852474a77fc9ca1aef06272": { name: "Pokémon Voyager (Battle Frontier Demo v1.2)", addr: 0x02023A93 },
+};
+const sharedFor = (romSha1, n) => SYS.id === "gba" && n > 1 ? SHARED_GAMES[romSha1] || null : null;
+
 // opts: { n, rom, romSha1, saves[], names[], net (ou null), slot, delay,
 //         onSave(saves[], fechandoAba) — grava o save; onEnd(saves[]) — partida acabou }
 function startRun(opts) {
@@ -700,7 +708,7 @@ function startRun(opts) {
     const mine = opts.saves[opts.slot];
     opts = { ...opts, worldN: opts.n, n: 1, saves: [mine && mine.length ? mine : new Uint8Array(0)] };
     if (SYS.id === "gba" && typeof LinkHLE !== "undefined" && LinkHLE.supports(opts.romSha1)) opts.cabo = opts.romSha1;
-  }
+  } else if (opts.net) opts.shared = sharedFor(opts.romSha1, opts.n);
   // ?semrollback no endereço da página: sala sem rollback (só espera, como antes) — para comparar
   const worker = new Worker(`engine-worker.js?sys=${SYS.id}&v=${ASSET_V}${/[?&]semrollback\b/.test(location.search) ? "&rb=0" : ""}`);
   const run = { ...opts, worker, desync: null, raf: 0, lastKeys: "",
@@ -728,7 +736,7 @@ function startRun(opts) {
   if (Cheats.usable(run)) CheatPresets.applyRom(roms);
   worker.postMessage({ t: "start", module: Play.mod, n: run.n, rom: roms, saves: opts.saves,
                        net: !!run.net && !run.free, free: !!run.free, me: run.slot | 0, slot: run.free ? 0 : run.slot,
-                       cabo: run.cabo || null, especial: Cheats.usable(run) ? CheatPresets.especial() : 0,
+                       cabo: run.cabo || null, shared: run.shared ? { addr: run.shared.addr } : null, especial: Cheats.usable(run) ? CheatPresets.especial() : 0,
                        delay: run.delay || 0, cheats: cheats.length ? cheats : null }, [roms.buffer]);
   $("btn-cheats").classList.toggle("hidden", !Cheats.usable(run));
   if (run.cabo && run.net) run.net.onCabo = (u8) => { const b = u8.slice(); run.worker.postMessage({ t: "cabo", bytes: b.buffer }, [b.buffer]); };
@@ -745,7 +753,7 @@ function startRun(opts) {
     run.net.early = [];
   }
   S = { screen: "game", mode: run.net ? "net" : "local", n: run.n, my: run.slot, players: run.names,
-        view_all: !run.net, desync: null, free: !!run.free, cabo: !!run.cabo };
+        view_all: !run.net, desync: null, free: !!run.free, cabo: !!run.cabo, shared: !!run.shared };
   showOnly("game");
   renderGame(S, true);
   syncView();

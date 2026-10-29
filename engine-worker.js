@@ -20,7 +20,7 @@ const SNAP_MS = 1000;   // de quanto em quanto tempo confere se o jogo gravou al
 // Save do jogo (o "cartucho"): em rede só o seu; no "Mesmo PC", o de todos.
 // Ler o save não mexe na emulação (testado: estado idêntico), então não dessincroniza.
 function grabSaves() {
-  return run.net ? [run.s.save(run.slot)] : [...Array(run.n).keys()].map(i => run.s.save(i));
+  return run.net ? [run.s.save(gbaSlot())] : [...Array(run.gbas).keys()].map(i => run.s.save(i));
 }
 function sigOf(saves) {
   let h = 2166136261 >>> 0;
@@ -40,6 +40,19 @@ function snapshot() {
 }
 
 let run = null, iv = null;
+// Controle compartilhado (ex.: Pokémon Voyager na sala): um GBA só para todos, igual em todos os aparelhos.
+// Os botões de cada um viajam como sempre; o GBA recebe os de quem está na vez, que o próprio jogo diz: na
+// batalha tripla ele pergunta pelo Pokémon da esquerda (posição 0), do meio (2) e da direita (4) -> P1, P2, P3.
+// Ímpar (adversário agindo), fora da batalha ou sem esse jogador na sala: o P1. Todos leem a mesma memória
+// (o jogo é o mesmo em todos), então continuam iguais.
+function gbaKeys(row) {
+  if (!run.shared) return row;
+  const ram = run.s.ram(0);
+  const b = ram ? ram.r8(run.shared.addr) : 0;
+  const p = b & 1 ? 0 : b >> 1;
+  return [row[p < row.length ? p : 0] | 0];
+}
+const gbaSlot = () => run.shared ? 0 : run.slot;   // o GBA deste aparelho no motor
 let audioPort = null;   // canal direto para a linha de áudio do navegador (AudioWorklet), se houver
 let keys = [0, 0, 0, 0];
 let pending = null;   // botões que chegaram antes do motor terminar de carregar
@@ -47,14 +60,14 @@ let view = [0];
 // só os GBAs que esta página mostra são desenhados (os outros rodam igual, sem imagem: bem mais leve)
 function applyView() {
   if (!run || !run.s.render) return;
-  for (let i = 0; i < run.n; i++) run.s.render(i, view.includes(i));
+  for (let i = 0; i < run.gbas; i++) run.s.render(i, view.includes(i));
 }
 // Códigos (GameShark / Action Replay / CodeBreaker): só sozinho ou no "Mesmo PC" (em sala todos os
 // aparelhos rodam o mesmo jogo; um código só aqui separaria as partidas). Vale para todos os GBAs daqui.
 function setCheats(codes) {
   if (run.net || !run.s.cheats) return postMessage({ t: "cheats", res: null });
   let res = null;
-  for (let i = 0; i < run.n; i++) res = run.s.cheats(i, codes);
+  for (let i = 0; i < run.gbas; i++) res = run.s.cheats(i, codes);
   postMessage({ t: "cheats", res });
 }
 const pool = [];   // buffers de imagem reaproveitados (a página devolve depois de desenhar)
@@ -107,7 +120,7 @@ function stepNet(use, full) {
     run.rb.snaps.set(f, run.s.snapshot(old || run.rb.spare.pop()));
   }
   const t = performance.now();
-  run.s.runFrame(use);
+  run.s.runFrame(gbaKeys(use));
   const dt = performance.now() - t;
   run.costAvg = run.costAvg ? run.costAvg * 0.97 + dt * 0.03 : dt;
   if (speculative) run.used.set(f, use.slice());
@@ -142,7 +155,7 @@ function rollback(f) {
   while (run.frames < end) {
     const row = run.book.get(run.frames), full = !!row && !row.some(k => k === null);
     const spec = stepNet(full ? row : predictRow(row), full);
-    run.s.audio(run.slot);
+    run.s.audio(gbaSlot());
     run.frames++;
     run.rb.resim++;
     if (!spec && run.frames % HASH_EVERY === 0) sendHash();
@@ -301,14 +314,14 @@ function tick() {
           run.waitSince = null;
         }
         if (run.rb) spec = stepNet(use, full);
-        else run.s.runFrame(row);
+        else run.s.runFrame(gbaKeys(row));
         run.book.delete(run.frames - 600);
       } else {
         const k = [];
         for (let p = 0; p < run.n; p++) k.push(keys[p] | 0);
         // botão Especial (não é do GBA; o motor só vê os 10 de verdade): o pronto que usa ele lê da memória
         // do jogo, um byte por jogador, escrito aqui em cada GBA antes do quadro
-        if (run.especial) for (let i = 0; i < run.n; i++) {
+        if (run.especial) for (let i = 0; i < run.gbas; i++) {
           const ram = run.s.ram(i);
           if (ram) for (let p = 0; p < run.n; p++) ram.w8(run.especial + p, k[p] & 0x400 ? 1 : 0);
         }
@@ -327,7 +340,7 @@ function tick() {
           if (run.hle) for (const d of run.caboEarly.splice(0)) d.left != null ? run.hle.left(d.left) : run.hle.recv(d.from, d.m);
         }
         if (run.hle) run.hle.pre();
-        run.s.runFrame(k);
+        run.s.runFrame(gbaKeys(k));
         if (run.hle) run.hle.post();
       }
       // acelerando: só a imagem do último quadro da rodada vai para a tela; o som de todos entra no ffAudio
@@ -359,12 +372,12 @@ function tick() {
       // imagem + som DESTE quadro, numerados: a página mostra cada um na hora certa
       const vids = [];
       for (const i of view) {
-        if (i >= run.n) continue;
+        if (i >= run.gbas) continue;
         const buf = pool.pop() || new ArrayBuffer(FRAME_BYTES);
         run.s.video(i, new Uint8Array(buf));
         vids.push({ i, buf }); transfer.push(buf);
       }
-      const a = run.s.audio(run.net ? run.slot : 0);   // som do SEU Kirby (no "Mesmo PC", o do P1)
+      const a = run.s.audio(run.net ? gbaSlot() : 0);   // som do SEU Kirby (no "Mesmo PC", o do P1)
       if (speed > 1) { ffBufs.push(a.samples); ffRate = a.rate; out.push({ f: run.frames, vids, audio: null }); }
       else if (audioPort) {   // som vai direto para a placa, sem passar pela página
         audioPort.postMessage(a, [a.samples.buffer]);
@@ -432,9 +445,11 @@ onmessage = async (ev) => {
   if (m.t === "start") {
     try {
       const eng = await Core.load(m.module);
-      const s = eng.create(m.n, m.rom, m.saves);
+      // controle compartilhado: um GBA só (com o save de quem criou a sala), para m.n jogadores
+      const gbas = m.shared ? 1 : m.n;
+      const s = eng.create(gbas, m.rom, m.shared ? [m.saves[0]] : m.saves);
       if (s.fps > 30 && s.fps < 90) FPS = s.fps;
-      run = { n: m.n, net: m.net, slot: m.slot, delay: m.delay || 0, s, frames: 0, sent: m.delay || 0,
+      run = { n: m.n, gbas, shared: m.shared || null, net: m.net, slot: m.slot, delay: m.delay || 0, s, frames: 0, sent: m.delay || 0,
               waitSince: null, t0: performance.now(), fpsT: performance.now(), fpsN: 0, book: new Map(),
               win: { t: performance.now(), waited: 0, events: 0 }, calmT: performance.now(), minDelay: Math.min(2, m.delay || 2),
               busy: 0, busyN: 0, marg: {}, pm: { n: 0, late: 0, tight: 0, min: 99, by: {} }, mw: {}, slew: 0, startT: performance.now(),

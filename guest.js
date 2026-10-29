@@ -73,9 +73,19 @@ function setRom(name, bytes) {
 
 // Catálogo publicado junto com o site, usando caminhos relativos ao GitHub Pages.
 let libraryRequest = 0;
+// jogo aberto do próprio aparelho (📂): fica na lista como uma opção a mais e não é trocado pelo catálogo
+const LOCAL_ROM = "__local__";
+function showLocalRom(name) {
+  const select = $("g-library");
+  let opt = [...select.options].find(o => o.value === LOCAL_ROM);
+  if (!opt) { opt = new Option("", LOCAL_ROM); select.add(opt, 0); }
+  opt.text = "📂 " + name.replace(SYS.romRe, "");
+  select.value = LOCAL_ROM;
+}
 async function loadLibraryRom() {
-  const request = ++libraryRequest;
   const name = $("g-library").value;
+  if (name === LOCAL_ROM) return;   // já carregado (veio do aparelho)
+  const request = ++libraryRequest;
   Guest.rom = null;
   $("g-solo").disabled = true;
   $("g-create").disabled = true;
@@ -108,6 +118,7 @@ async function initLibrary() {
     select.replaceChildren(...games.map(game => new Option(game.name.replace(SYS.romRe, ""), game.file)));
     if (!games.length) select.add(new Option("Nenhum jogo disponível", ""));
     if (games.some(game => game.file === Guest.romName)) select.value = Guest.romName;
+    else if (Guest.rom && Guest.romName) { showLocalRom(Guest.romName); $("g-solo").disabled = false; $("g-create").disabled = false; return; }
     await loadLibraryRom();
   } catch (err) {
     select.replaceChildren(new Option("Não foi possível listar os jogos", ""));
@@ -145,6 +156,7 @@ async function guestInit() {
   if (saved && saved.bytes) setRom(saved.name, saved.bytes);
   showUndo();
   $("g-controls").onclick = openControls;
+  $("g-pick").onclick = () => $("g-file").click();
   $("g-file").onchange = async (e) => {
     const f = e.target.files[0];
     if (!f) return;
@@ -152,8 +164,11 @@ async function guestInit() {
       let bytes = new Uint8Array(await f.arrayBuffer()), name = f.name;
       if (name.toLowerCase().endsWith(".zip")) ({ name, bytes } = await unzipGba(bytes));
       if (!SYS.romRe.test(name)) throw new Error(`Escolha um ${SYS.romExt} ou .zip.`);
+      ++libraryRequest;   // um download do catálogo que ainda estava vindo não troca este jogo
       setRom(name, bytes);
       romStore({ name, bytes });
+      showLocalRom(name);
+      $("g-solo").disabled = false; $("g-create").disabled = false;
       toast(`ROM pronta: ${name}`);
     } catch (err) { toast(String(err.message || err)); }
     e.target.value = "";
@@ -249,6 +264,7 @@ async function guestJoin(roomCode) {
       if (sha1Hex(r.bytes) !== r.sha1) throw new Error("O jogo chegou com defeito. Tente entrar novamente.");
       setRom(r.name, r.bytes);
       await romStore({ name: r.name, bytes: r.bytes });
+      showLocalRom(r.name);
     }
   } catch (err) {
     return showGuestPage("Não consegui carregar o jogo: " + (err.message || err));
@@ -292,9 +308,11 @@ function roomCallbacks() {
       try {
         // Mundo livre (SNES): cada um no seu jogo, com o seu save. Mesmo console (um SNES só para
         // todos, o save do P1): só o P1 grava, senão o progresso do P1 iria parar no save dos outros.
+        // controle compartilhado (um GBA só, o de quem criou a sala): só o P1 grava, como no SNES de um console só
+        const one = SYS.oneScreen || !!sharedFor(Guest.romSha1, info.n);
         startRun({ n: info.n, rom: Guest.rom, romSha1: Guest.romSha1, saves: info.saves.map(b64dec), names: info.names,
                    net, slot: net.slot, delay: info.delay, free: !!info.free,
-                   onSave: info.free || !SYS.oneScreen || net.slot === 0 ? guestSaveWriter() : null });
+                   onSave: info.free || !one || net.slot === 0 ? guestSaveWriter() : null });
       } catch (err) { toast(String(err.message || err)); net.close(); showGuestPage(String(err)); }
     },
     onError(msg) {
