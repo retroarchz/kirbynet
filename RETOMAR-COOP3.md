@@ -281,3 +281,29 @@ espera do host, caixas de vida, sem Brendan. Defeito conhecido que fica: no P1 o
 cima do Pokémon do lugar 2 (colisão da tag D70C). Simulador: tripla 6 turnos sem travar; dupla vai e volta.
 `cloud.js` SAVE_SEEDS agora é lista: novo <- teste anterior b3121… <- Quetzal c4091f…. `site-e2e.js` não rodou
 (precisa do servidor https local); `site.test.js` passou.
+
+## Rodada 30/10/2026 (madrugada) — prints 23:10/23:13 do usuário — PUBLICADO sha1 58ae63d5…
+
+Feedback (prints em Downloads 231103/231324/231346 + referência do Emerald "Conquer-the-Battle-Frontier"):
+caixas de vida marrons (deviam ser bege como no Emerald), texto estranho no P1, o personagem do P3 não ficava
+junto dos outros dois para arremessar a Pokébola, ainda sobrava um Brendan ao fundo, níveis Nv0/Nv1/Nv23.
+
+Corrigido e visto no simulador (3 telas iguais, `.runtime/espera/fim-grande.png`, `pose-p3b.png`):
+- **Cores:** a paleta do Pokémon do lugar 4 caía no slot 4 = paleta com tag das caixas (D6FF). Etapa 13 grava
+  `gReservedSpritePaletteCount 0x030033BC = 6` (CB2_InitBattleInternal 0x08041904 grava 4 antes do coop).
+- **Texto por cima do Pokémon do lugar 2 (P1):** tags novas das caixas/barras 4/5 `0xB7A0..A3` (D70C era a barra
+  de bolinhas). Para caber na memória de vídeo: folhas da caixa/barra do lugar 5 só se gBattlersCount == 6.
+- **Pose do 3º treinador:** NÃO usar o IntroTrainerBallThrow da abertura para o lugar 4 (controlador espera o
+  parceiro b^2 = 6 e trava). Agora `envio3` (no fim da ROM, ponte de 8 bytes em 0x0803B198) roda no fim do envio
+  do lugar 2: treinador do lugar 4 faz StartSpriteAnim(1) + deslize (mesmos dados de 0x08039978) e o callback
+  `envia4` (fim do deslize) chama 0x08039F3C, StartSendOutAnim(4) e mostra a caixa 4 nas três telas.
+  gancho.py caixa4 não age mais no lado do jogador. Lado inimigo (+5) continua no fim do envio do lugar 1.
+- Testes: tripla 6 turnos sem travar; dupla vai e volta com 3 conectados andando; site.test.js passou.
+
+**Ainda aberto (próximos):**
+1. Níveis/vidas estranhos (Nv0 10/10, Nv1) — no simulador os saves são cópias e todos ficam Nv18, então não
+   reproduz: testar com saves diferentes; olhar 0x08109E58 (com flag &6 recria a equipe no nível máximo
+   0x0809C164 + 0x0803FA84) e a cópia de 2 Pokémon por jogador da etapa 3/4 do prep3.
+2. Texto "mandou" com lixo na tela do P3 ("Â ₽ëK,SANDRO mandou") — nome do lugar 4 (0x081D5E64).
+3. Caixa do 3º jogador (y=51) cobre a parte de baixo dos Pokémon inimigos — rever coordenadas (tabela 0x080AB6F8).
+4. Mensagem do host "A: começar em dupla"; P2 como vaga 2 na dupla (troca de gLinkPlayers não testada).

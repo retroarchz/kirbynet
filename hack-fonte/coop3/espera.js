@@ -22,7 +22,7 @@ link = link.replace('    return {\n', `    return {
 if (!/let .*\bsub\b/.test(link)) link = link.replace('let armed = false', 'let sub = null; const busy = new Set(); let armed = false');
 fs.writeFileSync(path.join(rt, 'link-espera.js'), link);
 let hle = fs.readFileSync(path.join(rt, 'hle.js'), 'utf8').replace(/require\("[^"]*link\.js"\)/, `require(${JSON.stringify(path.join(rt, 'link-espera.js'))})`);
-hle = hle.replace('const SHA = "c4091f572d52436c86ceaa0c5718cfb22dc2d59d"', 'const SHA = process.env.SHA || "b3121dfb3be248bcd51cf83815c463a72e2781e1"');
+hle = hle.replace('const SHA = "c4091f572d52436c86ceaa0c5718cfb22dc2d59d"', 'const SHA = process.env.SHA || "58ae63d52c0c0088a99c241bda502c36c8b3c3e6"');
 fs.writeFileSync(path.join(rt, 'hle-espera.js'), hle);
 const { world } = require(path.join(rt, 'hle-espera.js'));
 const RD = (p, a) => p.g.ram(0);

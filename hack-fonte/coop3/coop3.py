@@ -203,6 +203,9 @@ def prep3(a):
     a.addi('r7', 1); a.cmpi('r7', 6); a.bc('lo', 'e13laco')
     a.ldr_lit('r0', FLAG); a.mov('r1', 1); a.strb_i('r1', 'r0', 0)                # liga a tripla
     call(a, EXTRA)                                                                # imagens dos lugares 4/5
+    # paletas dos lugares 4/5 = slots 4/5: reservar 6 (gReservedSpritePaletteCount), senão as caixas de vida
+    # (paleta com tag no slot 4) ficavam com as cores do Pokémon do lugar 4 (marrom/laranja)
+    a.ldr_lit('r0', 0x030033BC); a.mov('r1', 6); a.strb_i('r1', 'r0', 0)
     call(a, 0x08032E98)                                                           # montagem original (4 lugares)
     # 6 lugares: pares = jogadores (o meu = Player, os outros = LinkPartner); ímpares = treinador
     a.ldr_lit('r0', TYPE); a.ldr_i('r0', 'r0', 0); a.mov('r1', 4); a.alu('and_', 'r0', 'r1'); a.movh('r6', 'r0')   # r6 = mestre?
@@ -284,35 +287,64 @@ def bl_em(at, to, antigo):
     off = antigo - (at + 4); old = struct.pack('<HH', 0xF000 | ((off >> 12) & 0x7FF), 0xF800 | ((off >> 1) & 0x7FF))
     assert bytes(d[at - B:at - B + 4]) == old, hex(at)
     off = to - (at + 4); d[at - B:at - B + 4] = struct.pack('<HH', 0xF000 | ((off >> 12) & 0x7FF), 0xF800 | ((off >> 1) & 0x7FF))
-# passo 6 do gancho (envio do 3º na entrada) refeito com "só se o lugar +4 tem Pokémon (espécie != 0)"
+# passo 6 do gancho (envio do 3º na entrada), no fim da tarefa de envio (Task_StartSendOutAnim 0x08039D18):
+#  - lado do treinador: no fim do envio do lugar 1 manda o lugar 5 (se tem Pokémon);
+#  - 3º jogador: no fim do envio do lugar 2 o treinador do lugar 4 faz a pose de arremesso e desliza para fora
+#    (igual a BtlController_HandleIntroTrainerBallThrow 0x08039978); quando sai de cena (os outros dois já
+#    saíram e liberaram a memória de vídeo) o callback envia4 manda o Pokémon e mostra a caixa de vida.
+#    O "arremessar" normal da abertura não serve para o lugar 4: o controlador espera o "parceiro" b^2 = 6.
+SPR_IDS, HB_IDS = 0x0203F664, 0x0203F9F8
+def manda(a, reg_b, reg_mon):
+    # BattleLoadMonSpriteGfx(mon, b); StartSendOutAnim(b, FALSE)
+    a.movh('r0', reg_mon); a.movh('r1', reg_b); call(a, 0x080931C8)
+    a.movh('r0', reg_b); a.mov('r1', 0); call(a, 0x08037B40)
+def envia4(a):                                     # callback do fim do deslize do treinador do lugar 4 (r0 = sprite)
+    a.push(['r4', 'r5'], lr=True)
+    call(a, 0x08039F3C)                            # o do jogo: libera o treinador e carrega a imagem do Pokémon
+    a.mov('r0', 4); a.mov('r1', 0); call(a, 0x08037B40)                 # StartSendOutAnim(4, FALSE)
+    a.ldr_lit('r1', PIDX + 8); a.ldrh_i('r1', 'r1', 0); a.mov('r0', 0x68); a.alu('mul', 'r1', 'r0')
+    a.ldr_lit('r0', PARTY); a.add_r('r5', 'r1', 'r0')
+    a.ldr_lit('r4', HB_IDS); a.ldrb_i('r0', 'r4', 4); a.movh('r1', 'r5'); a.mov('r2', 0); call(a, 0x080AE0AC)   # UpdateHealthboxAttribute
+    a.mov('r0', 4); call(a, 0x080B1254)                                  # StartHealthboxSlideIn(4)
+    a.ldrb_i('r0', 'r4', 4); call(a, 0x080AB3A4)                         # SetHealthboxSpriteVisible
+    a.pop(['r4', 'r5']); a.pop(['r0']); a.bx('r0')
+ENVIA4 = far(envia4)
 def envio3(a):
     a.push(['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7'], lr=True)
-    a.ldr_lit('r2', FLAG); a.ldrb_i('r2', 'r2', 0); a.cmpi('r2', 0); a.bc('eq', 'out')
+    a.ldr_lit('r2', FLAG); a.ldrb_i('r2', 'r2', 0); a.cmpi('r2', 0); a.bfar('eq', 'out')
     a.mov('r2', 0x28); a.alu('mul', 'r2', 'r0'); a.ldr_lit('r3', 0x03005648); a.add_r('r2', 'r2', 'r3'); a.ldrh_i('r4', 'r2', 0)
-    a.cmpi('r4', 1); a.bc('hi', 'out')
-    a.addi('r4', 4)
-    # Pokémon do lugar +4 pela equipe (a gBattleMons dele ainda não está pronta neste ponto da batalha coop:
-    # conferir por ela deixava o sprite do treinador no lugar do Pokémon do 3º jogador)
+    a.cmpi('r4', 2); a.bc('eq', 'jogador'); a.cmpi('r4', 1); a.bfar('ne', 'out'); a.addi('r4', 2)
+    a.label('jogador'); a.addi('r4', 2)                                  # 1 -> 5, 2 -> 4
+    # Pokémon do lugar pela equipe (a gBattleMons dele ainda não está pronta neste ponto da batalha coop)
     a.ldr_lit('r3', PIDX); a.lsl('r5', 'r4', 1); a.ldrh_r('r5', 'r3', 'r5')
     a.mov('r7', 0x68); a.alu('mul', 'r7', 'r5')
     a.ldr_lit('r3', PARTY); a.mov('r6', 1); a.alu('tst', 'r4', 'r6'); a.bc('eq', 'jog'); a.ldr_lit('r3', ENEMY); a.label('jog')
     a.add_r('r7', 'r7', 'r3')
-    a.movh('r0', 'r7'); a.mov('r1', 0xB); a.bl(0x0809EAC4); a.cmpi('r0', 0); a.bc('eq', 'out')   # GetMonData(mon, SPECIES)
-    # se o lugar +4 tiver um sprite de treinador da abertura (o gancho.py não desenha mais, mas por segurança),
-    # ele sai antes do Pokémon: senão ficava na tela (o Brendan do print). Id 0 = nada criado (é a 1ª caixa de vida)
-    a.ldr_lit('r3', 0x0203F664); a.ldrb_r('r0', 'r3', 'r4'); a.cmpi('r0', 0); a.bc('eq', 'semtreinador'); a.cmpi('r0', 64); a.bc('hs', 'semtreinador')
-    a.mov('r1', 0x44); a.alu('mul', 'r0', 'r1'); a.ldr_lit('r1', SPRITES); a.add_r('r0', 'r0', 'r1'); a.bl(0x08007A60)   # DestroySprite
-    a.ldr_lit('r3', 0x0203F664); a.mov('r0', 64); a.strb_r('r0', 'r3', 'r4')
-    a.label('semtreinador')
+    a.movh('r0', 'r7'); a.mov('r1', 0xB); call(a, 0x0809EAC4); a.cmpi('r0', 0); a.bfar('eq', 'out')   # espécie
     a.ldr_lit('r3', 0x02023538); a.ldr_i('r3', 'r3', 0); a.lsl('r6', 'r4', 9); a.add_r('r3', 'r3', 'r6'); a.addi('r3', 0x25); a.strb_i('r5', 'r3', 0)
-    a.movh('r0', 'r7'); a.movh('r1', 'r4')
-    a.bl(0x080931C8)                                   # BattleLoadMonSpriteGfx(mon, b)
-    a.movh('r0', 'r4'); a.mov('r1', 0); a.bl(0x08037B40) # StartSendOutAnim(b, FALSE)
+    a.cmpi('r4', 4); a.bc('ne', 'direto')
+    # treinador do lugar 4 (desenhado na abertura): id 1..63 (0 = nada criado, é a 1ª caixa de vida)
+    a.ldr_lit('r3', SPR_IDS); a.ldrb_i('r0', 'r3', 4); a.cmpi('r0', 0); a.bc('eq', 'direto'); a.cmpi('r0', 64); a.bc('hs', 'direto')
+    a.mov('r1', 0x44); a.alu('mul', 'r0', 'r1'); a.ldr_lit('r1', SPRITES); a.add_r('r6', 'r0', 'r1')   # r6 = sprite do treinador
+    a.movh('r0', 'r6'); call(a, 0x080F7678)
+    a.mov('r0', 50); a.strh_i('r0', 'r6', 0x2E)                         # data[0] = duração
+    a.ldr_lit('r0', 0xFFD8); a.strh_i('r0', 'r6', 0x32)                 # data[2] = -40 (sai pela esquerda)
+    a.ldrh_i('r0', 'r6', 0x22); a.strh_i('r0', 'r6', 0x36)              # data[4] = y
+    a.ldr_lit('r0', 0x080F7D09); a.str_i('r0', 'r6', 0x1C)              # StartAnimLinearTranslation
+    a.mov('r0', 4); a.strh_i('r0', 'r6', 0x38)                          # data[5] = lugar
+    a.movh('r0', 'r6'); a.ldr_lit('r1', ENVIA4 | 1); call(a, 0x080F6FDC)  # StoreSpriteCallbackInData6
+    a.movh('r0', 'r6'); a.mov('r1', 1); call(a, 0x080090D4)            # StartSpriteAnim(treinador, 1) = pose
+    a.b('out')
+    a.label('direto'); manda(a, 'r4', 'r7')
     a.label('out')
     a.pop(['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7'])
-    a.bl(0x080FB0B4)
+    call(a, 0x080FB0B4)
     a.pop(['r3']); a.bx('r3')
-bl_em(0x08039F20, baixo(envio3), 0x0803AF80)
+# ponte curta nos 8 bytes finais da função morta 0x0803AF48 (o gancho.py não usa): ldr r3,=envio3; bx r3
+PONTE_ENVIO = 0x0803B198
+assert bytes(d[PONTE_ENVIO - B:PONTE_ENVIO - B + 8]) == bytes.fromhex('aa46f0bc01bc0047'), 'área da ponte em uso'
+d[PONTE_ENVIO - B:PONTE_ENVIO - B + 8] = struct.pack('<HHI', 0x4B00, 0x4718, far(envio3) | 1)
+bl_em(0x08039F20, PONTE_ENVIO, 0x0803AF80)
 # carga dos sprites da batalha (0x08093714): lugar ausente não ganha caixa de vida (cada uma gasta 6 dos 64 sprites).
 # No lugar dela fica um sprite invisível parado com todos os "links" (affineParam, data[0..7]) apontando para ele mesmo,
 # e as funções que desenham/posicionam/escondem a caixa pulam esse sprite (reconhecido pelo callback parado).

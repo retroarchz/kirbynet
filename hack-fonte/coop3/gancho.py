@@ -59,7 +59,7 @@ c = rd(0x091299E8, 32) + b''.join(bytes([x, y, 0, 0]) for x, y in TRI)
 repoint(0x091299E8, nova(c), (0x080F6B40, 0x080F6B64, 0x080F6D74))
 # tags novas das folhas das posições 4/5. Não usar 0xD708..0xD70C: são do jogo (0xD70C = TAG_STATUS_SUMMARY_BAR_TILE,
 # a barra de bolinhas da abertura; ao ser destruída ela liberava os tiles da caixa 4, que o Pokémon do lugar 2 pegava)
-TAG_BAR4, TAG_BAR5, TAG_BOX4, TAG_BOX5 = 0xD708, 0xD709, 0xD70C, 0xD70D   # TODO: trocar (ver RETOMAR-COOP3.md); 0xB7A0.. trava sem espaço de vídeo
+TAG_BAR4, TAG_BAR5, TAG_BOX4, TAG_BOX5 = 0xB7A0, 0xB7A1, 0xB7A2, 0xB7A3
 # folhas da barra de vida (gfx, tamanho, tag): 4 e 5 iguais a 2 e 3 com tags novas
 hb = bytearray(rd(0x085C3FB8, 32)); e4 = bytearray(hb[16:24]); e5 = bytearray(hb[24:32])
 struct.pack_into('<H', e4, 6, TAG_BAR4); struct.pack_into('<H', e5, 6, TAG_BAR5)
@@ -110,12 +110,17 @@ a = Asm(H3)
 a.push(['r4'], lr=True)
 a.bl(0x0803AD50)                                         # a folha original do passo 5
 a.ldr_lit('r4', FLAG); a.ldrb_i('r4', 'r4', 0); a.cmpi('r4', 0); a.bc('eq', 'fim')
-for folha in (sp3, so3, HBS + 32, HBS + 40):
+for folha in (sp3, HBS + 32):
+    a.ldr_lit('r0', folha); a.bl(0x0803AD50)
+# caixa/barra do lugar 5 só se ele existe (gBattlersCount 6): sem 3º inimigo eram ~72 tiles de vídeo à toa,
+# e faltava espaço para o Pokémon do lugar 2 no envio
+a.ldr_lit('r4', 0x02023044); a.ldrb_i('r4', 'r4', 0); a.cmpi('r4', 6); a.bc('lo', 'fim')
+for folha in (so3, HBS + 40):
     a.ldr_lit('r0', folha); a.bl(0x0803AD50)
 a.label('fim')
 a.pop(['r4']); a.pop(['r3']); a.bx('r3')
 a.pool()
-code = a.build(); assert H3 + len(code) <= 0x0803AF48 + 0x258
+code = a.build(); assert H3 + len(code) <= 0x0803B060, hex(len(code))   # 0x0803B060+ é área do bloco() (passo 10)
 d[H3 - B:H3 - B + len(code)] = code
 assert rd(0x08093692, 4) == bytes.fromhex('a7f75dfb'); bl(0x08093692, H3)
 # 8) modelos de sprite dos Pokémon por posição (gBattlerSpriteTemplates 0x085BD0BC): 4 -> 6
@@ -213,7 +218,8 @@ def caixa4(a):
     a.movh('r4', 'r6')                                   # r6 = batalhador da tarefa (no chamador)
     a.bl(0x080AB3A4)                                     # original
     a.ldr_lit('r0', FLAG); a.ldrb_i('r0', 'r0', 0); a.cmpi('r0', 0); a.bc('eq', 'fim')
-    a.cmpi('r4', 1); a.bc('hi', 'fim'); a.addi('r4', 4)
+    # lado do jogador (lugar 4) agora mostra a caixa no fim do próprio envio (coop3.py envia4)
+    a.cmpi('r4', 1); a.bc('ne', 'fim'); a.addi('r4', 4)
     a.ldr_lit('r5', HBIDS)
     a.ldr_lit('r1', 0x0203F400); a.lsl('r2', 'r4', 1); a.ldrh_r('r2', 'r1', 'r2'); a.mov('r1', 0x68); a.alu('mul', 'r1', 'r2')
     a.ldr_lit('r2', 0x020235CC); a.add_r('r1', 'r1', 'r2')
