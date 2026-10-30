@@ -112,8 +112,12 @@ def prep3(a):
     a.ldr_lit('r0', STATE); a.ldrb_i('r0', 'r0', 0)
     a.cmpi('r0', 2); a.bc('lo', 'antes'); a.cmpi('r0', 13); a.bc('ls', 'meu')
     a.label('orig'); a.ldr_lit('r0', ORIG); a.bx('r0')
-    # etapa 0: guarda o lp[2] (o P3), porque a etapa 1 original escreve o treinador inimigo nessa vaga
-    a.label('antes'); a.cmpi('r0', 0); a.bc('ne', 'orig')
+    # etapas 0 e 1: guarda o lp[2] (o P3), porque a etapa 1 original escreve o treinador inimigo nessa vaga.
+    # Na etapa 0 o cabo ainda está sendo reaberto e a tabela está vazia (o P3 ficava sem nome/aparência: Brendan e
+    # texto com lixo); copiando a cada quadro da etapa 1, a última cópia é a de logo antes da original gravar.
+    a.label('antes'); a.cmpi('r0', 1); a.bc('hi', 'orig')
+    # a original grava a vaga 2 (id = 1) antes de esperar o cabo: daí em diante não copia mais
+    a.ldr_lit('r1', LINKP + 2 * 0x24 + 0x18); a.ldrh_i('r1', 'r1', 0); a.cmpi('r1', 1); a.bc('eq', 'orig')
     a.ldr_lit('r0', LINKP + 2 * 0x24); a.ldr_lit('r1', SALVA_LP2); a.mov('r2', 0x24)
     a.label('copia'); a.ldrb_i('r3', 'r0', 0); a.strb_i('r3', 'r1', 0); a.addi('r0', 1); a.addi('r1', 1); a.subi('r2', 1); a.bc('ne', 'copia')
     a.b('orig')

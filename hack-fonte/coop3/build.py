@@ -21,7 +21,8 @@ run('gancho.py', out / 'tables.gba', out / 'triple.gba')
 run('coop3.py', out / 'triple.gba', out / 'qc9-rebuilt.gba')
 baseline = hashlib.sha256((out / 'qc9-rebuilt.gba').read_bytes()).hexdigest()
 # qc9 + correções de 29/10/2026 (caixa de vida falsa marcada em data[7]; envio do 3º pela equipe , sem o sprite do treinador , com o bloco extra de imagens ); a qc9 original era 4f204715...
-assert baseline == '9e9cdf7a0a0aed2ea5c162ff0d1a3587a0061ce9f571ea341d727e9018f6e2f8', baseline
+assert baseline == 'f80d7a78060cea68082cbbee4577274bd11318457960ecc1dfe1ee0a5d0bce7f', baseline
 run('stability.py', out / 'qc9-rebuilt.gba', out / 'stable-fixes.gba')
-run('espera.py', out / 'stable-fixes.gba', out / 'coop3-test.gba')
+run('espera.py', out / 'stable-fixes.gba', out / 'espera.gba')
+run('alvos6.py', out / 'espera.gba', out / 'coop3-test.gba')
 print('Only local test artifacts were generated; original ROM is unchanged.')

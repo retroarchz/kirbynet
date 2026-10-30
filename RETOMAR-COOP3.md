@@ -307,3 +307,28 @@ Corrigido e visto no simulador (3 telas iguais, `.runtime/espera/fim-grande.png`
 2. Texto "mandou" com lixo na tela do P3 ("Â ₽ëK,SANDRO mandou") — nome do lugar 4 (0x081D5E64).
 3. Caixa do 3º jogador (y=51) cobre a parte de baixo dos Pokémon inimigos — rever coordenadas (tabela 0x080AB6F8).
 4. Mensagem do host "A: começar em dupla"; P2 como vaga 2 na dupla (troca de gLinkPlayers não testada).
+
+## Rodada 30/10/2026 01h — prints 23:40/23:42 — PUBLICADO sha1 84e4248d…
+
+Usuário confirmou: **níveis consertados**. Relatou: "Brendan" atrás do personagem (eram 3 Sandros de teste);
+golpes não acertavam a Lilligant do meio (lugar 4, Surf etc.); não dava para escolher ela como alvo; ela
+**sumiu ao usar Cotton Guard** (não reproduzido no simulador ainda — investigar a animação do golpe com o
+atacante no lugar 4: posições/coords de animação de 4 entradas, gBattlerSpriteIds, sprite escondido).
+
+Corrigido (novo `alvos6.py`, aplicado depois do `espera.py` no build):
+- GetNextTarget 0x08073B6C ia 0..3 (4 = nenhum): agora 0..5, "nenhum" = 6 (chamadores 0x080704FE,
+  0x080754D0, 0x08075638). targetsDone (+0x402) movido para -0x100 (área antes do bloco). Visto no simulador:
+  golpe de área do inimigo tira PS do lugar 4.
+- Menu de alvo: tabela {0,4,2,5,3,1} em 0x09FFA000, limites 5, e o filtro por posição (0x0808E30C/42C)
+  agora "ímpar = inimigo, par = aliado". Cursor passa pelo 4; Leech Seed do P1 chegou nele.
+- x do treinador na abertura = 32 + 29*pos (0x081D5212 parceiro, 0x0820C164, 0x08091528 jogador):
+  32/90/148 nas três telas.
+- coop3.py prep3: cópia do lp[2] (P3) também na etapa 1 enquanto lp[2].id != 1 (na etapa 0 a tabela
+  estava vazia por causa da reabertura do cabo). O P3 tinha nome/aparência zerados -> sprite Brendan.
+
+**Ainda aberto:**
+1. Lilligant do meio sumindo no Cotton Guard (ver acima).
+2. IA do inimigo com golpe de alvo único provavelmente só escolhe 0..3 (laço da IA) — conferir se ataca o 4.
+3. Texto "Â ₽ëK,SANDRO mandou" na tela do P3: parceiro do lugar 4 = 4^2 = 6 nas mensagens (o 0x081D5E64 da
+   memória antiga NÃO é o lugar; procurar a expansão de B_TXT do parceiro).
+4. Caixa do 3º jogador (y=51) cobre a parte de baixo dos inimigos; mensagem do host "A: começar em dupla".

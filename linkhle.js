@@ -43,6 +43,7 @@ const LinkHLE = (() => {
   GAMES.b3121dfb3be248bcd51cf83815c463a72e2781e1 = GAMES.c4091f572d52436c86ceaa0c5718cfb22dc2d59d;
   GAMES.a9162e75a98631c4d31541bf1168fcee62770ec9 = { ...GAMES.c4091f572d52436c86ceaa0c5718cfb22dc2d59d, coop: COOP3 };
   GAMES["58ae63d52c0c0088a99c241bda502c36c8b3c3e6"] = GAMES.a9162e75a98631c4d31541bf1168fcee62770ec9;   // 30/10: pose do 3º treinador, cores e caixas de vida
+  GAMES["84e4248d13c0a43a765319e5a0c40ae7570e7c3f"] = GAMES.a9162e75a98631c4d31541bf1168fcee62770ec9;   // 30/10: o Pokémon do meio pode ser alvo e recebe golpes de área
   // struct Link
   const IS_MASTER = 0x00, STATE = 0x01, LOCAL_ID = 0x02, COUNT = 0x03, HANDSHAKE = 0x04, INTR = 0x0D,
         HS_MASTER = 0x0E, FIELD_F = 0x0F, HW_ERR = 0x10, BAD_SUM = 0x11, LAG = 0x13,
