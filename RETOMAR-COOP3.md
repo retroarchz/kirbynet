@@ -365,3 +365,19 @@ GIF final: `C:/Users/Sandro/Downloads/coop3-batalha-completa.gif` (Sandro/Luan/A
 
 **Ainda aberto:** Lilligant do meio sumindo no Cotton Guard (não reproduzido); IA pode não mirar golpe de alvo
 único no lugar 4; caixa do 3º jogador cobre parte dos inimigos; mensagem do host "A: começar em dupla".
+
+## IDEIA PEDIDA PELO USUÁRIO (talvez 31/10): inimigo também manda 3 Pokémon (6 lugares)
+
+Regra pedida: treinador com 6 (ou 3+) manda 3 de uma vez; com 3 manda os 3; **com 2, duplica o de MAIOR nível**
+para ser o 3º. Com 1: perguntar ao usuário (duplicar duas vezes ou 3 contra 1).
+
+Já existe: lugar 5 na tripla (PIDX[5] = espaço 2 da equipe do inimigo; envio do 5 no envio3 ao fim do envio do
+lugar 1; caixa/barra do 5 carregadas só se gBattlersCount == 6; caixa falsa quando ausente). A equipe inteira do
+treinador vai para os três aparelhos nas etapas 7..12 do prep3. Hoje gBattlersCount = 5 quando o espaço 2 está vazio.
+
+Fazer: (1) duplicar no prep3 (etapa 13, antes de montar os lugares, igual nos três aparelhos) o Pokémon de maior
+nível no espaço 2 vazio; (2) mover aiMoveOrAction (gBattleStruct+0x3B4, 4 bytes) e aiChosenTarget (+0x3B8) para
+6 lugares — o 5 escreveria em cima do alvo de outro; conferir outros arrays [4] da IA; (3) memória de vídeo dos
+sprites com 6 Pokémon + 6 caixas (já estava no limite no envio; ver mapa com cenas/vram.js); (4) posições das 3
+caixas inimigas (tabela 0x080AB6F8) sem cobrir Pokémon; (5) decidir se o duplicado dá experiência/dinheiro.
+Testar com treinador de 3+ Pokémon e com o Banhista Ricky (2) no simulador (cenas/gif.js com gif-p1..p3.sav).
