@@ -1,5 +1,8 @@
 # Quetzal: teste cooperativo com três jogadores
 
+**Retomada após o teste do usuário:** ler primeiro [RETOMAR-COOP3.md](../../RETOMAR-COOP3.md).
+Há novos relatos de espera prematura, HP/níveis incorretos e sprites, ainda pendentes.
+
 Continuação da sessão do Claude em 29/10/2026. O build preserva a ROM original
 e gera uma edição de teste separada. A integração com o catálogo do site e o
 backup anterior à publicação estão documentados em `PUBLICACAO.md`.
