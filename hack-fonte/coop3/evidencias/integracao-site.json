@@ -1,0 +1,49 @@
+{
+  "states": [
+    {
+      "slot": 0,
+      "n": 1,
+      "worldN": 3,
+      "cable": "b3121dfb3be248bcd51cf83815c463a72e2781e1",
+      "free": true,
+      "frames": 31,
+      "testSaveBytes": 131072
+    },
+    {
+      "slot": 1,
+      "n": 1,
+      "worldN": 3,
+      "cable": "b3121dfb3be248bcd51cf83815c463a72e2781e1",
+      "free": true,
+      "frames": 31,
+      "testSaveBytes": 131072
+    },
+    {
+      "slot": 2,
+      "n": 1,
+      "worldN": 3,
+      "cable": "b3121dfb3be248bcd51cf83815c463a72e2781e1",
+      "free": true,
+      "frames": 34,
+      "testSaveBytes": 131072
+    }
+  ],
+  "errors": [],
+  "cloudWrites": [
+    {
+      "player": 1,
+      "sha": "b3121dfb3be248bcd51cf83815c463a72e2781e1",
+      "method": "PUT"
+    },
+    {
+      "player": 2,
+      "sha": "b3121dfb3be248bcd51cf83815c463a72e2781e1",
+      "method": "PUT"
+    },
+    {
+      "player": 3,
+      "sha": "b3121dfb3be248bcd51cf83815c463a72e2781e1",
+      "method": "PUT"
+    }
+  ]
+}

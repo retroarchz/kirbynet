@@ -1,0 +1,38 @@
+{
+  "date": "2026-10-29",
+  "environment": "three independent GBA instances, LinkHLE, local simulator",
+  "published": false,
+  "originalRomSha1": "c4091f572d52436c86ceaa0c5718cfb22dc2d59d",
+  "claudeQc9Sha256": "4f204715c7d4bf28fd8632cdc55ddde2de36f7cf5d05ca0d2288404dc71f1223",
+  "testRomSha256": "66f2ad7bc8af34be1d2c7c9879d16196ffb7cd253cba374fc2c3e18e95b88dd7",
+  "fixes": [
+    "AI saved battler allocation: 0x70 to 0x98 bytes",
+    "HasNoMonsToSwitch: each human owns two party slots in coop-3"
+  ],
+  "checks": {
+    "baselineRebuildByteIdentical": true,
+    "nativeReserveChecksAllThreePlayers": "PASS",
+    "twoPlayerRegressionAgainstClaudeQc9": {
+      "matchingScreenComparisons": 2726,
+      "lastFrame": 10904
+    },
+    "longReplay": {
+      "choicePhasesObservedAfterSecondTurnCheckpoint": 16,
+      "p1ExhaustedOwnPartyAndOthersContinued": true,
+      "moveChangedAfterPpExhausted": true,
+      "victoryOutcomeAllThree": 1,
+      "overworldMovementAllThree": "PASS"
+    },
+    "variableDelayReplay": {
+      "baseDelayFrames": 10,
+      "additionalDelayFrames": [0, 4],
+      "choicePhasesObserved": 17,
+      "heapCorruptionDetected": false
+    }
+  },
+  "remaining": [
+    "healthbox visual layout and redraw",
+    "broader coverage of moves, items and simultaneous events",
+    "physical-device and online testing"
+  ]
+}

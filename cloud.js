@@ -15,6 +15,11 @@ function normName(s) {
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } };
 const lsDel = (k) => { try { localStorage.removeItem(k); } catch (e) {} };
+// A edição de teste começa com uma cópia do Quetzal atual. Cada edição continua
+// gravando na própria chave: jogar no teste nunca sobrescreve o progresso original.
+const SAVE_SEEDS = Object.freeze({
+  b3121dfb3be248bcd51cf83815c463a72e2781e1: "c4091f572d52436c86ceaa0c5718cfb22dc2d59d",
+});
 
 const Cloud = {
   who: "", lastUp: null, timers: {},
@@ -54,10 +59,12 @@ const Cloud = {
     this.timers[rom] = setTimeout(() => this.put(who, rom).catch(() => {}), 1500);
   },
   // deixa este aparelho e a nuvem com o mesmo save (o mais novo). Devolve true se trouxe da nuvem.
-  async sync(who, rom) {
+  async sync(who, rom, deadline = Infinity) {
     if (!who || !rom) return false;
     const c = await this.get(who, rom);
+    if (Date.now() > deadline) return false;
     const local = lsGet(`kirbynet.save.${who}.${rom}`), m = this.meta(who, rom);
+    if (!c && !local && !m.t && SAVE_SEEDS[rom] && await this.seedVariant(who, rom, deadline)) return true;
     // "começar do zero" em outro aparelho desta pessoa: zera aqui também (o daqui fica em .antes)
     if (c && !c.d && c.t > (m.t || 0)) {
       if (local) { lsSet(`kirbynet.save.${who}.${rom}.antes`, local); lsDel(`kirbynet.save.${who}.${rom}`); }
@@ -77,6 +84,26 @@ const Cloud = {
     if (local && (!c || (m.t || 0) > c.t)) await this.put(who, rom);
     return false;
   },
+  // Só lê a origem; a primeira cópia e todas as gravações seguintes são da edição de teste.
+  async seedVariant(who, rom, deadline = Infinity) {
+    const source = SAVE_SEEDS[rom];
+    if (!source || !who) return false;
+    const key = `kirbynet.save.${who}.${rom}`;
+    if (lsGet(key) || this.meta(who, rom).t) return false;
+    const local = lsGet(`kirbynet.save.${who}.${source}`) || lsGet("kirbynet.save." + source);
+    const meta = this.meta(who, source);
+    let remote = null;
+    try { remote = await this.get(who, source); } catch (e) { if (!local) throw e; }
+    if (Date.now() > deadline || lsGet(key) || this.meta(who, rom).t) return false;
+    // Um "começar do zero" na origem também prevalece sobre uma cópia local mais velha.
+    if (remote && !remote.d && remote.t > (meta.t || 0)) return false;
+    const data = remote && remote.d && (!local || remote.t > (meta.t || 0)) ? remote.d : local;
+    if (!data) return false;
+    lsSet(key, data);
+    this.setMeta(who, rom, { t: Date.now(), synced: 0 });
+    await this.put(who, rom);
+    return true;
+  },
   // começar do zero: apaga o save desta pessoa neste jogo, aqui e na nuvem. Fica uma marca "apagado"
   // na nuvem (save vazio, mais novo), senão outro aparelho dela mandaria o save antigo de volta.
   async reset(who, rom) {
@@ -91,7 +118,7 @@ const Cloud = {
   // antes de jogar: puxa o mais novo (sem internet? joga com o daqui mesmo)
   async before(who, rom) {
     if (!who || !rom) return;
-    try { await Promise.race([this.sync(who, rom), new Promise((_, bad) => setTimeout(() => bad(new Error("demorou")), 6000))]); }
+    try { await Promise.race([this.sync(who, rom, Date.now() + 5500), new Promise((_, bad) => setTimeout(() => bad(new Error("demorou")), 6000))]); }
     catch (e) { console.warn("nuvem:", e.message); }
   },
   // todos os saves desta pessoa neste aparelho

@@ -30,6 +30,9 @@ const LinkHLE = (() => {
       bye: (last) => [...(last && last[0] === 0xBEBE ? [[0xBEBE, last[1], last[2], last[3], (last[4] & 0xFF00) | 0xFF, last[5], 0x8005, last[7]]] : []),
                       [0xCAFE, 0xBEBE, 0, 0, 0, 0, 0, 0]] },
   };
+  // Quetzal coop-3 de teste (build 2026-10-29): o protocolo e os endereços do cabo
+  // são os mesmos. A identidade da ROM continua distinta na sala e nos saves.
+  GAMES.b3121dfb3be248bcd51cf83815c463a72e2781e1 = GAMES.c4091f572d52436c86ceaa0c5718cfb22dc2d59d;
   // struct Link
   const IS_MASTER = 0x00, STATE = 0x01, LOCAL_ID = 0x02, COUNT = 0x03, HANDSHAKE = 0x04, INTR = 0x0D,
         HS_MASTER = 0x0E, FIELD_F = 0x0F, HW_ERR = 0x10, BAD_SUM = 0x11, LAG = 0x13,

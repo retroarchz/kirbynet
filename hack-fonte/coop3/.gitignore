@@ -1,0 +1,4 @@
+.runtime/
+*.gba
+*.log
+__pycache__/

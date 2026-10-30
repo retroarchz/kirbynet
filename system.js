@@ -25,7 +25,7 @@ const SYSTEMS = {
     pad: { A: "b1", B: "b0", L: "b4", R: "b5", Select: "b8", Start: "b9",
       Cima: "b12", Baixo: "b13", Esquerda: "b14", Direita: "b15", Especial: "b6" },   // Especial = LT (o RT acelera)
     profiles: "kirbynet.profiles", touchMap: "kirbynet.touchmap", romSlot: "last",
-    engineV: "3",   // motor (kncore.wasm): todos da sala precisam do mesmo. 3 = mGBA de 2026-10, desenho só do que aparece e rollback
+    engineV: "4",   // 4 = cabo também reconhece o Quetzal coop-3 de teste; evita misturar abas antigas na sala.
   },
   snes: {
     id: "snes", name: "SNES", W: 256, H: 224, fps: 60.0988,

@@ -82,7 +82,9 @@ async function loadLibraryRom() {
   if (!name) { $("g-rom").textContent = "Nenhum jogo disponível."; return; }
   $("g-rom").textContent = "Carregando " + name + "…";
   try {
-    const response = await fetch(new URL(SYS.roms + encodeURIComponent(name), location.href));
+    const url = new URL(SYS.roms + encodeURIComponent(name), location.href);
+    url.searchParams.set("v", ASSET_V);
+    const response = await fetch(url);
     if (!response.ok) throw new Error("Falha ao baixar o jogo (" + response.status + ").");
     const bytes = new Uint8Array(await response.arrayBuffer());
     if (request !== libraryRequest) return;
