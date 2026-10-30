@@ -1,7 +1,7 @@
 // Site integration: save seeding is one-way, respects resets, and keeps ROM identities distinct.
 const assert=require('assert/strict'),fs=require('fs'),vm=require('vm'),path=require('path'),crypto=require('crypto');
 const root=path.resolve(__dirname,'../..');
-const original='c4091f572d52436c86ceaa0c5718cfb22dc2d59d',variant='84e4248d13c0a43a765319e5a0c40ae7570e7c3f',previous='58ae63d52c0c0088a99c241bda502c36c8b3c3e6';
+const original='c4091f572d52436c86ceaa0c5718cfb22dc2d59d',variant='cee4fb273fd301762c2dc29d65d83db08f1d68ca',previous='84e4248d13c0a43a765319e5a0c40ae7570e7c3f';
 function sandbox({local={},remote={},meta={},late}={}){
   const items=new Map(Object.entries(local).map(([r,d])=>[`kirbynet.save.sandro.${r}`,d]));
   for(const [r,m]of Object.entries(meta))items.set(`kirbynet.savet.sandro.${r}`,JSON.stringify(m));

@@ -22,7 +22,7 @@ link = link.replace('    return {\n', `    return {
 if (!/let .*\bsub\b/.test(link)) link = link.replace('let armed = false', 'let sub = null; const busy = new Set(); let armed = false');
 fs.writeFileSync(path.join(rt, 'link-espera.js'), link);
 let hle = fs.readFileSync(path.join(rt, 'hle.js'), 'utf8').replace(/require\("[^"]*link\.js"\)/, `require(${JSON.stringify(path.join(rt, 'link-espera.js'))})`);
-hle = hle.replace('const SHA = "c4091f572d52436c86ceaa0c5718cfb22dc2d59d"', 'const SHA = process.env.SHA || "84e4248d13c0a43a765319e5a0c40ae7570e7c3f"');
+hle = hle.replace('const SHA = "c4091f572d52436c86ceaa0c5718cfb22dc2d59d"', 'const SHA = process.env.SHA || "cee4fb273fd301762c2dc29d65d83db08f1d68ca"');
 fs.writeFileSync(path.join(rt, 'hle-espera.js'), hle);
 const { world } = require(path.join(rt, 'hle-espera.js'));
 const RD = (p, a) => p.g.ram(0);
@@ -32,8 +32,8 @@ const info = (W) => W.players.map(p => { const m = p.g.ram(0); return {
   mail: [0,1,4].map(o => m.r8(0x0203FE80 + o)), sub: p.hle && p.hle.sub, duo: p.hle && p.hle.duo,
   tarefas: Array.from({ length: 16 }, (_, t) => m.r8(0x03005640 + 40 * t + 4) ? m.r32(0x03005640 + 40 * t).toString(16) : null).filter(Boolean) }; });
 (async () => {
-  const W = await world(['sandro.sav', 'quarto.sav', 'terceiro.sav'], { delay: 10, jitter: +(process.env.JITTER || 0), rom: process.env.ROM || path.join(rt, 'espera-test.gba') });
-  const snap = path.join(rt, 'perto.snapshot');
+  const W = await world((process.env.SAVES || 'sandro.sav,quarto.sav,terceiro.sav').split(','), { delay: 10, jitter: +(process.env.JITTER || 0), rom: process.env.ROM || path.join(rt, 'espera-test.gba') });
+  const snap = path.join(rt, process.env.SNAP || 'perto.snapshot');
   W.shot = ((shot) => (f) => shot(path.relative(path.dirname(require.resolve(path.join(rt, 'hle-espera.js'))), path.join(out, f))))(W.shot);
   if (process.env.RESTORE) {
     W.play([[600]]); W.players.forEach(p => p.g.ram(0));
@@ -49,6 +49,7 @@ const info = (W) => W.players.map(p => { const m = p.g.ram(0); return {
     W.play([[90], [6, 'A']]);
     for (let k = 0; k < 900 && !W.players.every(p => rd(p, 1) === 4); k++) W.play([[1]]);
     W.play([[240]]);
+    if (process.env.SO_CONECTA) { if (process.env.CENA) require(path.resolve(__dirname, process.env.CENA))(W); W.shot('conectado.png'); fs.writeFileSync(snap, v8.serialize(W.debugSnapshot())); console.log('CONECTADO', JSON.stringify(info(W).map(x => x.link)), W.players.map(p => { const m = p.g.ram(0); return [m.r16(0x02038D20) - 7, m.r16(0x02038D22) - 7]; })); return; }
     require(path.join(qz, 'rota.js')).ate(W, [0, 100, 200]);
     W.play([[300]]);
     fs.writeFileSync(snap, v8.serialize(W.debugSnapshot()));

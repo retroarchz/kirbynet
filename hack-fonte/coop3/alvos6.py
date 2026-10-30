@@ -13,6 +13,8 @@ import hashlib
 import struct
 import sys
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'metaknight'))
+from thumb import Asm
 
 src, dst = map(Path, sys.argv[1:3])
 d = bytearray(src.read_bytes()); B = 0x08000000
@@ -83,6 +85,64 @@ def x_treinador(at, reg, olds, fim=None):
 x_treinador(0x081D5212, 4, [0x2102, 0x4008, 0x2420, 0x2800, 0xD00A, 0x245A, 0xE008], fim=0x081D5232)   # parceiro
 x_treinador(0x0820C164, 3, [0x2102, 0x4008, 0x2320, 0x2800, 0xD000, 0x235A])                        # 0x0820C1C4
 x_treinador(0x08091528, 7, [0x2102, 0x4008, 0x2720, 0x2800, 0xD000, 0x275A])                        # o jogador (0x0809160C)
+
+# IA do inimigo: a escolha do turno (0x081A5970, guardada em gBattleStruct+0x3B4) podia ser um golpe bloqueado
+# (ex.: Nasty Plot sob Taunt) quando todas as notas empatam em 0. O motor recusa, pede de novo, a IA devolve a mesma
+# escolha guardada: laço infinito em "Ligação em espera". A função é reescrita igual e, se a escolha for um golpe
+# marcado na máscara de bloqueios (aiData+0x1BC+lugar, CheckMoveLimitations), usa o primeiro golpe permitido.
+IA = 0x09FFA100
+a = Asm(IA)
+def call(f): a.ldr_lit('r3', f | 1); a.bl('_r3')
+a.push(['r4', 'r5', 'r6', 'r7'], lr=True)
+call(0x080F793C); a.lsl('r0', 'r0', 24); a.bc('ne', 'dupla')
+a.ldr_lit('r0', 0x0203C618); a.ldrb_i('r0', 'r0', 0); call(0x081A5F34); a.b('tem')
+a.label('dupla'); a.ldr_lit('r0', 0x0203C618); a.ldrb_i('r0', 'r0', 0); call(0x081A6078)
+a.label('tem'); a.movh('r4', 'r0')
+a.ldr_lit('r0', 0x0203F848); a.mov('r1', 0); a.mov('r2', 0x50); call(0x084BFF74)
+a.cmpi('r4', 4); a.bc('hs', 'fim')                                         # 4+ = trocar/item/etc.
+a.ldr_lit('r0', 0x0203C618); a.ldrb_i('r5', 'r0', 0)                      # r5 = lugar
+a.ldr_lit('r0', 0x02023538); a.ldr_i('r0', 'r0', 0); a.ldr_i('r0', 'r0', 0x18)
+a.ldr_lit('r1', 0x1BC); a.add_r('r0', 'r0', 'r1'); a.ldrb_r('r6', 'r0', 'r5')   # r6 = máscara de bloqueios
+a.movh('r0', 'r6'); a.h(0x40E0)                                            # lsrs r0,r4
+a.mov('r1', 1); a.alu('tst', 'r0', 'r1'); a.bc('eq', 'fim')               # golpe escolhido está livre
+a.mov('r0', 0x60); a.alu('mul', 'r0', 'r5'); a.ldr_lit('r1', 0x0203F424 + 0xC); a.add_r('r7', 'r0', 'r1')   # &moves[0]
+a.mov('r2', 0)
+a.label('laco')
+a.movh('r0', 'r6'); a.h(0x40D0)                                            # lsrs r0,r2
+a.mov('r1', 1); a.alu('tst', 'r0', 'r1'); a.bc('ne', 'prox')
+a.lsl('r0', 'r2', 1); a.ldrh_r('r0', 'r7', 'r0'); a.cmpi('r0', 0); a.bc('eq', 'prox')
+a.movh('r4', 'r2')
+# alvo guardado (gBattleStruct+0x3B8+lugar) podia ser o próprio (golpe de status): mira o oponente da frente
+a.ldr_lit('r0', 0x0202352C); a.ldr_i('r0', 'r0', 0); a.ldr_lit('r1', 0x3B8); a.add_r('r0', 'r0', 'r1')
+a.mov('r2', 1); a.alu('eor', 'r2', 'r5'); a.strb_r('r2', 'r0', 'r5'); a.b('fim')
+a.label('prox'); a.addi('r2', 1); a.cmpi('r2', 4); a.bc('lo', 'laco')
+a.label('fim'); a.movh('r0', 'r4'); a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r1']); a.bx('r1')
+a.label('_r3'); a.bx('r3'); a.pool()
+code = a.build()
+assert set(d[IA - B:IA - B + len(code)]) == {0xFF} and len(code) < 0x200
+d[IA - B:IA - B + len(code)] = code
+F = 0x081A5970
+assert bytes(d[F - B:F - B + 4]) == bytes.fromhex('10b551f7')
+d[F - B:F - B + 16] = struct.pack('<HHIII', 0x4778, 0x46C0, 0xE59FC000, 0xE12FFF1C, IA | 1)   # bx pc; ldr ip,=IA; bx ip
+
+# texto "X mandou Y! Vai! Z!": o parceiro do jogador local era id ^ 2; para o P3 (id 4) dava 6, que não existe
+# (nome e Pokémon vinham de memória inválida: "Â ₽ëK,SANDRO mandou"). eors -> bics: r0 = 2 & ~id
+# (0 -> 2, 2 -> 0 como antes; 4 -> 2: o P3 cita o P2). Os dois pontos só tratam lugares pares (o jogador local).
+h16(0x080A431E, 0x4388, 0x4048)   # nome do parceiro (0x080A4308)
+h16(0x081D62A0, 0x4388, 0x4048)   # Pokémon do parceiro na mensagem
+
+# nome do parceiro no texto (marcador 0x1F de BattleStringExpandPlaceholders, caso em 0x081D6666): pulava para um
+# trecho comum que faz "id ^ 2" (lixo para o P3). O caso vai para um código novo com a regra 2 & ~id e volta para a
+# chamada GetBattlerMultiplayerId (0x081D66A6). r4 = gLinkPlayers como no original; r8 = meu id.
+NOME = 0x09FFA300
+a = Asm(NOME)
+a.ldr_lit('r4', 0x020229F0); a.movh('r1', 'r8'); a.mov('r0', 0x24); a.alu('mul', 'r0', 'r1'); a.add_r('r0', 'r0', 'r4')
+a.ldrh_i('r1', 'r0', 0x18); a.mov('r0', 2); a.alu('bic', 'r0', 'r1')
+a.ldr_lit('r2', 0x081D66A7); a.bx('r2'); a.pool()
+code = a.build(); assert set(d[NOME - B:NOME - B + len(code)]) == {0xFF}; d[NOME - B:NOME - B + len(code)] = code
+troca_literal([0x081D6666], 0x020229F0, NOME | 1)
+h16(0x081D6666, 0x4804, 0x4C04)   # ldr r4,[pc,#0x10] -> ldr r0,[pc,#0x10]
+h16(0x081D6668, 0x4700, 0x4641)   # mov r1,r8 -> bx r0
 
 dst.write_bytes(d)
 print('alvos com 6 lugares: golpes de área, targetsDone e menu de alvo')

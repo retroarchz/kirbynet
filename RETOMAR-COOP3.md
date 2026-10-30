@@ -332,3 +332,36 @@ Corrigido (novo `alvos6.py`, aplicado depois do `espera.py` no build):
 3. Texto "Â ₽ëK,SANDRO mandou" na tela do P3: parceiro do lugar 4 = 4^2 = 6 nas mensagens (o 0x081D5E64 da
    memória antiga NÃO é o lugar; procurar a expansão de B_TXT do parceiro).
 4. Caixa do 3º jogador (y=51) cobre a parte de baixo dos inimigos; mensagem do host "A: começar em dupla".
+
+## GIF Sandro/Luan/André (30/10) — achado: TRAVAMENTO depois do 1º inimigo desmaiar
+
+`C:/Users/Sandro/Downloads/coop3-sandro-luan-andre.gif` (3 telas, 2x). Saves lidos da nuvem SÓ por leitura
+(scratchpad `saves/`); para os três chegarem ao treinador 64 sem andar, os saves do simulador são o sandro.sav
+antigo (sala do coop) com nome/gênero/ID (seção 0, 14 primeiros bytes) e equipe (seção 1 +0x6A4..+0x918) de
+cada um (`qz/gif-p1..p3.sav`). Posição/mapa do jogador no save: seção 1 +0x470 (mas o Quetzal NÃO usa isso
+para nascer; a cópia não funcionou). Cena: `cenas/gif.js` (SAVES=gif-p1.sav,gif-p2.sav,gif-p3.sav,
+SNAP=gif-perto.snapshot, RUN_NAME=gif; CONTINUA=1 continua de `.runtime/gif-fim.snapshot`).
+
+Resultado: espera/tripla/envio OK, níveis certos (Lilligant 23, OLKK 23, Scizor 17), nomes certos. Lixo no texto
+"mandou" do P3 continua. **Travamento:** depois de "Pichu alvo foi semeado" e do 1º Pichu (lugar 1) desmaiar
+(gAbsentBattlerFlags = 0b10), as três telas ficam para sempre em "Ligação em espera...": mestre em 0x08044CF9
+(escolha de ação), exec P1 0x8200 / P2 0x8000 / P3 0x200 = lugar 3 pendente de resposta dos jogadores 1 e 2
+(controladores LinkOpponent 0x080992B9 parados no idle). Com 3 cópias do Sandro a batalha seguia 6 rodadas com um
+Pichu derrotado — investigar o que difere (lugar 1 ausente + lugar 3 vivo; Leech Seed; times diferentes).
+
+## 30/10 02h — travamento resolvido — PUBLICADO sha1 cee4fb27…
+
+**Causa do "Ligação em espera" infinito:** não era o cabo. A IA do inimigo escolhia Nasty Plot com o Pichu sob
+Taunt (gDisableStructs+0x18 nibble alto). A escolha é calculada uma vez por turno (0x08044E04 -> 0x081A5970,
+guardada em gBattleStruct+0x3B4+lugar, alvo em +0x3B8); o motor recusava (estado 6 = script de seleção) e pedia
+de novo, a IA devolvia a mesma: laço. `alvos6.py` reescreve 0x081A5970 em 0x09FFA100: se o golpe está na máscara
+de bloqueios (aiData = [gBattleResources]+0x18, +0x1BC+lugar), usa o 1º golpe permitido e mira o lugar ^ 1.
+**Texto do 3º jogador:** "X mandou Y" usava id ^ 2 (6 para o P3). Pokémon do parceiro: 0x081D62A0 e nome via
+0x080A431E -> bics (2 & ~id); marcador 0x1F (nome do parceiro) 0x081D6666 desviado para 0x09FFA300.
+Agora o P3 vê "LUAN mandou OLKK! Vai! Scizor!".
+
+GIF final: `C:/Users/Sandro/Downloads/coop3-batalha-completa.gif` (Sandro/Luan/André, batalha até a vitória,
+"X conseguiu ₽26", volta à praia e cada um anda). Regressão: dupla vai e volta; tripla com cópias 6 rodadas.
+
+**Ainda aberto:** Lilligant do meio sumindo no Cotton Guard (não reproduzido); IA pode não mirar golpe de alvo
+único no lugar 4; caixa do 3º jogador cobre parte dos inimigos; mensagem do host "A: começar em dupla".
