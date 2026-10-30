@@ -32,7 +32,16 @@ const LinkHLE = (() => {
   };
   // Quetzal coop-3 de teste (build 2026-10-29): o protocolo e os endereços do cabo
   // são os mesmos. A identidade da ROM continua distinta na sala e nos saves.
+  // coop: espera antes da batalha decidida pelo host (hack-fonte/coop3/espera.py). A ROM pede pela
+  // caixa de correio (mail+0: 2 = dupla com o id em mail+4, 3 = todos) e só começa quando o cabo libera
+  // (mail+1). Na dupla com 3 conectados, os dois participantes passam a ver um cabo de 2 (o coop de 2
+  // original do jogo) até voltarem ao mapa; o terceiro não recebe nada deles nesse tempo.
+  const COOP3 = { mail: 0x0203FE80, tasks: 0x03005640, waitTask: 0x081077F5, myid: 0x030055F0, count: 0x030055F4,
+                  players: 0x020229F0, playerSize: 0x24, cb2: 0x03002664, field: 0x080C2965, battle: 0x0803F431,
+                  saved: 0x02022AA4, savedCount: 0x030034A0, linkType: 0x020229C6 };
+  // teste anterior (29/10, sem a espera do host): cabo comum. Teste atual: com a espera decidida pelo host.
   GAMES.b3121dfb3be248bcd51cf83815c463a72e2781e1 = GAMES.c4091f572d52436c86ceaa0c5718cfb22dc2d59d;
+  GAMES.a9162e75a98631c4d31541bf1168fcee62770ec9 = { ...GAMES.c4091f572d52436c86ceaa0c5718cfb22dc2d59d, coop: COOP3 };
   // struct Link
   const IS_MASTER = 0x00, STATE = 0x01, LOCAL_ID = 0x02, COUNT = 0x03, HANDSHAKE = 0x04, INTR = 0x0D,
         HS_MASTER = 0x0E, FIELD_F = 0x0F, HW_ERR = 0x10, BAD_SUM = 0x11, LAG = 0x13,
@@ -60,6 +69,17 @@ const LinkHLE = (() => {
     const lastCmd = new Map(); // vaga -> último comando dele (para o "desconectar" em nome de quem caiu)
     // armado = o jogo abriu o cabo de verdade (estado 1 com o SIOCNT em multiplayer, o que o OpenLink faz).
     // Antes disso a memória do gLink pode ter lixo (no boot), e mexer nela estragaria o jogo.
+    // sub: cabo só da dupla (vagas), busy: vagas numa dupla sem mim, ask: pedido do host esperando resposta
+    const C = G.coop, busy = new Set();
+    // duo: vagas da dupla em andamento (da liberação até voltar ao mapa depois da batalha). O jogo fecha e
+    // reabre o cabo para a batalha: nesse handshake só entram os dois. sub vale enquanto o cabo é o de todos.
+    let sub = null, subSave = null, ask = null, duo = null, duoBattle = false;
+    // quem voltou de uma dupla sem mim: ao reabrir o cabo o mestre pede os dados de cada jogador
+    // (LINKCMD_SEND_LINK_TYPE 0x2222, com o tipo de cabo). O meu jogo, no mapa, responde com o gLinkType
+    // dele, que não é o do pedido: antes de o jogo ver o pedido, o gLinkType vira o pedido.
+    const rejoin = new Set();
+    const cur = () => sub || ids;
+    const linkPeers = () => openPeers().filter(s => duo ? duo.includes(s) : !busy.has(s));
     let armed = false, open = false, ids = null, go = null, lastSt = 0, role = null, beat = 0;
 
     const r8 = (o) => ram.r8(L + o), w8 = (o, v) => ram.w8(L + o, v);
@@ -90,22 +110,71 @@ const LinkHLE = (() => {
       setSio(id, ids.length);
     }
     function reset() {
-      ids = null; go = null; echo.length = 0;
+      if (sub) exitSub(false);
+      ids = null; go = null; echo.length = 0; ask = null; busy.clear();
       for (const q of inbox.values()) q.length = 0;
     }
     // uma linha na fila de recebimento: o comando de cada jogador (zeros = nada dele neste quadro)
     function pushRow() {
-      const row = ids.map(s => (s === me ? echo : inbox.get(s) || []).shift() || null);
+      const row = cur().map(s => (s === me ? echo : inbox.get(s) || []).shift() || null);
       if (row.every(c => !c)) return false;
       const cnt = r8(RQ_CNT);
-      if (cnt >= CAP) { row.forEach((c, p) => c && (ids[p] === me ? echo : inbox.get(ids[p])).unshift(c)); return false; }
+      if (cnt >= CAP) { row.forEach((c, p) => c && (cur()[p] === me ? echo : inbox.get(cur()[p])).unshift(c)); return false; }
       const idx = (r8(RQ_POS) + cnt) % CAP;
       row.forEach((c, p) => { for (let j = 0; j < CMD; j++) w16(RQ + ((p * CMD + j) * CAP + idx) * 2, c ? c[j] : 0); });
       w8(RQ_CNT, cnt + 1);
       return true;
     }
 
+    // a tarefa de espera do treinador está rodando no meu jogo?
+    function waiting() {
+      for (let t = 0; t < 16; t++) if (ram.r8(C.tasks + 40 * t + 4) && ram.r32(C.tasks + 40 * t) === C.waitTask) return true;
+      return false;
+    }
+    function swapPlayers(a, b) {
+      for (let j = 0; j < C.playerSize; j++) {
+        const pa = C.players + a * C.playerSize + j, pb = C.players + b * C.playerSize + j, x = ram.r8(pa);
+        ram.w8(pa, ram.r8(pb)); ram.w8(pb, x);
+      }
+    }
+    // dupla: o jogo passa a ver só [host, parceiro] (ids 0 e 1), como no coop de 2 original
+    function enterSub(list) {
+      sub = list.slice();
+      const p = ids.indexOf(sub[1]), id = sub.indexOf(me);
+      subSave = { myid: ram.r8(C.myid), count: ram.r8(C.count), swap: p !== 1 ? p : 0 };
+      if (subSave.swap) swapPlayers(1, p);
+      ram.w8(C.myid, id); ram.w8(C.count, sub.length);
+      w8(COUNT, sub.length); w8(LOCAL_ID, id); setSio(id, sub.length);
+      for (const s of ids) if (!sub.includes(s) && inbox.has(s)) inbox.get(s).length = 0;
+      send({ k: "sub", ids: sub });
+    }
+    function exitSub(tell = true) {
+      if (subSave.swap) swapPlayers(1, subSave.swap);
+      ram.w8(C.myid, subSave.myid); ram.w8(C.count, subSave.count);
+      sub = null; subSave = null;
+      if (ids && tell) { const id = ids.indexOf(me); w8(COUNT, ids.length); w8(LOCAL_ID, id); setSio(id, ids.length); }
+    }
+    // o jogo confere, ao reabrir o cabo, os jogadores contra a lista salva no começo do coop
+    // (CheckLinkPlayersMatchSaved 0x0800C8FC): na dupla a lista salva vira só [host, parceiro]
+    let savedBackup = null;
+    function duoSaved(list) {
+      const n = C.playerSize * 4;
+      savedBackup = { count: ram.r8(C.savedCount), bytes: Array.from({ length: n }, (_, j) => ram.r8(C.saved + j)) };
+      list.forEach((s, k) => { const from = ids.indexOf(s); for (let j = 0; j < C.playerSize; j++) ram.w8(C.saved + k * C.playerSize + j, savedBackup.bytes[from * C.playerSize + j]); });
+      ram.w8(C.savedCount, list.length);
+    }
+    function restoreSaved() {
+      if (!savedBackup) return;
+      savedBackup.bytes.forEach((v, j) => ram.w8(C.saved + j, v)); ram.w8(C.savedCount, savedBackup.count); savedBackup = null;
+    }
+    function release(list, t) {
+      if (t === 2) { duo = list.slice(); duoBattle = false; duoSaved(list); enterSub(list); }
+      ram.w8(C.mail + 1, 1);
+    }
+
     return {
+      get sub() { return sub; },
+      get duo() { return duo; },
       get ids() { return ids; },
       get open() { return open; },
       // antes de rodar o quadro
@@ -115,7 +184,7 @@ const LinkHLE = (() => {
         if (st === ST_HANDSHAKE) {
           if (go && go.includes(me)) { establish(go); go = null; }
           else {
-            const others = openPeers(), n = 1 + others.length;
+            const others = linkPeers(), n = 1 + others.length;
             const slaves = [me, ...others].filter(s => !(peers.get(s) || {}).master && !(s === me && role === "m")).sort((a, b) => a - b);
             const id = role === "m" ? 0 : Math.min(3, 1 + Math.max(0, slaves.indexOf(me)));
             setSio(id, 2);   // SD ligado: o cabo está plugado nos outros (a sala)
@@ -127,12 +196,19 @@ const LinkHLE = (() => {
             w8(IS_MASTER, 0);
           }
         }
+        if (duo) {
+          // a dupla voltou ao mapa depois da batalha: o cabo volta a ser de todos antes do mapa rodar
+          // (entre a escolha de equipe e a batalha o jogo também passa pelo mapa)
+          const cb = ram.r32(C.cb2);
+          if (cb === C.battle) duoBattle = true;
+          else if (duoBattle && cb === C.field) { duo = null; duoBattle = false; if (sub) exitSub(); restoreSaved(); send({ k: "full" }); }
+        }
         if (r8(STATE) === ST_CONN && ids) {
           // ligado comigo e calado há muito tempo (fechou a página, caiu): o jogo recebe o "desconectar" dele
           const t = now();
           for (const s of ids) if (s !== me && !dead.has(s) && t - ((peers.get(s) || {}).t || t) > DEAD_MS) this.left(s);
-          const id = ids.indexOf(me);
-          setSio(id, ids.length);
+          const id = cur().indexOf(me);
+          setSio(id, cur().length);
           ram.w8(G.vbl, 0);   // ninguém fica esperando a transmissão do fio
           w8(LAG, 0); w8(HW_ERR, 0); w8(BAD_SUM, 0); w8(LOCAL_ID, id);
           if (id === 0) w8(INTR, 9);
@@ -158,7 +234,7 @@ const LinkHLE = (() => {
         lastSt = st;
         if (st === ST_HANDSHAKE && !go) {
           // o mestre apertou A em "Pressione A para começar": todos que estão com o cabo aberto entram
-          const list = [me, ...openPeers()];
+          const list = [me, ...linkPeers()];
           if (role === "m" && list.length > 1 && ram.r8(G.adv) === 1) {
             ram.w8(G.adv, 0);
             send({ k: "go", ids: list });
@@ -175,6 +251,22 @@ const LinkHLE = (() => {
           }
           if (cnt) { w8(SQ_POS, (pos + cnt) % CAP); w8(SQ_CNT, 0); }
         }
+        if (C && st === ST_CONN && ids) {
+          const req = ram.r8(C.mail);
+          if (req) {
+            ram.w8(C.mail, 0);
+            // só o host (id 0) pede; um pedido por vez
+            if (ids[0] === me && !ask && !sub) {
+              const list = req === 2 ? [me, ids[ram.r8(C.mail + 4)]] : ids.slice();
+              if (list.length > 1 && list.every(s => s != null) && !list.some(s => busy.has(s))) {
+                ask = { t: req, ids: list, ok: new Set([me]), at: now() };
+                send({ k: "ask", t: req, ids: list });
+              }
+            }
+          }
+          if (ask && now() - ask.at > 5000) ask = null;   // ninguém respondeu: continua esperando
+          if (!waiting()) ram.w8(C.mail + 1, 0);          // liberação velha não vale para a próxima espera
+        }
       },
       // mensagem de outro jogador da sala
       recv(from, m) {
@@ -190,7 +282,25 @@ const LinkHLE = (() => {
           // fechar o cabo" (LINKCMD_READY_CLOSE_LINK), que chega junto com o aviso de que ele fechou
         } else if (m.k === "go") {
           if (r8(STATE) === ST_HANDSHAKE && m.ids.includes(me)) go = m.ids;
+        } else if (C && m.k === "ask") {
+          // só vale pedido do host, para quem está na lista e ainda esperando o treinador
+          if (!ids || from !== ids[0] || !Array.isArray(m.ids) || !m.ids.includes(me) || sub) return;
+          if (waiting() && !m.ids.some(s => s !== me && busy.has(s))) { release(m.ids, m.t); send({ k: "ok" }); }
+          else send({ k: "no" });
+        } else if (C && (m.k === "ok" || m.k === "no")) {
+          if (!ask || !ask.ids.includes(from)) return;
+          if (m.k === "no") { ask = null; return; }
+          ask.ok.add(from);
+          if (ask.ids.every(s => ask.ok.has(s))) { const a = ask; ask = null; if (waiting()) release(a.ids, a.t); }
+        } else if (C && m.k === "sub") {
+          if (Array.isArray(m.ids) && !m.ids.includes(me)) for (const s of m.ids) { busy.add(s); if (inbox.has(s)) inbox.get(s).length = 0; }
+        } else if (C && m.k === "full") {
+          if (busy.has(from) && ids && r8(STATE) === ST_CONN) rejoin.add(from);
+          busy.delete(from);
         } else if (m.k === "c" && Array.isArray(m.w) && m.w.length === CMD) {
+          // numa dupla: só os comandos dos dois; fora dela: nada de quem está numa dupla sem mim
+          if (sub ? !sub.includes(from) : busy.has(from)) return;
+          if (C && rejoin.has(from) && (m.w[0] & 0xFFFF) === 0x2222 && ids && r8(STATE) === ST_CONN) { rejoin.clear(); ram.w16(C.linkType, m.w[1] & 0xFFFF); }
           if (!inbox.has(from)) inbox.set(from, []);
           const c = m.w.map(v => v & 0xFFFF);
           inbox.get(from).push(c); lastCmd.set(from, c);
@@ -209,6 +319,7 @@ const LinkHLE = (() => {
   }
   // Mensagens pela sala, em bytes: [vaga de quem manda, tipo, ...]
   //   1 = comando (8 números de 16 bits), 2 = cabo aberto/fechado + se é o mestre, 3 = "começar" (vagas de quem entra)
+  //   coop de teste: 4 = pedido do host (tipo, vagas), 5/6 = aceito/recusado, 7 = entrei na dupla (vagas), 8 = saí da dupla
   function encode(from, m) {
     if (m.k === "c") {
       const b = new Uint8Array(2 + 2 * CMD), dv = new DataView(b.buffer);
@@ -218,6 +329,11 @@ const LinkHLE = (() => {
     }
     if (m.k === "st") return new Uint8Array([from, 2, m.open ? 1 : 0, m.master ? 1 : 0]);
     if (m.k === "go") return new Uint8Array([from, 3, m.ids.length, ...m.ids]);
+    if (m.k === "ask") return new Uint8Array([from, 4, m.t, m.ids.length, ...m.ids]);
+    if (m.k === "ok") return new Uint8Array([from, 5]);
+    if (m.k === "no") return new Uint8Array([from, 6]);
+    if (m.k === "sub") return new Uint8Array([from, 7, m.ids.length, ...m.ids]);
+    if (m.k === "full") return new Uint8Array([from, 8]);
     return null;
   }
   function decode(b) {
@@ -226,6 +342,11 @@ const LinkHLE = (() => {
     if (b[1] === 1 && b.length >= 2 + 2 * CMD) return { from, m: { k: "c", w: Array.from({ length: CMD }, (_, j) => dv.getUint16(2 + 2 * j, true)) } };
     if (b[1] === 2 && b.length >= 3) return { from, m: { k: "st", open: !!b[2], master: !!b[3] } };
     if (b[1] === 3 && b.length >= 3 + b[2]) return { from, m: { k: "go", ids: Array.from(b.subarray(3, 3 + b[2])) } };
+    if (b[1] === 4 && b.length >= 4 + b[3]) return { from, m: { k: "ask", t: b[2], ids: Array.from(b.subarray(4, 4 + b[3])) } };
+    if (b[1] === 5) return { from, m: { k: "ok" } };
+    if (b[1] === 6) return { from, m: { k: "no" } };
+    if (b[1] === 7 && b.length >= 3 + b[2]) return { from, m: { k: "sub", ids: Array.from(b.subarray(3, 3 + b[2])) } };
+    if (b[1] === 8) return { from, m: { k: "full" } };
     return null;
   }
   return { supports, create, encode, decode, GAMES };

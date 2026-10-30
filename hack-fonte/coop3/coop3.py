@@ -202,6 +202,7 @@ def prep3(a):
     a.alu('orr', 'r2', 'r0'); a.strh_i('r2', 'r1', 0)
     a.addi('r7', 1); a.cmpi('r7', 6); a.bc('lo', 'e13laco')
     a.ldr_lit('r0', FLAG); a.mov('r1', 1); a.strb_i('r1', 'r0', 0)                # liga a tripla
+    call(a, EXTRA)                                                                # imagens dos lugares 4/5
     call(a, 0x08032E98)                                                           # montagem original (4 lugares)
     # 6 lugares: pares = jogadores (o meu = Player, os outros = LinkPartner); ímpares = treinador
     a.ldr_lit('r0', TYPE); a.ldr_i('r0', 'r0', 0); a.mov('r1', 4); a.alu('and_', 'r0', 'r1'); a.movh('r6', 'r0')   # r6 = mestre?
@@ -241,6 +242,31 @@ def prep3(a):
     a.ldrb_i('r0', 'r5', 0); a.addi('r0', 1); a.strb_i('r0', 'r5', 0)
     a.label('sai')
     a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r0']); a.bx('r0')
+# bloco extra de imagens dos lugares 4/5 (o mesmo do gancho.py, passo 10). O gancho só o monta se a tripla já
+# está ligada quando a batalha aloca os gráficos (0x08094570); no coop ela só liga na etapa 13, então o bloco
+# ficava vazio e o Pokémon do lugar 4 nascia sem imagem (mostrava restos da memória de vídeo: texto das caixas).
+GPTR, EXTV, EXTBLK = 0x02023574, 0x0203FE04, 0x0203FC40
+NEWTPL = struct.unpack_from('<I', d, 0x08094648 - B)[0]
+def monta_extra(a):
+    a.push(['r4', 'r5', 'r6'], lr=True)
+    a.ldr_lit('r4', EXTBLK)
+    a.ldr_lit('r2', GPTR); a.ldr_i('r2', 'r2', 0); a.ldr_i('r5', 'r2', 0); a.str_i('r5', 'r4', 0)
+    a.ldr_lit('r0', 0x1000); a.add_r('r5', 'r5', 'r0')                 # metade de cima do buffer da posição 0
+    a.ldr_lit('r6', 0x74); a.add_r('r6', 'r6', 'r4')                 # r6 = &quadros[0]
+    for i in range(2):
+        a.ldr_lit('r0', 0x2000 * i); a.add_r('r0', 'r0', 'r5'); a.str_i('r0', 'r4', 4 + 4 * i)
+        for j in range(2):
+            a.ldr_lit('r1', 0x800 * j); a.add_r('r1', 'r1', 'r0'); a.str_i('r1', 'r6', 0x10 * i + 8 * j)
+            a.ldr_lit('r1', 0x800); a.strh_i('r1', 'r6', 0x10 * i + 8 * j + 4)
+        a.ldr_lit('r1', NEWTPL + (4 + i) * 0x18)
+        for w in range(6): a.ldr_i('r2', 'r1', 4 * w); a.str_i('r2', 'r4', 0x14 + i * 0x18 + 4 * w)
+        a.ldr_lit('r1', 0x10 * i); a.add_r('r1', 'r1', 'r6'); a.str_i('r1', 'r4', 0x14 + i * 0x18 + 0xC)   # images
+    a.ldr_lit('r2', GPTR); a.ldr_i('r2', 'r2', 0)
+    for off in (0x134, 0x138, 0x13C):
+        a.ldr_lit('r3', off); a.add_r('r1', 'r2', 'r3'); a.ldr_i('r0', 'r1', 0); a.add_r('r1', 'r4', 'r3'); a.str_i('r0', 'r1', 0)
+    a.ldr_lit('r2', EXTV); a.str_i('r4', 'r2', 0)
+    a.pop(['r4', 'r5', 'r6']); a.pop(['r0']); a.bx('r0')
+EXTRA = far(monta_extra)
 P3 = far(prep3)
 assert struct.unpack_from('<I', d, 0x0803D4C8 - B)[0] == ORIG; w32(0x0803D4C8, P3 | 1)
 
@@ -252,7 +278,8 @@ def baixo(corpo):
     assert ini + len(code) <= LOW[1], 'sem espaço na área baixa'
     d[ini - B:ini - B + len(code)] = code; LOW[0] = (ini + len(code) + 3) & ~3
     return ini
-MONS = 0x0203F424                         # gBattleMons (0x60 cada), já mudado pelo muda.py
+MONS = 0x0203F424
+SPRITES = 0x02020630                         # gBattleMons (0x60 cada), já mudado pelo muda.py
 def bl_em(at, to, antigo):
     off = antigo - (at + 4); old = struct.pack('<HH', 0xF000 | ((off >> 12) & 0x7FF), 0xF800 | ((off >> 1) & 0x7FF))
     assert bytes(d[at - B:at - B + 4]) == old, hex(at)
@@ -264,12 +291,21 @@ def envio3(a):
     a.mov('r2', 0x28); a.alu('mul', 'r2', 'r0'); a.ldr_lit('r3', 0x03005648); a.add_r('r2', 'r2', 'r3'); a.ldrh_i('r4', 'r2', 0)
     a.cmpi('r4', 1); a.bc('hi', 'out')
     a.addi('r4', 4)
-    a.mov('r6', 0x60); a.alu('mul', 'r6', 'r4'); a.ldr_lit('r3', MONS); a.ldrh_r('r6', 'r3', 'r6'); a.cmpi('r6', 0); a.bc('eq', 'out')
+    # Pokémon do lugar +4 pela equipe (a gBattleMons dele ainda não está pronta neste ponto da batalha coop:
+    # conferir por ela deixava o sprite do treinador no lugar do Pokémon do 3º jogador)
     a.ldr_lit('r3', PIDX); a.lsl('r5', 'r4', 1); a.ldrh_r('r5', 'r3', 'r5')
-    a.ldr_lit('r3', 0x02023538); a.ldr_i('r3', 'r3', 0); a.lsl('r6', 'r4', 9); a.add_r('r3', 'r3', 'r6'); a.addi('r3', 0x25); a.strb_i('r5', 'r3', 0)
-    a.mov('r0', 0x68); a.alu('mul', 'r0', 'r5')
+    a.mov('r7', 0x68); a.alu('mul', 'r7', 'r5')
     a.ldr_lit('r3', PARTY); a.mov('r6', 1); a.alu('tst', 'r4', 'r6'); a.bc('eq', 'jog'); a.ldr_lit('r3', ENEMY); a.label('jog')
-    a.add_r('r0', 'r0', 'r3'); a.movh('r1', 'r4')
+    a.add_r('r7', 'r7', 'r3')
+    a.movh('r0', 'r7'); a.mov('r1', 0xB); a.bl(0x0809EAC4); a.cmpi('r0', 0); a.bc('eq', 'out')   # GetMonData(mon, SPECIES)
+    # se o lugar +4 tiver um sprite de treinador da abertura (o gancho.py não desenha mais, mas por segurança),
+    # ele sai antes do Pokémon: senão ficava na tela (o Brendan do print). Id 0 = nada criado (é a 1ª caixa de vida)
+    a.ldr_lit('r3', 0x0203F664); a.ldrb_r('r0', 'r3', 'r4'); a.cmpi('r0', 0); a.bc('eq', 'semtreinador'); a.cmpi('r0', 64); a.bc('hs', 'semtreinador')
+    a.mov('r1', 0x44); a.alu('mul', 'r0', 'r1'); a.ldr_lit('r1', SPRITES); a.add_r('r0', 'r0', 'r1'); a.bl(0x08007A60)   # DestroySprite
+    a.ldr_lit('r3', 0x0203F664); a.mov('r0', 64); a.strb_r('r0', 'r3', 'r4')
+    a.label('semtreinador')
+    a.ldr_lit('r3', 0x02023538); a.ldr_i('r3', 'r3', 0); a.lsl('r6', 'r4', 9); a.add_r('r3', 'r3', 'r6'); a.addi('r3', 0x25); a.strb_i('r5', 'r3', 0)
+    a.movh('r0', 'r7'); a.movh('r1', 'r4')
     a.bl(0x080931C8)                                   # BattleLoadMonSpriteGfx(mon, b)
     a.movh('r0', 'r4'); a.mov('r1', 0); a.bl(0x08037B40) # StartSendOutAnim(b, FALSE)
     a.label('out')
@@ -286,10 +322,12 @@ def ponte(alvo):
     def corpo(a):
         a.h(0x4778); a.h(0x46C0); a.word(0xE59FC000); a.word(0xE12FFF1C); a.word(alvo | 1)
     return corpo
+FALSA = 0xFA15                            # marca da caixa falsa em data[7]
 def e_falsa(a, reg, pula):
-    # pula se gSprites[reg].callback == SpriteCallbackDummy (estraga r2, r3)
-    a.mov('r3', 0x44); a.alu('mul', 'r3', reg); a.ldr_lit('r2', SPRITES + 0x1C); a.add_r('r3', 'r3', 'r2'); a.ldr_i('r3', 'r3', 0)
-    a.ldr_lit('r2', CB_DUMMY); a.alu('cmp', 'r3', 'r2'); a.bc('eq', pula)
+    # pula se gSprites[reg].data[7] == FALSA (estraga r2, r3). Não dá para usar o callback: as caixas
+    # verdadeiras do Quetzal também ficam com SpriteCallbackDummy, e eram todas puladas (sem posição/vida).
+    a.mov('r3', 0x44); a.alu('mul', 'r3', reg); a.ldr_lit('r2', SPRITES); a.add_r('r3', 'r3', 'r2'); a.ldrh_i('r3', 'r3', 0x3C)
+    a.ldr_lit('r2', FALSA); a.alu('cmp', 'r3', 'r2'); a.bc('eq', pula)
 def cria_caixa(a):        # 0x080AACEC(b)
     a.push(['r4', 'r5'], lr=True); a.movh('r4', 'r0')
     a.ldr_lit('r1', ABSENT); a.ldrb_i('r1', 'r1', 0); a.h(0x40C1); a.lsl('r1', 'r1', 31)   # lsrs r1,r0 ; bit 0 -> 31
@@ -300,6 +338,7 @@ def cria_caixa(a):        # 0x080AACEC(b)
     a.strh_i('r5', 'r1', 6)                                                                 # oam.affineParam
     for k in range(8): a.strh_i('r5', 'r1', 0x2E + 2 * k)                                  # data[0..7]
     a.strh_i('r4', 'r1', 0x2E + 12)                                                         # data[6] = lugar
+    a.ldr_lit('r0', FALSA); a.strh_i('r0', 'r1', 0x3C)                                       # data[7] = marca
     a.label('fim'); a.movh('r0', 'r5'); a.pop(['r4', 'r5']); a.pop(['r1']); a.bx('r1')
     a.label('cria'); a.movh('r0', 'r4'); call(a, 0x080AACEC); a.movh('r5', 'r0'); a.b('fim')
 def pula_lugar(f):        # f(b): pula se a caixa do lugar b é falsa

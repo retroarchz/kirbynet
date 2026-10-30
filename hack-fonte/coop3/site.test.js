@@ -1,7 +1,7 @@
 // Site integration: save seeding is one-way, respects resets, and keeps ROM identities distinct.
 const assert=require('assert/strict'),fs=require('fs'),vm=require('vm'),path=require('path'),crypto=require('crypto');
 const root=path.resolve(__dirname,'../..');
-const original='c4091f572d52436c86ceaa0c5718cfb22dc2d59d',variant='b3121dfb3be248bcd51cf83815c463a72e2781e1';
+const original='c4091f572d52436c86ceaa0c5718cfb22dc2d59d',variant='a9162e75a98631c4d31541bf1168fcee62770ec9',previous='b3121dfb3be248bcd51cf83815c463a72e2781e1';
 function sandbox({local={},remote={},meta={},late}={}){
   const items=new Map(Object.entries(local).map(([r,d])=>[`kirbynet.save.sandro.${r}`,d]));
   for(const [r,m]of Object.entries(meta))items.set(`kirbynet.savet.sandro.${r}`,JSON.stringify(m));
@@ -27,8 +27,9 @@ function sandbox({local={},remote={},meta={},late}={}){
   x=sandbox({local:{[original]:'old-local'},meta:{[original]:{t:100}},remote:{[original]:{d:'',t:200}}});await x.cloud.sync('sandro',variant);assert.equal(x.writes.length,0);assert(!x.items.has(`kirbynet.save.sandro.${variant}`));
   x=sandbox({local:{[original]:'local-only'}});await x.cloud.sync('sandro',variant);assert.equal(x.items.get(`kirbynet.save.sandro.${variant}`),'local-only');assert(x.writes.every(([r])=>r===variant));
   x=sandbox({remote:{[original]:{d:'late',t:100}},late:true});await x.cloud.sync('sandro',variant,1500);assert.equal(x.writes.length,0);assert(!x.items.has(`kirbynet.save.sandro.${variant}`));
+  x=sandbox({local:{[previous]:'old-test',[original]:'base'},meta:{[previous]:{t:500},[original]:{t:100}}});await x.cloud.sync('sandro',variant);assert.equal(x.items.get(`kirbynet.save.sandro.${variant}`),'old-test');assert.equal(x.items.get(`kirbynet.save.sandro.${previous}`),'old-test');assert(x.writes.every(([r])=>r===variant));
   x=sandbox();await x.cloud.sync('',variant);assert.equal(x.requests.length,0);
-  const link=require(path.join(root,'linkhle.js'));assert(link.supports(original));assert(link.supports(variant));assert.equal(link.GAMES[variant],link.GAMES[original]);
+  const link=require(path.join(root,'linkhle.js'));assert(link.supports(original));assert(link.supports(variant));assert(link.supports(previous));assert.equal(link.GAMES[previous],link.GAMES[original]);assert.equal(link.GAMES[variant].link,link.GAMES[original].link);assert(link.GAMES[variant].coop);
   const catalog=JSON.parse(fs.readFileSync(path.join(root,'roms/index.json')));
   for(const [file,sha]of [['PokemonQuetzalPtBrAlpha9v1.gba',original],['PokemonQuetzalCoop3Teste.gba',variant]]){
     assert(catalog.some(g=>g.file===file));assert.equal(crypto.createHash('sha1').update(fs.readFileSync(path.join(root,'roms',file))).digest('hex'),sha);

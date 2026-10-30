@@ -2,7 +2,9 @@
 
 Opção do catálogo: **Pokémon Quetzal — Coop 3 (TESTE)**.
 Arquivo: `roms/PokemonQuetzalCoop3Teste.gba`.
-SHA-1: `b3121dfb3be248bcd51cf83815c463a72e2781e1`.
+SHA-1: `a9162e75a98631c4d31541bf1168fcee62770ec9` (30/10: espera decidida pelo host, caixas de vida, sem o
+Brendan). O teste anterior era `b3121dfb3be248bcd51cf83815c463a72e2781e1`: o save dele é copiado para o novo
+(se não houver, o do Quetzal atual), só por leitura.
 
 O Quetzal anterior continua no catálogo, com seu arquivo e SHA-1 originais.
 O cabo reconhece ambas as edições; cada sala continua exigindo que os jogadores

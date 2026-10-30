@@ -231,3 +231,53 @@ de início e chegada de P3 para tripla.
 O usuário pediu atualizações frequentes: explicar o que será alterado, quando
 estiver apenas aguardando teste e quando publicar. Evitar longos períodos de
 ferramentas sem comunicação. Não apresentar hipóteses como correções concluídas.
+
+## Progresso 29/10/2026 (Claude, sessão a523b258) — espera decidida pelo host
+
+**Feito e testado só no simulador (nada publicado, ROM/saves estáveis intactos):**
+
+- `hack-fonte/coop3/espera.py` (aplicar depois do `stability.py`; ainda NÃO ligado ao `build.py`):
+  a tarefa de espera `0x081077F4` em `0x081078A4` chama `0x09FF9000`. Convidado nunca começa; host
+  pede "todos" quando todos esperam o mesmo treinador, ou "dupla" com A novo (armado só após soltar, data[7]
+  da tarefa). Caixa de correio `0x0203FE80` (+0 pedido 2/3, +1 liberação, +4 parceiro).
+- `linkhle.js`: config `coop` só para a ROM de teste (sha b3121dfb…; precisa ser atualizada quando a ROM mudar).
+  Pedido do host -> `ask` -> participantes aceitam só se a tarefa de espera estiver viva e o pedido vier do id 0
+  -> liberação. Dupla: sub-cabo de 2 enquanto o cabo é o de 3; o jogo FECHA e REABRE o cabo para a batalha
+  e o handshake fica restrito à dupla (`linkPeers`); lista salva `0x02022AA4`/contagem `0x030034A0` vira só
+  da dupla (senão `CheckLinkPlayersMatchSaved 0x0800C8FC` dá erro de cabo). Na volta, P3 recebe `full`, e o
+  `gLinkType 0x020229C6` dele vira o do pedido `0x2222` (senão a reentrada falhava ~85 quadros depois).
+  Mensagens novas na sala: tipos 4..8 em encode/decode.
+- Simulador: `hack-fonte/coop3/espera.js` + `cenas/*.js` (p1p2, dupla, dupla-batalha, anda, tripla, cancela).
+  Pontos salvos em `.runtime/` (perto, espera2, dupla-equipe, dupla-volta, tripla-batalha).
+
+**Resultados:** P1+P2 esperam (A do diálogo e 4x A do P2 não iniciam); A do P1 inicia a dupla com P3 no mapa;
+dupla luta, vence, volta e os 3 ficam conectados e andando; P1+P2 esperando + P3 fala = os três juntos na tripla;
+R do P2 = luta solo (comportamento original), P1 segue esperando.
+
+**Falta:** texto da espera no host ("A: começar em dupla"); ligar `espera.py` no build/sha/cloud.js/ASSET_V;
+caixas de vida ausentes e sprite do treinador na tripla (reproduzido em `.runtime/espera/tripla-batalha.png`);
+níveis/HP Nv0 10/10; IDs com P2 = vaga 2 (troca de gLinkPlayers não testada); corrida R × liberação.
+
+### Correções visuais da tripla (mesma sessão, só local)
+
+- `coop3.py`: caixa de vida falsa marcada em `data[7]=0xFA15` (antes o teste era o callback, igual ao das
+  caixas verdadeiras -> TODAS eram puladas = "caixas ausentes"). CORRIGIDO e visto no simulador.
+- `coop3.py` envio3: espécie conferida pela equipe (não pela gBattleMons, que ainda não está pronta), destrói o
+  sprite de treinador que sobra em gBattlerSpriteIds[b+4] (id 1..63) e a etapa 13 monta o bloco extra de imagens
+  (`monta_extra`; antes `0x0203FE04` ficava 0 no coop e o Pokémon 4 nascia sem imagem). Brendan sumiu.
+- `gancho.py`: tags novas das caixas/barras 4/5 = `0xB7A0..0xB7A3` (D70C era TAG_STATUS_SUMMARY_BAR_TILE: a
+  barra de bolinhas liberava os tiles da caixa 4 e o Pokémon do lugar 2 pegava -> texto por cima dele).
+- **ABERTO:** com as tags certas a memória de vídeo dos sprites acaba no envio: gBattlerSpriteIds[2]=64 e a
+  tripla TRAVA no envio (`.runtime/espera/mais.png`). O usuário QUER o treinador do P3 aparecendo, fazendo a pose
+  e arremessando a Pokébola (não remover o treinador do lugar 4). Caminho: mandar o comando de "arremessar"
+  (IntroTrainerBallThrow) também para o lugar 4, para ele sair e liberar os 64 tiles como os outros, antes do
+  envio do lugar 2; conferir o espaço livre de tiles nesse momento.
+- build.py: hash da qc9 atualizada de propósito (comentário no arquivo); `espera.py` já entra no build.
+
+### Publicado para o usuário testar (sha1 a9162e75…)
+
+Publicada a variante SEM a troca de tags (`gancho.py` com `TAG_* = 0xD708.. 0xD70C` + TODO): não trava; tem a
+espera do host, caixas de vida, sem Brendan. Defeito conhecido que fica: no P1 o texto da caixa 4 aparece por
+cima do Pokémon do lugar 2 (colisão da tag D70C). Simulador: tripla 6 turnos sem travar; dupla vai e volta.
+`cloud.js` SAVE_SEEDS agora é lista: novo <- teste anterior b3121… <- Quetzal c4091f…. `site-e2e.js` não rodou
+(precisa do servidor https local); `site.test.js` passou.

@@ -57,13 +57,16 @@ rd = lambda a, n: bytes(d[a - B:a - B + n])
 TRI = [(20, 80), (212, 38), (112, 84), (164, 38), (66, 92), (116, 38)]
 c = rd(0x091299E8, 32) + b''.join(bytes([x, y, 0, 0]) for x, y in TRI)
 repoint(0x091299E8, nova(c), (0x080F6B40, 0x080F6B64, 0x080F6D74))
+# tags novas das folhas das posições 4/5. Não usar 0xD708..0xD70C: são do jogo (0xD70C = TAG_STATUS_SUMMARY_BAR_TILE,
+# a barra de bolinhas da abertura; ao ser destruída ela liberava os tiles da caixa 4, que o Pokémon do lugar 2 pegava)
+TAG_BAR4, TAG_BAR5, TAG_BOX4, TAG_BOX5 = 0xD708, 0xD709, 0xD70C, 0xD70D   # TODO: trocar (ver RETOMAR-COOP3.md); 0xB7A0.. trava sem espaço de vídeo
 # folhas da barra de vida (gfx, tamanho, tag): 4 e 5 iguais a 2 e 3 com tags novas
 hb = bytearray(rd(0x085C3FB8, 32)); e4 = bytearray(hb[16:24]); e5 = bytearray(hb[24:32])
-struct.pack_into('<H', e4, 6, 0xD708); struct.pack_into('<H', e5, 6, 0xD709)
+struct.pack_into('<H', e4, 6, TAG_BAR4); struct.pack_into('<H', e5, 6, TAG_BAR5)
 HBS = nova(bytes(hb + e4 + e5)); repoint(0x085C3FB8, HBS, (0x080935B0, 0x080936E4))
 # modelos de sprite da barra de vida: tileTag novo
 ht = bytearray(rd(0x085C4070, 96)); t4 = bytearray(ht[48:72]); t5 = bytearray(ht[72:96])
-struct.pack_into('<H', t4, 0, 0xD708); struct.pack_into('<H', t5, 0, 0xD709)
+struct.pack_into('<H', t4, 0, TAG_BAR4); struct.pack_into('<H', t5, 0, TAG_BAR5)
 repoint(0x085C4070, nova(bytes(ht + t4 + t5)), (0x080AB034,))
 # 5) posição das caixas de vida (GetBattlerHealthboxCoords 0x080AB6A0): switch de 4 posições -> tabela de 6 no mesmo lugar
 assert rd(0x080AB6E2, 2) == bytes.fromhex('0128') and rd(0x080AB6F8, 2) == bytes.fromhex('9f20')
@@ -96,7 +99,7 @@ code = a.build(); assert H2 + len(code) <= 0x0803AF48 + 0x258
 d[H2 - B:H2 - B + len(code)] = code
 assert rd(0x08039F20, 4) == bytes.fromhex('c1f0c8f8'); bl(0x08039F20, H2)
 # 7) caixas de vida da 3ª posição de cada lado: modelos [2] -> [3] com tags novas e folhas carregadas no passo 5
-P3, O3 = 0xD70C, 0xD70D
+P3, O3 = TAG_BOX4, TAG_BOX5
 sp3 = nova(struct.pack('<IHH', 0x09AB4EC4, 0x800, P3)); so3 = nova(struct.pack('<IHH', 0x09AB5048, 0x800, O3))
 tp = bytearray(rd(0x085C3FF0, 48)); x3 = bytearray(tp[24:48]); struct.pack_into('<H', x3, 0, P3)
 repoint(0x085C3FF0, nova(bytes(tp + x3)), (0x080AAD80, 0x080AAE94))

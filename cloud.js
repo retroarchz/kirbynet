@@ -15,10 +15,12 @@ function normName(s) {
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } };
 const lsDel = (k) => { try { localStorage.removeItem(k); } catch (e) {} };
-// A edição de teste começa com uma cópia do Quetzal atual. Cada edição continua
+// A edição de teste começa com uma cópia de outra edição. Cada edição continua
 // gravando na própria chave: jogar no teste nunca sobrescreve o progresso original.
+// Lista = ordem de tentativa: o teste novo puxa o progresso do teste anterior e, se não houver, o do Quetzal atual.
 const SAVE_SEEDS = Object.freeze({
-  b3121dfb3be248bcd51cf83815c463a72e2781e1: "c4091f572d52436c86ceaa0c5718cfb22dc2d59d",
+  b3121dfb3be248bcd51cf83815c463a72e2781e1: ["c4091f572d52436c86ceaa0c5718cfb22dc2d59d"],
+  a9162e75a98631c4d31541bf1168fcee62770ec9: ["b3121dfb3be248bcd51cf83815c463a72e2781e1", "c4091f572d52436c86ceaa0c5718cfb22dc2d59d"],
 });
 
 const Cloud = {
@@ -86,8 +88,15 @@ const Cloud = {
   },
   // Só lê a origem; a primeira cópia e todas as gravações seguintes são da edição de teste.
   async seedVariant(who, rom, deadline = Infinity) {
-    const source = SAVE_SEEDS[rom];
-    if (!source || !who) return false;
+    if (!SAVE_SEEDS[rom] || !who) return false;
+    for (const source of SAVE_SEEDS[rom]) {
+      const r = await this.seedFrom(who, rom, source, deadline);
+      if (r !== null) return r;   // copiou (true) ou a origem diz para não copiar (false)
+    }
+    return false;
+  },
+  // null = esta origem não tem save (tenta a próxima)
+  async seedFrom(who, rom, source, deadline) {
     const key = `kirbynet.save.${who}.${rom}`;
     if (lsGet(key) || this.meta(who, rom).t) return false;
     const local = lsGet(`kirbynet.save.${who}.${source}`) || lsGet("kirbynet.save." + source);
@@ -98,7 +107,7 @@ const Cloud = {
     // Um "começar do zero" na origem também prevalece sobre uma cópia local mais velha.
     if (remote && !remote.d && remote.t > (meta.t || 0)) return false;
     const data = remote && remote.d && (!local || remote.t > (meta.t || 0)) ? remote.d : local;
-    if (!data) return false;
+    if (!data) return null;
     lsSet(key, data);
     this.setMeta(who, rom, { t: Date.now(), synced: 0 });
     await this.put(who, rom);
