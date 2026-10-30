@@ -19,17 +19,19 @@ Não dizer ao usuário que estes problemas já foram resolvidos.
 2. P1 fala com um treinador e fica na tela de espera.
 3. P2 fala com **o mesmo treinador** e também fica na tela de espera.
    **Não abrir a seleção de equipe automaticamente com o segundo jogador.**
-4. Com dois prontos, um **novo toque em A** por um participante permite iniciar
-   somente com essa dupla. O usuário deu como exemplo apertar A no P2; não
-   presumir que apenas o criador da sala pode confirmar.
-5. Se ninguém confirmar a dupla, ambos continuam esperando P3.
+4. Com dois prontos, somente **P1, o host da sala**, decide iniciar em dupla
+   com um **novo toque em A** no aparelho dele. P2/P3 não podem confirmar o início.
+   Esta é a correção explícita do usuário após o primeiro registro: a decisão
+   é sempre do host, não do segundo jogador que chegou.
+5. Se P1 não confirmar a dupla, ambos continuam esperando P3.
 6. Quando P3 falar com o mesmo treinador, os três avançam juntos para a seleção
    de equipe e a batalha, sem outro passo manual de confirmação.
 7. R continua sendo o cancelamento da espera. Cancelar ou sair precisa remover
    a pessoa do conjunto de prontos e atualizar os outros aparelhos.
 
-Texto possível: `2 jogadores prontos. A: começar em dupla. Aguarde o terceiro.
-R: cancelar.` É uma sugestão de texto, não uma frase literal exigida pelo usuário.
+Texto possível no P1: `2 jogadores prontos. A: começar em dupla. Aguarde o terceiro.
+R: cancelar.` No P2/P3, mostrar espera pela decisão do host, sem oferecer A para
+iniciar. São sugestões de texto, não frases literais exigidas pelo usuário.
 
 **Debounce importante:** o A que confirma/avança o diálogo com o treinador não
 pode contar como a confirmação de iniciar em dupla. Armar a confirmação só
@@ -76,9 +78,10 @@ corretamente dados, máscaras, IDs e confirmações para esse conjunto.
 não por uma seleção de participantes. Não reutilizar cegamente a preparação
 de dupla só mudando o contador global: isso também afetaria o mundo compartilhado.
 
-Testar: P1 sozinho; P1/P2 esperando; P1/P2 confirmam A com P3 ainda no mapa;
-P1/P2 aguardam e P3 chega; R para cancelar; treinador diferente; confirmação
-simultânea/duplicada; latência variável. Conferir IDs reais quando as vagas
+Testar: P1 sozinho; P1/P2 esperando; A no P2 não inicia; A no P1 inicia a dupla
+com P3 ainda no mapa; P1/P2 aguardam e P3 chega; R para cancelar; treinador
+diferente; confirmação simultânea/duplicada; latência variável. Validar a autoridade
+do host também no recebimento dos pacotes, não só no texto/menu. Conferir IDs reais quando as vagas
 participantes não forem simplesmente 0 e 1.
 
 ## Prints inspecionados e problemas visuais/dados
@@ -222,7 +225,8 @@ node hack-fonte/coop3/diagnose.js
 **Esse replay antigo NÃO valida a nova espera.** `tres_ok.js` e `engata3.js` já
 apertam botões para avançar e foram feitos para a entrada automática anterior.
 Criar um roteiro que pare após P2 falar e comprove que ambos realmente esperam,
-antes de testar separadamente A para dupla e chegada de P3 para tripla.
+antes de testar separadamente A do host para dupla, A de convidado sem efeito
+de início e chegada de P3 para tripla.
 
 O usuário pediu atualizações frequentes: explicar o que será alterado, quando
 estiver apenas aguardando teste e quando publicar. Evitar longos períodos de
