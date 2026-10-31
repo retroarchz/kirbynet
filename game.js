@@ -727,6 +727,7 @@ function startRun(opts) {
   // prontos que mudam a ROM (ex.: Meta Knight): só na cópia desta partida, sozinho ou "Mesmo PC"
   if (Cheats.usable(run)) CheatPresets.applyRom(roms);
   quetzalTipos(roms);   // ajustes fixos do Quetzal: valem sempre (também online, todos iguais)
+  quetzalNuvem(roms);
   worker.postMessage({ t: "start", module: Play.mod, n: run.n, rom: roms, saves: opts.saves,
                        net: !!run.net && !run.free, free: !!run.free, me: run.slot | 0, slot: run.free ? 0 : run.slot,
                        cabo: run.cabo || null, especial: Cheats.usable(run) ? CheatPresets.especial() : 0,
@@ -1068,6 +1069,52 @@ function quetzalTipos(rom) {
     changed++;
   }
   return changed;
+}
+// Pokémon Quetzal: habilidade nova 319 "Nuvem Tóxica": ao entrar na batalha mostra o balão da habilidade e envenena
+// todos os adversários (o próprio jogo confere imunidade: tipos Poison/Steel, Immunity, já com status, Safeguard...).
+// Molde: o caso da Intimidate no switch "ao entrar" (tabela 0x08052608, índice habilidade-2, até a 309) e o script
+// dela (0x084B18F8). A tabela é copiada para 0x09FFE400 indo até a 319; GetAbilityName (0x080A5628) desvia para
+// devolver o nome; as descrições (curta 0x085371B0, longa 0x085376AC) ganham a entrada 319. Fonte: hack-fonte/nuvem.
+// Testado no motor: com a habilidade, envenena os dois adversários e a batalha segue; sem ninguém com ela, 1600
+// quadros com os mesmos botões dão as mesmas telas da ROM original. Devolve 1 se mudou a ROM.
+const QZ_NUVEM = {
+  fix: [   // [endereço, original, novo]
+    [0x52600, "33010000", "3d010000"],                   // último índice do switch: 0x133 -> 0x13D (habilidade 319)
+    [0x52604, "08260508", "00e4ff09"],                   // tabela do switch -> 0x09FFE400
+    [0xA5628, "00b50004010c0b1c", "0049084781e0ff09"],   // GetAbilityName -> 0x09FFE080
+    [0x247C4C, "b0715308", "00eaff09"], [0x284704, "b0715308", "00eaff09"], [0x284748, "b0715308", "00eaff09"],
+    [0x297700, "ac765308", "00f0ff09"],
+  ],
+  novo: [   // [endereço, bytes] em área livre (0xFF)
+    [0x1FFE000, "0c48554669005144c9000b18187c800700280bdb08480570187c0221084318740648074900f004f806488746064887460847c046f83302020432020200e1ff09058d0508ae83050804860508"],
+    [0x1FFE080, "00b50004010c0b1c0348814202d1034802bc0847024800473f01000000e2ff0931560a08"],
+    [0x1FFE100, "ff91980808760136394000760f622e05320202002c05320202043202020153e1ff0976013753e1ff0976006153e1ff091d000000000153e1ff092e1e350202022e1f350202002e1c350202022e1d35020200162f05320202012d05320202443002020114e1ff0931073502020432020201760f62ffb19808083930003f"],
+    [0x1FFE200, "c8e9ead9e100ce23ecddd7d5ff"],   // "Nuvem Tóxica"
+    [0x1FFE220, "bfe2ead9e2d9e2d500e3e700e6ddead5dde700d5e300d9e2e8e6d5e6adff"],
+    [0x1FFE260, "bbe300d9e2e8e6d5e600d9e100d7e3e1d6d5e8d9b800e7e3e0e8d5fee9e1d500e2e9ead9e100e823ecddd7d500e5e9d900d9e2ead9e2d9e2d5fee8e3d8e3e700e3e700dde2dde1dddbe3e7adff"],
+  ],
+  // tabelas copiadas da própria ROM: [de, para, entradas copiadas, total, valor das que faltam, valor da 319]
+  tabelas: [
+    [0x52608, 0x1FFE400, 308, 318, 0x08058604, 0x09FFE000],   // switch "ao entrar" (habilidade - 2)
+    [0x5371B0, 0x1FFEA00, 319, 320, 0, 0x09FFE220],           // descrição curta
+    [0x5376AC, 0x1FFF000, 319, 320, 0, 0x09FFE260],           // descrição longa
+  ],
+};
+function quetzalNuvem(rom) {
+  if (String.fromCharCode(...rom.subarray(0xA0, 0xAB)) !== "PKM QUETZAL") return 0;
+  const hex = (h) => Uint8Array.from(h.match(/../g), (b) => parseInt(b, 16));
+  const dv = new DataView(rom.buffer, rom.byteOffset, rom.byteLength);
+  const livre = (at, n) => { if (at + n > rom.length) return false; for (let i = 0; i < n; i++) if (rom[at + i] !== 0xFF) return false; return true; };
+  // confere tudo antes de mudar qualquer coisa (metade do hack aplicada travaria a batalha)
+  for (const [at, orig] of QZ_NUVEM.fix) { const o = hex(orig); if (o.some((b, i) => rom[at + i] !== b)) return 0; }
+  for (const [at, data] of QZ_NUVEM.novo) if (!livre(at, data.length / 2)) return 0;
+  for (const [, to, , total] of QZ_NUVEM.tabelas) if (!livre(to, total * 4)) return 0;
+  for (const [from, to, n, total, falta, nova] of QZ_NUVEM.tabelas) {
+    for (let i = 0; i < total; i++) dv.setUint32(to + 4 * i, i < n ? dv.getUint32(from + 4 * i, true) : i === total - 1 ? nova : falta, true);
+  }
+  for (const [at, data] of QZ_NUVEM.novo) rom.set(hex(data), at);
+  for (const [at, , data] of QZ_NUVEM.fix) rom.set(hex(data), at);
+  return 1;
 }
 function romGameCode(rom) {
   const id = String.fromCharCode(...rom.subarray(0xAC, 0xB0)).replace(/[^0-9A-Za-z]/g, "");
