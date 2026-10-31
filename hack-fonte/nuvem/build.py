@@ -30,7 +30,8 @@ def put(at, data): patches.append((at, bytes(data)))
 
 # --- caso da habilidade 319 no switch "ao entrar" (registradores como no caso da Intimidate: sl = batalhador)
 a = Asm(CASE)
-a.ldr_lit('r0', 0x020233F8)          # gSpecialStatuses
+a.ldr_lit('r0', 0x080533C0)          # literal da Intimidate com o endereço de gSpecialStatuses
+a.ldr_i('r0', 'r0', 0)               # (a ROM do Coop 3 mudou a tabela de lugar: 0x0203F8C0)
 a.movh('r5', 10)                     # r5 = sl
 a.lsl('r1', 'r5', 1)
 a.h(0x4451)                          # add r1, sl
@@ -111,7 +112,7 @@ put(SCRIPT, s)
 # --- animação "Haze roxo": o script do Haze (0x084988F2) com a neblina roxa e escurecendo para roxo, não preto
 h16 = lambda v: struct.pack('<H', v & 0xFFFF)
 blend = lambda a, b, c: bytes.fromhex('03fd6818080a05') + h16(0x1E) + h16(a) + h16(b) + h16(c) + h16(ROXO)
-anim = bytes.fromhex('0519f60000') + b'' + p32(TASK | 1) + bytes.fromhex('0500') + bytes.fromhex('041e')      + blend(2, 0, 16) + bytes.fromhex('045a') + blend(1, 16, 0) + b''
+anim = bytes.fromhex('0519f60000') + b'\x03' + p32(TASK | 1) + bytes.fromhex('0500') + bytes.fromhex('041e')      + blend(2, 0, 16) + bytes.fromhex('045a') + blend(1, 16, 0) + b'\x08'
 put(ANIM, anim)
 # paleta da neblina (0x091756D8, 16 cores cinza) puxada para o roxo
 pal = b''
@@ -154,6 +155,56 @@ assert w32(0x080F40AC) == OLD_GERAL
 g = [w32(OLD_GERAL + 4 * i) for i in range(N_GERAL)] + [ANIM]
 put(GERAL, b''.join(p32(x) for x in g))
 put(0x080F40AC, p32(GERAL))
+
+# --- Razor Leaf da Arboliva com folhas roxas: o golpe 75 ganha um script que carrega os gráficos como o original,
+# roda uma tarefa (se o atacante for a Arboliva, troca as paletas das folhas pelas roxas) e segue no script original
+RL_TASK, RL_SCRIPT, RL_PAL1, RL_PAL2 = 0x09FFF740, 0x09FFF800, 0x09FFF820, 0x09FFF840
+MOVES_ANIM, RAZOR = 0x0846AB1C, 75
+ARBOLIVA, TAG_FOLHA, TAG_LAMINA = 1259, 0x274F, 0x27B0
+from lz import lz77
+def roxo_folha(addr_tab, idxs):
+    p = w32(addr_tab)
+    d = lz77(ROM, p - 0x08000000)[0]
+    cs = list(struct.unpack('<16H', d))
+    for k in idxs:
+        c = cs[k]; R, G, B = c & 31, c >> 5 & 31, c >> 10 & 31
+        cs[k] = round(G * 0.85) | round(min(R, B) * 0.5) << 5 | G << 10
+    return struct.pack('<16H', *cs)
+put(RL_PAL1, roxo_folha(0x09128A38, range(1, 8)))     # folha pequena (cores 1-7 verdes; laranja/vermelho ficam)
+put(RL_PAL2, roxo_folha(0x09128D40, range(2, 16)))    # lâmina em meia-lua (cores 2-15 verdes)
+a = Asm(RL_TASK)
+a.push(['r4', 'r5', 'r6'], lr=True)
+a.h(0x1C06)                          # add r6, r0, #0 (taskId)
+a.ldr_lit('r0', 0x02039F1E); a.ldrb_i('r0', 'r0', 0)    # gBattleAnimAttacker
+a.mov('r1', 0x60); a.alu('mul', 'r0', 'r1')
+a.ldr_lit('r1', 0x0806DBC8); a.ldr_i('r1', 'r1', 0)    # gBattleMons pelo literal do jogo (muda na ROM do Coop 3)
+a.add_r('r0', 'r0', 'r1'); a.ldrh_i('r0', 'r0', 0)     # espécie do atacante
+a.ldr_lit('r1', ARBOLIVA); a.alu('cmp', 'r0', 'r1'); a.bc('ne', 'fim')
+for tag, pal, nome in ((TAG_FOLHA, RL_PAL1, 'p1'), (TAG_LAMINA, RL_PAL2, 'p2')):
+    a.ldr_lit('r0', tag); a.bl('acha')
+    a.cmpi('r0', 16); a.bc('hs', nome)
+    a.lsl('r1', 'r0', 4); a.addi('r1', 0x80); a.addi('r1', 0x80)   # 0x100 + vaga*16 (paletas de sprite)
+    a.ldr_lit('r0', pal); a.mov('r2', 0x20)
+    a.ldr_lit('r3', 0x080F196D); a.bl('c3')           # LoadPalette
+    a.label(nome)
+a.label('fim')
+a.h(0x1C30)                          # add r0, r6, #0
+a.ldr_lit('r3', 0x080F43A9); a.bl('c3')               # DestroyAnimVisualTask
+a.pop(['r4', 'r5', 'r6']); a.pop(['r0']); a.bx('r0')
+a.label('acha')                      # r0 = tag -> r0 = vaga em sSpritePaletteTags (0x030009FE) ou 16
+a.ldr_lit('r1', 0x030009FE); a.mov('r2', 0)
+a.label('laco'); a.ldrh_i('r3', 'r1', 0); a.alu('cmp', 'r3', 'r0'); a.bc('eq', 'achou')
+a.addi('r1', 2); a.addi('r2', 1); a.cmpi('r2', 16); a.bc('lo', 'laco')
+a.label('achou'); a.h(0x1C10); a.bx('lr')            # add r0, r2, #0
+a.label('c3'); a.bx('r3')
+a.pool()
+code = a.build(); assert RL_TASK + len(code) <= RL_SCRIPT, len(code)
+put(RL_TASK, code)
+orig_rl = w32(MOVES_ANIM + 4 * RAZOR)
+put(RL_SCRIPT, ROM[orig_rl - 0x08000000:orig_rl - 0x08000000 + 9] + b'\x03' + p32(RL_TASK | 1) + b'\x05\x00'
+    + b'\x13' + p32(orig_rl + 9))
+assert ROM[orig_rl - 0x08000000:orig_rl - 0x08000000 + 9] == bytes.fromhex('004f2700b027009727')
+put(MOVES_ANIM + 4 * RAZOR, p32(RL_SCRIPT))
 
 # --- textos
 nome = enc('Nuvem Tóxica')
