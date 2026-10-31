@@ -726,6 +726,7 @@ function startRun(opts) {
   if (patched) { run.saves = opts.saves = patched; persistSaves(run, patched, false); toast("❓ Pronto! Já está no seu save."); }
   // prontos que mudam a ROM (ex.: Meta Knight): só na cópia desta partida, sozinho ou "Mesmo PC"
   if (Cheats.usable(run)) CheatPresets.applyRom(roms);
+  quetzalTipos(roms);   // ajustes fixos do Quetzal: valem sempre (também online, todos iguais)
   worker.postMessage({ t: "start", module: Play.mod, n: run.n, rom: roms, saves: opts.saves,
                        net: !!run.net && !run.free, free: !!run.free, me: run.slot | 0, slot: run.free ? 0 : run.slot,
                        cabo: run.cabo || null, especial: Cheats.usable(run) ? CheatPresets.especial() : 0,
@@ -1048,6 +1049,23 @@ function cheatPresetsRender() {
     };
     box.appendChild(el);
   }
+}
+// Pokémon Quetzal: tabela de espécies em 0x548C04 (0x24 bytes cada, nº nacional; tipos em +6/+7: Ghost 0x07,
+// Dark 0x11). Duskull (#355) vira Ghost/Dark. Só muda se o Duskull estiver lá com os status e tipos originais.
+const QZ_TIPOS = [
+  [0x54BDF0, "14285a191e5a0707", "14285a191e5a0711"],   // Duskull: Ghost/Ghost -> Ghost/Dark
+];
+function quetzalTipos(rom) {
+  if (String.fromCharCode(...rom.subarray(0xA0, 0xAB)) !== "PKM QUETZAL") return 0;
+  const hex = (h) => Uint8Array.from(h.match(/../g), (b) => parseInt(b, 16));
+  let changed = 0;
+  for (const [at, orig, data] of QZ_TIPOS) {
+    const want = hex(orig);
+    if (at + want.length > rom.length || want.some((b, i) => rom[at + i] !== b)) continue;
+    rom.set(hex(data), at);
+    changed++;
+  }
+  return changed;
 }
 function romGameCode(rom) {
   const id = String.fromCharCode(...rom.subarray(0xAC, 0xB0)).replace(/[^0-9A-Za-z]/g, "");
