@@ -11,6 +11,7 @@ NOVA2 = 320                                  # "Distúrbio" (Dusknoir)
 # Distúrbio: área livre igual nas duas ROMs
 D_NUVEM, D_CODE, D_CASE, D_SCRIPT, D_ANIM = 0x09FED000, 0x09FEE400, 0x09FEE800, 0x09FEE880, 0x09FEE8C0
 D_TXT, D_PAL, D_ESCURO = 0x09FEE900, 0x09FEE9E0, 0x09FEEA00
+D_ANIM2 = 0x09FEEB40                         # animação geral 62: absorção do Dream Eater (dreno do Distúrbio)
 # área livre (0xFF) igual nas duas ROMs do Quetzal (a do Coop 3 usa até 0x09FFA31C)
 CASE, NOME_HOOK, SCRIPT, TXT = 0x09FFE000, 0x09FFE080, 0x09FFE100, 0x09FFE200
 JTAB, DESC_C, DESC_L = 0x09FFE400, 0x09FFEA00, 0x09FFF000
@@ -157,7 +158,7 @@ a.label('c3'); a.bx('r3')
 a.pool()
 put(TASK, a.build())
 assert w32(0x080F40AC) == OLD_GERAL
-g = [w32(OLD_GERAL + 4 * i) for i in range(N_GERAL)] + [ANIM, D_ANIM]
+g = [w32(OLD_GERAL + 4 * i) for i in range(N_GERAL)] + [ANIM, D_ANIM, D_ANIM2]
 put(GERAL, b''.join(p32(x) for x in g))
 put(0x080F40AC, p32(GERAL))
 
@@ -687,16 +688,99 @@ assert ROM[0x3C06C:0x3C074] == bytes.fromhex('30b5084801680848')
 put(0x0803C06C, struct.pack('<HHI', 0x4B00, 0x4718, c.labels['entra'] | 1))
 
 # animação geral 61: liga o céu e treme a tela como o Earthquake (tarefa 0x081854E1: fundo e Pokémon)
-def treme(alvo): return bytes.fromhex('03e15418080503') + h16(alvo) + h16(10) + h16(50)
+def treme(alvo): return bytes.fromhex('03e15418080503') + h16(alvo) + h16(5) + h16(50)        # tremor pela metade do Earthquake
 put(D_ANIM, b'\x03' + p32(D_START | 1) + b'\x05\x00' + treme(5) + treme(4) + bytes.fromhex('19ea0000') + b'\x05\x08')
 # script de batalha: balão da habilidade, animação 61, fecha o balão
 put(D_SCRIPT, bytes.fromhex('760136394000') + bytes([0x45, 0x01, N_GERAL + 1]) + p32(0x02023500)
-    + bytes.fromhex('0a760f623920003f'))
+    + bytes.fromhex('0a') + bytes([0x10]) + struct.pack('<H', 745) + bytes.fromhex('124000')   # "Uma presença sombria..."
+    + bytes.fromhex('760f623920003f'))
 put(D_CASE, caso(D_CASE, D_SCRIPT))
 put(D_TXT, enc('Distúrbio')); put(D_TXT + 0x20, enc('Escurece o céu ao entrar.'))
 put(D_TXT + 0x60, enc('Ao entrar, a terra treme e o\ncéu fica coberto de nuvens\nescuras enquanto estiver lá.'))
 assert ROM[0x54CF30:0x54CF36] == bytes.fromhex('2e0000007700')
 put(0x0854CF30, struct.pack('<3H', NOVA2, NOVA2, NOVA2))      # Dusknoir: Distúrbio nas 3 vagas
+
+# --- Distúrbio, fim de cada rodada: o Dusknoir rouba 1/16 da vida de cada inimigo em campo (aliados não), com a
+# animação de absorção do Dream Eater, e recupera o que roubou. Mensagem nova ao entrar.
+D_TABTXT, D_MSG = 0x09FEB200, 0x09FEEB00     # tabela de textos da batalha (+1) e o texto novo
+D_DRENO, D_TRAMP, D_DANO = 0x09FEBE00, 0x09FEBEA0, 0x09FEBF00
+OLD_TABTXT, N_TXT, ID_MSG, ID_DRENADA = 0x09253FF0, 733, 745, 45
+MAGIC_GUARD = 98
+
+# texto: "Uma presença sombria cobre / o campo de batalha!"
+_msg = bytearray()
+for ch in 'Uma presença sombria cobre\no campo de batalha!':
+    if 'A' <= ch <= 'Z': _msg.append(0xBB + ord(ch) - 65)
+    elif 'a' <= ch <= 'z': _msg.append(0xD5 + ord(ch) - 97)
+    else: _msg.append({' ': 0x00, '\n': 0xFE, '!': 0xAB, 'ç': 0x19}[ch])
+put(D_MSG, bytes(_msg) + b'\xff')
+_tab = [w32(OLD_TABTXT + 4 * i) for i in range(N_TXT)] + [D_MSG]
+put(D_TABTXT, b''.join(p32(x) for x in _tab))
+_v = p32(OLD_TABTXT); _i = ROM.find(_v); _n = 0
+while _i != -1:
+    assert _i % 4 == 0 and _i < 0x400000
+    put(0x08000000 + _i, p32(D_TABTXT)); _n += 1
+    _i = ROM.find(_v, _i + 1)
+assert _n == 24, _n
+assert ROM[0x1D5BCC:0x1D5BD0] == bytes.fromhex('ba208000')
+put(0x081D5BCC, bytes.fromhex('bb20'))         # limite do número do texto: 744 -> 748
+
+# animação geral 62: a tarefa do dreno do Leech Seed (quem recebe/quem perde vêm do argumento) + a do Dream Eater
+put(D_ANIM2, bytes.fromhex('03817c1f080500') + b'\x13' + p32(w32(0x0846AB1C + 4 * 138)))
+
+# 1/16 da vida máxima do alvo em gBattleMoveDamage (mínimo 1); callnative: avança 5 bytes
+a = Asm(D_DANO)
+a.ldr_lit('r0', 0x02023205); a.ldrb_i('r0', 'r0', 0); a.mov('r1', 0x60); a.alu('mul', 'r0', 'r1')
+a.ldr_lit('r1', 0x0806DBC8); a.ldr_i('r1', 'r1', 0); a.add_r('r0', 'r0', 'r1'); a.ldrh_i('r0', 'r0', 0x2E)
+lsr(a, 0, 0, 4); a.cmpi('r0', 0); a.bc('ne', 'ok'); a.mov('r0', 1)
+a.label('ok'); a.ldr_lit('r1', 0x020231E8); a.str_i('r0', 'r1', 0)
+a.ldr_lit('r1', 0x0202320C); a.ldr_i('r0', 'r1', 0); a.addi('r0', 5); a.str_i('r0', 'r1', 0)
+a.bx('lr')
+a.pool()
+put(D_DANO, a.build())
+
+# script do fim de rodada
+s = bytearray(); lab = {}; fix = []
+def jmp(name): fix.append((len(s), name)); s.extend(b'\0\0\0\0')
+s += bytes.fromhex('760136392000')             # balão da habilidade
+s += bytes.fromhex('2e0532020200')             # alvo = 0
+lab['laco'] = len(s)
+s += bytes.fromhex('760137'); jmp('prox')       # aliado
+s += bytes.fromhex('760061'); jmp('prox')       # ausente
+s += bytes.fromhex('ff3998080800'); jmp('prox') # desmaiado
+s += bytes([0x1E, 0x00, MAGIC_GUARD, 0x00]); jmp('prox')
+s += bytes.fromhex('31003502020432020201')     # sB_ANIM_ARG1 = Dusknoir (recebe)
+s += bytes.fromhex('31013502020532020201')     # sB_ANIM_ARG2 = inimigo (perde)
+s += bytes([0x45, 0x01, N_GERAL + 2]) + p32(0x02023500) + b'\x0a'   # animação 62 e espera
+s += b'\xff' + p32(D_DANO | 1)                 # dano = 1/16 da vida máxima do inimigo
+s += bytes.fromhex('357432020200011000') + bytes.fromhex('0b000c00')
+s += bytes([0x10]) + struct.pack('<H', ID_DRENADA) + bytes.fromhex('124000')
+s += bytes.fromhex('31e8310202ec31020204')     # dano = vida tirada de verdade
+s += bytes.fromhex('8007')                     # vira cura (com a Big Root)
+s += bytes.fromhex('357432020200011000') + bytes.fromhex('0b010c01')
+s += bytes.fromhex('19000000000000')           # tryfaintmon inimigo
+lab['prox'] = len(s)
+s += bytes.fromhex('2f0532020201')
+s += bytes.fromhex('2d053202024430020201'); jmp('laco')
+s += bytes.fromhex('760f62390f003f')           # fecha o balão, pausa, end3
+for at, name in fix: s[at:at + 4] = p32(D_DRENO + lab[name])
+put(D_DRENO, s)
+
+# desvio no começo das comparações do fim de rodada (0x08053E52): 320 -> script do dreno
+assert ROM[0x53E52:0x53E5C] == bytes.fromhex('0d480188832900d19de2')
+a = Asm(D_TRAMP)
+a.ldr_lit('r0', 0x02023202); a.ldrh_i('r1', 'r0', 0)
+a.ldr_lit('r3', NOVA2); a.alu('cmp', 'r1', 'r3'); a.bc('eq', 'dreno')   # r2 (batalhador) fica intacto
+a.cmpi('r1', 0x83); a.bc('ne', 'segue')
+a.ldr_lit('r3', 0x08054398); a.h(0x469F)          # mov pc, r3 (caso 0x83, como antes)
+a.label('segue'); a.ldr_lit('r3', 0x08053E5C); a.h(0x469F)
+a.label('dreno')
+a.ldr_lit('r0', D_DRENO); a.ldr_lit('r3', PUSH_SCRIPT); a.bl('c3')
+a.ldr_lit('r3', 0x08057E16); a.h(0x469F)          # efeito++ e fim do switch
+a.label('c3'); a.bx('r3')
+a.pool()
+put(D_TRAMP, a.build())
+put(0x08053E52, struct.pack('<HHHI', 0x4801, 0x4700, 0x46C0, D_TRAMP | 1))
 
 # --- textos
 nome = enc('Nuvem Tóxica')
