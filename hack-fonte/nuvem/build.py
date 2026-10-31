@@ -13,7 +13,9 @@ D_NUVEM, D_CODE, D_CASE, D_SCRIPT, D_ANIM = 0x09FED000, 0x09FEE400, 0x09FEE800, 
 D_TRAMP, D_GUARDA = 0x09FEEB60, 0x09FEEBE0
 D_DRENO, D_DANO, D_CURA, D_FASE = 0x09FEBE00, 0x09FEBF00, 0x09FEBF40, 0x09FEBFC0
 D_TXT, D_PAL, D_ESCURO = 0x09FEE900, 0x09FEE9E0, 0x09FEEA00
-D_ANIM2 = 0x09FEEB40                         # animação geral 62: absorção do Dream Eater (dreno do Distúrbio)
+D_ANIM2 = 0x09FEEC80                         # animação geral 62: absorção do Dream Eater (dreno do Distúrbio)
+D_SAI = 0x09FEED00                           # tarefa da saída: a luz volta aos poucos quando o Distúrbio acaba
+SAI_QUADROS = 44                             # brilho 5/16 -> 16/16, +1/16 a cada 4 quadros
 # área livre (0xFF) igual nas duas ROMs do Quetzal (a do Coop 3 usa até 0x09FFA31C)
 CASE, NOME_HOOK, SCRIPT, TXT = 0x09FFE000, 0x09FFE080, 0x09FFE100, 0x09FFE200
 JTAB, DESC_C, DESC_L = 0x09FFE400, 0x09FFEA00, 0x09FFF000
@@ -306,7 +308,13 @@ a.bl('tem'); a.cmpi('r0', 0); a.bc('ne', 'presente')
 a.bl('embatalha'); a.cmpi('r0', 0); a.bc('eq', 'mata')   # a batalha acabou: só desliga
 a.bl('pode'); a.cmpi('r0', 0); a.bc('eq', 'fim')         # animação ou outra tela: espera
 a.bl('marca'); a.cmpi('r0', 0); a.bc('eq', 'mata')
-a.ldr_lit('r3', DRAWBG | 1); a.bl('c3')       # devolve o fundo normal
+a.ldr_lit('r3', DRAWBG | 1); a.bl('c3')       # devolve o fundo normal, mas escuro: a luz volta aos poucos (D_SAI)
+a.ldr_lit('r0', PLTT_BASE + 0x42); a.mov('r1', 0)            # cores 1-15 da paleta 2 -> dados da tarefa +10..
+a.label('s_cop'); a.ldrh_r('r2', 'r0', 'r1'); a.h(0x1C0B); a.addi('r3', 10); a.strh_r('r2', 'r6', 'r3')
+a.addi('r1', 2); a.cmpi('r1', 30); a.bc('lo', 's_cop')
+a.mov('r0', 0); a.strh_i('r0', 'r6', 8)
+a.ldr_lit('r0', D_SAI | 1); a.str_i('r0', 'r6', 0)
+a.h(0x1C38); a.ldr_lit('r3', D_SAI | 1); a.bl('c3'); a.b('fim')
 a.label('mata')
 a.h(0x1C38); a.ldr_lit('r3', DESTROYTASK | 1); a.bl('c3')
 a.b('fim')
@@ -730,7 +738,14 @@ assert ROM[0x1D5BCC:0x1D5BD0] == bytes.fromhex('ba208000')
 put(0x081D5BCC, bytes.fromhex('bb20'))         # limite do número do texto: 744 -> 748
 
 # animação geral 62: a tarefa do dreno do Leech Seed (quem recebe/quem perde vêm do argumento) + a do Dream Eater
-put(D_ANIM2, bytes.fromhex('03817c1f080500') + b'\x13' + p32(w32(0x0846AB1C + 4 * 138)))
+# o script do Dream Eater copiado sem trocar o fundo (o "call SetPsychicBackground" e o "call UnsetPsychicBg" chamam
+# um "return"; nop trava a animação), para a absorção acontecer em cima do céu do Distúrbio
+_de = w32(0x0846AB1C + 4 * 138) - 0x08000000
+_de = bytearray(ROM[_de:_de + 0x6A])
+assert _de[0x0E:0x13] == b'\x0e' + p32(0x0849DAC3) and _de[0x64:0x69] == b'\x0e' + p32(0x0849DACF) and _de[0x69] == 0x08
+_ret = D_ANIM2 + 7 + len(_de)                # "return" logo depois do script: as duas chamadas não fazem nada
+_de[0x0E:0x13] = b'\x0e' + p32(_ret); _de[0x64:0x69] = b'\x0e' + p32(_ret)
+put(D_ANIM2, bytes.fromhex('03817c1f080500') + bytes(_de) + b'\x0f')
 
 # 1/8 da vida máxima do alvo em gBattleMoveDamage (mínimo 1); callnative: avança 5 bytes
 a = Asm(D_DANO)
@@ -858,6 +873,45 @@ a.addi('r6', 1); a.cmpi('r6', 2); a.bc('lo', 'lado')
 a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r0']); a.bx('r0')
 a.pool()
 put(D_GUARDA, a.build())
+
+# saída do Distúrbio: o fundo normal volta com 5/16 do brilho e clareia até o normal em SAI_QUADROS quadros
+# (dados da tarefa: +8 quadro, +10.. cores 1-15 originais da paleta 2). Espera animações; se um Dusknoir com
+# Distúrbio voltar, devolve as cores e sai (a entrada dele cria a tarefa do céu de novo).
+a = Asm(D_SAI)
+a.push(['r4', 'r5', 'r6', 'r7'], lr=True)
+a.h(0x1C07)
+a.lsl('r1', 'r0', 2); a.add_r('r1', 'r1', 'r0'); a.lsl('r1', 'r1', 3)
+a.ldr_lit('r6', GTASKS); a.add_r('r6', 'r6', 'r1')
+a.ldr_lit('r3', D_GUARDA | 1); a.bl('c3')
+a.ldr_lit('r0', 0x03002A99); a.ldrb_i('r0', 'r0', 0); a.mov('r1', 2); a.alu('and_', 'r0', 'r1'); a.cmpi('r0', 0); a.bc('eq', 'mata')
+a.ldr_lit('r0', 0x0806DBC8); a.ldr_i('r0', 'r0', 0)
+a.ldr_lit('r1', 0x02023044); a.ldrb_i('r1', 'r1', 0); a.ldr_lit('r2', NOVA2)
+a.label('t_laco'); a.cmpi('r1', 0); a.bc('eq', 'sem')
+a.ldrh_i('r3', 'r0', 0x20); a.alu('cmp', 'r3', 'r2'); a.bc('ne', 't_prox')
+a.ldrh_i('r3', 'r0', 0x2A); a.cmpi('r3', 0); a.bc('ne', 'volta')
+a.label('t_prox'); a.addi('r0', 0x60); a.subi('r1', 1); a.b('t_laco')
+a.label('volta'); a.mov('r5', SAI_QUADROS); a.b('pinta')
+a.label('sem')
+a.ldr_lit('r0', 0x03002664); a.ldr_i('r0', 'r0', 0); a.ldr_lit('r1', BATTLE_CB2); a.alu('cmp', 'r0', 'r1'); a.bc('ne', 'fim')
+a.ldr_lit('r0', 0x02039EE5); a.ldrb_i('r0', 'r0', 0); a.cmpi('r0', 0); a.bc('ne', 'fim')
+a.ldrh_i('r5', 'r6', 8); a.addi('r5', 1); a.strh_i('r5', 'r6', 8)
+a.label('pinta')
+lsr(a, 4, 5, 2); a.addi('r4', 5)                  # brilho k = 5 + quadro/4 (16 no último)
+a.mov('r3', 1)
+a.label('cor')
+a.lsl('r1', 'r3', 1); a.addi('r1', 8); a.ldrh_r('r0', 'r6', 'r1')
+a.lsl('r1', 'r0', 27); lsr(a, 1, 1, 27); a.alu('mul', 'r1', 'r4'); lsr(a, 1, 1, 4)
+a.lsl('r2', 'r0', 22); lsr(a, 2, 2, 27); a.alu('mul', 'r2', 'r4'); lsr(a, 2, 2, 4); a.lsl('r2', 'r2', 5); a.alu('orr', 'r1', 'r2')
+a.lsl('r2', 'r0', 17); lsr(a, 2, 2, 27); a.alu('mul', 'r2', 'r4'); lsr(a, 2, 2, 4); a.lsl('r2', 'r2', 10); a.alu('orr', 'r1', 'r2')
+a.ldr_lit('r2', PLTT_BASE + 0x40); a.lsl('r0', 'r3', 1); a.add_r('r2', 'r2', 'r0'); a.strh_i('r1', 'r2', 0)
+a.mov('r0', 1); a.lsl('r0', 'r0', 10); a.add_r('r2', 'r2', 'r0'); a.strh_i('r1', 'r2', 0)
+a.addi('r3', 1); a.cmpi('r3', 16); a.bc('lo', 'cor')
+a.cmpi('r5', SAI_QUADROS); a.bc('lo', 'fim')
+a.label('mata'); a.h(0x1C38); a.ldr_lit('r3', DESTROYTASK | 1); a.bl('c3')
+a.label('fim'); a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r0']); a.bx('r0')
+a.label('c3'); a.bx('r3')
+a.pool()
+put(D_SAI, a.build())
 
 # --- textos
 nome = enc('Nuvem Tóxica')
