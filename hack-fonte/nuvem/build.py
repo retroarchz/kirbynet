@@ -10,6 +10,8 @@ NOVA = 319
 NOVA2 = 320                                  # "Distúrbio" (Dusknoir)
 # Distúrbio: área livre igual nas duas ROMs
 D_NUVEM, D_CODE, D_CASE, D_SCRIPT, D_ANIM = 0x09FED000, 0x09FEE400, 0x09FEE800, 0x09FEE880, 0x09FEE8C0
+D_TRAMP, D_GUARDA = 0x09FEEB60, 0x09FEEBE0
+D_DRENO, D_DANO, D_CURA, D_FASE = 0x09FEBE00, 0x09FEBF00, 0x09FEBF40, 0x09FEBFC0
 D_TXT, D_PAL, D_ESCURO = 0x09FEE900, 0x09FEE9E0, 0x09FEEA00
 D_ANIM2 = 0x09FEEB40                         # animação geral 62: absorção do Dream Eater (dreno do Distúrbio)
 # área livre (0xFF) igual nas duas ROMs do Quetzal (a do Coop 3 usa até 0x09FFA31C)
@@ -299,6 +301,7 @@ a.push(['r4', 'r5', 'r6', 'r7'], lr=True)
 a.h(0x1C07)                                  # add r7, r0, #0
 a.lsl('r1', 'r0', 2); a.add_r('r1', 'r1', 'r0'); a.lsl('r1', 'r1', 3)
 a.ldr_lit('r6', GTASKS); a.add_r('r6', 'r6', 'r1')
+a.ldr_lit('r3', D_GUARDA | 1); a.bl('c3')      # Safeguard no lado de quem tem Distúrbio (ou desliga)
 a.bl('tem'); a.cmpi('r0', 0); a.bc('ne', 'presente')
 a.bl('embatalha'); a.cmpi('r0', 0); a.bc('eq', 'mata')   # a batalha acabou: só desliga
 a.bl('pode'); a.cmpi('r0', 0); a.bc('eq', 'fim')         # animação ou outra tela: espera
@@ -691,7 +694,7 @@ put(0x0803C06C, struct.pack('<HHI', 0x4B00, 0x4718, c.labels['entra'] | 1))
 def treme(alvo): return bytes.fromhex('03e15418080503') + h16(alvo) + h16(5) + h16(50)        # tremor pela metade do Earthquake
 put(D_ANIM, b'\x03' + p32(D_START | 1) + b'\x05\x00' + treme(5) + treme(4) + bytes.fromhex('19ea0000') + b'\x05\x08')
 # script de batalha: balão da habilidade, animação 61, fecha o balão
-put(D_SCRIPT, bytes.fromhex('760136394000') + bytes([0x45, 0x01, N_GERAL + 1]) + p32(0x02023500)
+put(D_SCRIPT, bytes([0xFF]) + p32(D_FASE | 1) + bytes.fromhex('760136394000') + bytes([0x45, 0x01, N_GERAL + 1]) + p32(0x02023500)
     + bytes.fromhex('0a') + bytes([0x10]) + struct.pack('<H', 745) + bytes.fromhex('124000')   # "Uma presença sombria..."
     + bytes.fromhex('760f623920003f'))
 put(D_CASE, caso(D_CASE, D_SCRIPT))
@@ -703,7 +706,8 @@ put(0x0854CF30, struct.pack('<3H', NOVA2, NOVA2, NOVA2))      # Dusknoir: Distú
 # --- Distúrbio, fim de cada rodada: o Dusknoir rouba 1/8 da vida de cada inimigo em campo (aliados não), com a
 # animação de absorção do Dream Eater, e recupera metade da própria vida máxima por rodada. Mensagem nova ao entrar.
 D_TABTXT, D_MSG = 0x09FEB200, 0x09FEEB00     # tabela de textos da batalha (+1) e o texto novo
-D_DRENO, D_TRAMP, D_DANO, D_CURA = 0x09FEBE00, 0x09FEBEA0, 0x09FEBF00, 0x09FEBF40
+DISABLE_LIT, POS_LIT = 0x08052C74, 0x0808529C        # literais com gDisableStructs e gBattlerPositions (o Coop 3 mudou)
+SIDE_STATUS, SIDE_TIMERS = 0x02023280, 0x02023288    # Safeguard = 0x20; timer +6 e dono +7 (0x20 bytes por lado)
 OLD_TABTXT, N_TXT, ID_MSG, ID_DRENADA = 0x09253FF0, 733, 745, 45
 MAGIC_GUARD = 98
 
@@ -739,7 +743,7 @@ a.bx('lr')
 a.pool()
 put(D_DANO, a.build())
 
-# cura do Dusknoir: metade da vida máxima dele por rodada, dividida entre os inimigos vivos (o alvo atual conta)
+# cura do Dusknoir: 9/16 da vida máxima dele na fase 3, dividida entre os inimigos vivos (o alvo atual conta)
 a = Asm(D_CURA)
 a.push(['r4', 'r5', 'r6', 'r7'], lr=True)
 a.ldr_lit('r0', 0x02023204); a.ldrb_i('r4', 'r0', 0)
@@ -756,7 +760,7 @@ a.label('prox'); a.addi('r7', 1); a.alu('cmp', 'r7', 'r3'); a.bc('lo', 'laco')
 a.cmpi('r6', 0); a.bc('ne', 'tem'); a.mov('r6', 1)
 a.label('tem')
 a.mov('r0', 0x60); a.alu('mul', 'r0', 'r4'); a.add_r('r0', 'r0', 'r5'); a.ldrh_i('r0', 'r0', 0x2E)
-a.addi('r0', 1); lsr(a, 0, 0, 1)                 # metade arredondada para cima
+lsr(a, 1, 0, 4); lsr(a, 0, 0, 1); a.add_r('r0', 'r0', 'r1')   # metade + 1/16 (54 PS -> 30)
 a.h(0x1C31); a.h(0xDF06)                         # r0 = r0 / r6 (BIOS Div)
 a.cmpi('r0', 0); a.bc('ne', 'ok'); a.mov('r0', 1)
 a.label('ok'); a.ldr_lit('r1', 0x020231E8); a.str_i('r0', 'r1', 0)
@@ -800,13 +804,60 @@ a.ldr_lit('r3', NOVA2); a.alu('cmp', 'r1', 'r3'); a.bc('eq', 'dreno')   # r2 (ba
 a.cmpi('r1', 0x83); a.bc('ne', 'segue')
 a.ldr_lit('r3', 0x08054398); a.h(0x469F)          # mov pc, r3 (caso 0x83, como antes)
 a.label('segue'); a.ldr_lit('r3', 0x08053E5C); a.h(0x469F)
-a.label('dreno')
+a.label('dreno')                                  # fase: contador da Slow Start (o jogo zera ao entrar e tira 1 por rodada)
+a.ldr_lit('r0', DISABLE_LIT); a.ldr_i('r0', 'r0', 0); a.mov('r1', 0x2C); a.alu('mul', 'r1', 'r2'); a.add_r('r0', 'r0', 'r1')
+a.ldrb_i('r1', 'r0', 0x1F); a.cmpi('r1', 0); a.bc('eq', 'fase3')
+a.ldr_lit('r3', 0x08058604); a.h(0x469F)          # fases 1 e 2: nada (por enquanto)
+a.label('fase3'); a.mov('r1', 3); a.strb_i('r1', 'r0', 0x1F)   # o jogo já tira 1 nesta rodada: 2, 1, 0 de novo
 a.ldr_lit('r0', D_DRENO); a.ldr_lit('r3', PUSH_SCRIPT); a.bl('c3')
 a.ldr_lit('r3', 0x08057E16); a.h(0x469F)          # efeito++ e fim do switch
 a.label('c3'); a.bx('r3')
 a.pool()
 put(D_TRAMP, a.build())
 put(0x08053E52, struct.pack('<HHHI', 0x4801, 0x4700, 0x46C0, D_TRAMP | 1))
+
+# entrada: começa a contagem das 3 fases (callnative, gBattlerAttacker = Dusknoir)
+a = Asm(D_FASE)
+a.ldr_lit('r0', 0x02023204); a.ldrb_i('r0', 'r0', 0); a.mov('r1', 0x2C); a.alu('mul', 'r0', 'r1')
+a.ldr_lit('r1', DISABLE_LIT); a.ldr_i('r1', 'r1', 0); a.add_r('r0', 'r0', 'r1'); a.mov('r1', 2); a.strb_i('r1', 'r0', 0x1F)   # vê 2, 1, 0 (o jogo tira 1 depois)
+a.ldr_lit('r1', 0x0202320C); a.ldr_i('r0', 'r1', 0); a.addi('r0', 5); a.str_i('r0', 'r1', 0)
+a.bx('lr')
+a.pool()
+put(D_FASE, a.build())
+
+# guarda (todo quadro, pela tarefa): lado com Dusknoir com Distúrbio e vida = Safeguard ligado (timer 200, nunca acaba);
+# sem ele, desliga o Safeguard que foi ligado aqui (timer >= 190)
+a = Asm(D_GUARDA)
+a.push(['r4', 'r5', 'r6', 'r7'], lr=True)
+a.ldr_lit('r4', 0x0806DBC8); a.ldr_i('r4', 'r4', 0)
+a.ldr_lit('r5', POS_LIT); a.ldr_i('r5', 'r5', 0)
+a.mov('r6', 0)
+a.label('lado')
+a.mov('r7', 0); a.mov('r2', 0xFF)
+a.label('bat')
+a.ldr_lit('r0', 0x02023044); a.ldrb_i('r0', 'r0', 0); a.alu('cmp', 'r7', 'r0'); a.bc('hs', 'bfim')
+a.ldrb_r('r0', 'r5', 'r7'); a.mov('r1', 1); a.alu('and_', 'r0', 'r1'); a.alu('cmp', 'r0', 'r6'); a.bc('ne', 'bprox')
+a.mov('r0', 0x60); a.alu('mul', 'r0', 'r7'); a.add_r('r0', 'r0', 'r4')
+a.ldrh_i('r1', 'r0', 0x20); a.ldr_lit('r3', NOVA2); a.alu('cmp', 'r1', 'r3'); a.bc('ne', 'bprox')
+a.ldrh_i('r1', 'r0', 0x2A); a.cmpi('r1', 0); a.bc('eq', 'bprox')
+a.h(0x1C3A)                                       # r2 = batalhador
+a.label('bprox'); a.addi('r7', 1); a.b('bat')
+a.label('bfim')
+a.ldr_lit('r0', SIDE_STATUS); a.lsl('r1', 'r6', 2); a.add_r('r0', 'r0', 'r1')
+a.ldr_lit('r1', SIDE_TIMERS); a.lsl('r3', 'r6', 5); a.add_r('r1', 'r1', 'r3')
+a.ldr_i('r3', 'r0', 0); a.mov('r7', 0x20)
+a.cmpi('r2', 0xFF); a.bc('eq', 'sem')
+a.alu('orr', 'r3', 'r7'); a.str_i('r3', 'r0', 0)
+a.mov('r3', 200); a.strb_i('r3', 'r1', 6); a.strb_i('r2', 'r1', 7); a.b('prox')
+a.label('sem')
+a.alu('tst', 'r3', 'r7'); a.bc('eq', 'prox')
+a.ldrb_i('r2', 'r1', 6); a.cmpi('r2', 190); a.bc('lo', 'prox')
+a.alu('bic', 'r3', 'r7'); a.str_i('r3', 'r0', 0); a.mov('r2', 0); a.strb_i('r2', 'r1', 6)
+a.label('prox')
+a.addi('r6', 1); a.cmpi('r6', 2); a.bc('lo', 'lado')
+a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r0']); a.bx('r0')
+a.pool()
+put(D_GUARDA, a.build())
 
 # --- textos
 nome = enc('Nuvem Tóxica')
