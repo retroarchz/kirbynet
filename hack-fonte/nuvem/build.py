@@ -700,10 +700,10 @@ put(D_TXT + 0x60, enc('Ao entrar, a terra treme e o\ncéu fica coberto de nuvens
 assert ROM[0x54CF30:0x54CF36] == bytes.fromhex('2e0000007700')
 put(0x0854CF30, struct.pack('<3H', NOVA2, NOVA2, NOVA2))      # Dusknoir: Distúrbio nas 3 vagas
 
-# --- Distúrbio, fim de cada rodada: o Dusknoir rouba 1/16 da vida de cada inimigo em campo (aliados não), com a
-# animação de absorção do Dream Eater, e recupera o que roubou. Mensagem nova ao entrar.
+# --- Distúrbio, fim de cada rodada: o Dusknoir rouba 1/8 da vida de cada inimigo em campo (aliados não), com a
+# animação de absorção do Dream Eater, e recupera metade da própria vida máxima por rodada. Mensagem nova ao entrar.
 D_TABTXT, D_MSG = 0x09FEB200, 0x09FEEB00     # tabela de textos da batalha (+1) e o texto novo
-D_DRENO, D_TRAMP, D_DANO = 0x09FEBE00, 0x09FEBEA0, 0x09FEBF00
+D_DRENO, D_TRAMP, D_DANO, D_CURA = 0x09FEBE00, 0x09FEBEA0, 0x09FEBF00, 0x09FEBF40
 OLD_TABTXT, N_TXT, ID_MSG, ID_DRENADA = 0x09253FF0, 733, 745, 45
 MAGIC_GUARD = 98
 
@@ -728,16 +728,42 @@ put(0x081D5BCC, bytes.fromhex('bb20'))         # limite do número do texto: 744
 # animação geral 62: a tarefa do dreno do Leech Seed (quem recebe/quem perde vêm do argumento) + a do Dream Eater
 put(D_ANIM2, bytes.fromhex('03817c1f080500') + b'\x13' + p32(w32(0x0846AB1C + 4 * 138)))
 
-# 1/16 da vida máxima do alvo em gBattleMoveDamage (mínimo 1); callnative: avança 5 bytes
+# 1/8 da vida máxima do alvo em gBattleMoveDamage (mínimo 1); callnative: avança 5 bytes
 a = Asm(D_DANO)
 a.ldr_lit('r0', 0x02023205); a.ldrb_i('r0', 'r0', 0); a.mov('r1', 0x60); a.alu('mul', 'r0', 'r1')
 a.ldr_lit('r1', 0x0806DBC8); a.ldr_i('r1', 'r1', 0); a.add_r('r0', 'r0', 'r1'); a.ldrh_i('r0', 'r0', 0x2E)
-lsr(a, 0, 0, 4); a.cmpi('r0', 0); a.bc('ne', 'ok'); a.mov('r0', 1)
+lsr(a, 0, 0, 3); a.cmpi('r0', 0); a.bc('ne', 'ok'); a.mov('r0', 1)
 a.label('ok'); a.ldr_lit('r1', 0x020231E8); a.str_i('r0', 'r1', 0)
 a.ldr_lit('r1', 0x0202320C); a.ldr_i('r0', 'r1', 0); a.addi('r0', 5); a.str_i('r0', 'r1', 0)
 a.bx('lr')
 a.pool()
 put(D_DANO, a.build())
+
+# cura do Dusknoir: metade da vida máxima dele por rodada, dividida entre os inimigos vivos (o alvo atual conta)
+a = Asm(D_CURA)
+a.push(['r4', 'r5', 'r6', 'r7'], lr=True)
+a.ldr_lit('r0', 0x02023204); a.ldrb_i('r4', 'r0', 0)
+a.ldr_lit('r0', 0x0806DBC8); a.ldr_i('r5', 'r0', 0)
+a.ldr_lit('r0', 0x02023044); a.ldrb_i('r3', 'r0', 0)
+a.mov('r6', 0); a.mov('r7', 0)
+a.label('laco')
+a.h(0x1C38); a.alu('eor', 'r0', 'r4'); a.mov('r1', 1); a.alu('and_', 'r0', 'r1'); a.bc('eq', 'prox')
+a.ldr_lit('r1', 0x02023205); a.ldrb_i('r1', 'r1', 0); a.alu('cmp', 'r1', 'r7'); a.bc('eq', 'conta')
+a.mov('r0', 0x60); a.alu('mul', 'r0', 'r7'); a.add_r('r0', 'r0', 'r5'); a.ldrh_i('r0', 'r0', 0x2A)
+a.cmpi('r0', 0); a.bc('eq', 'prox')
+a.label('conta'); a.addi('r6', 1)
+a.label('prox'); a.addi('r7', 1); a.alu('cmp', 'r7', 'r3'); a.bc('lo', 'laco')
+a.cmpi('r6', 0); a.bc('ne', 'tem'); a.mov('r6', 1)
+a.label('tem')
+a.mov('r0', 0x60); a.alu('mul', 'r0', 'r4'); a.add_r('r0', 'r0', 'r5'); a.ldrh_i('r0', 'r0', 0x2E)
+a.addi('r0', 1); lsr(a, 0, 0, 1)                 # metade arredondada para cima
+a.h(0x1C31); a.h(0xDF06)                         # r0 = r0 / r6 (BIOS Div)
+a.cmpi('r0', 0); a.bc('ne', 'ok'); a.mov('r0', 1)
+a.label('ok'); a.ldr_lit('r1', 0x020231E8); a.str_i('r0', 'r1', 0)
+a.ldr_lit('r1', 0x0202320C); a.ldr_i('r0', 'r1', 0); a.addi('r0', 5); a.str_i('r0', 'r1', 0)
+a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r0']); a.bx('r0')
+a.pool()
+put(D_CURA, a.build())
 
 # script do fim de rodada
 s = bytearray(); lab = {}; fix = []
@@ -752,10 +778,10 @@ s += bytes([0x1E, 0x00, MAGIC_GUARD, 0x00]); jmp('prox')
 s += bytes.fromhex('31003502020432020201')     # sB_ANIM_ARG1 = Dusknoir (recebe)
 s += bytes.fromhex('31013502020532020201')     # sB_ANIM_ARG2 = inimigo (perde)
 s += bytes([0x45, 0x01, N_GERAL + 2]) + p32(0x02023500) + b'\x0a'   # animação 62 e espera
-s += b'\xff' + p32(D_DANO | 1)                 # dano = 1/16 da vida máxima do inimigo
+s += b'\xff' + p32(D_DANO | 1)                 # dano = 1/8 da vida máxima do inimigo
 s += bytes.fromhex('357432020200011000') + bytes.fromhex('0b000c00')
 s += bytes([0x10]) + struct.pack('<H', ID_DRENADA) + bytes.fromhex('124000')
-s += bytes.fromhex('31e8310202ec31020204')     # dano = vida tirada de verdade
+s += bytes([0xFF]) + p32(D_CURA | 1)                # cura = metade da vida do Dusknoir / inimigos vivos
 s += bytes.fromhex('8007')                     # vira cura (com a Big Root)
 s += bytes.fromhex('357432020200011000') + bytes.fromhex('0b010c01')
 s += bytes.fromhex('19000000000000')           # tryfaintmon inimigo
