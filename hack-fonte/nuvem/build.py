@@ -218,8 +218,7 @@ put(MOVES_ANIM + 4 * RAZOR, p32(RL_SCRIPT))
 # viram escuro. Uma tarefa (CreateTask) refaz isso quando um golpe troca o fundo e devolve o normal
 # (DrawMainBattleBackground) quando nenhum Dusknoir com Distúrbio está em campo.
 GTASKS, BATTLE_CB2, DRAWBG, CREATETASK, DESTROYTASK, LOADPAL = 0x03005640, 0x0803F431, 0x0803C06C, 0x080FADB0, 0x080FAE9C, 0x080F196C
-D_START = 0x09FEED00
-D_NIVEIS, D_VTAB, D_TAB2, D_TAB6 = 0x09FEEB00, 0x09FEECC0, 0x09FEECE0, 0x09FEECE4
+D_START = D_CODE + 0x300
 PLTT_BASE = 0x020391FC                       # gPlttBufferUnfaded (o Faded fica 0x400 depois)
 PENUMBRA = 9                                 # chão com 9/16 do brilho
 from lz import lz77 as _lz
@@ -239,17 +238,7 @@ for y in range(40):
         faixa += p32(v)
 put(D_NUVEM, faixa)
 put(D_PAL, _pal[:32])
-put(D_ESCURO, _pal[18:20])
-import math
-niveis = bytearray()
-for ry in range(14):
-    for cx in range(32):
-        d = math.hypot((cx + 0.5 - 15) / 15, (ry + 0.5 - 7) / 7.5)
-        niveis.append(0 if d < 0.72 else 1 if d < 0.92 else 2 if d < 1.1 else 3)
-put(D_NIVEIS, niveis)
-VIN = (11, 7, 3)                             # brilho (de 16) dos 3 níveis da borda
-put(D_VTAB, bytes([2, 7, VIN[0], 2, 11, VIN[1], 2, 12, VIN[2], 6, 13, VIN[0], 6, 14, VIN[1], 6, 15, VIN[2]]))
-put(D_TAB2, bytes([2, 7, 11, 12])); put(D_TAB6, bytes([6, 13, 14, 15]))                   # cor 9 do fundo 73 (o escuro de baixo das nuvens)
+put(D_ESCURO, _pal[18:20])                   # cor 9 do fundo 73 (o escuro de baixo das nuvens)
 
 def lsr(a, d, m, imm): a.h(0x0800 | imm << 6 | m << 3 | d)
 a = Asm(D_CODE)
@@ -287,7 +276,7 @@ a.label('nao'); a.mov('r0', 0); a.bx('lr')
 a.label('embatalha')                         # gMain.inBattle (0x03002660 + 0x439, bit 1)
 a.ldr_lit('r0', 0x03002A99); a.ldrb_i('r0', 'r0', 0); a.mov('r1', 2); a.alu('and_', 'r0', 'r1'); a.bx('lr')
 a.label('marca')                             # 1 se o céu escuro está no mapa
-a.ldr_lit('r0', 0x0600D000); a.ldrh_i('r0', 'r0', 0); a.lsl('r0', 'r0', 22); lsr(a, 0, 0, 22); a.cmpi('r0', 0x80); a.bc('ne', 'nao')
+a.ldr_lit('r0', 0x0600D000); a.ldrh_i('r0', 'r0', 0); a.ldr_lit('r1', 0x6080); a.alu('cmp', 'r0', 'r1'); a.bc('ne', 'nao')
 a.mov('r0', 1); a.bx('lr')
 a.label('tem')                               # 1 se algum batalhador tem Distúrbio e vida
 a.ldr_lit('r0', 0x0806DBC8); a.ldr_i('r0', 'r0', 0)
@@ -333,43 +322,11 @@ a.label('e_grava')                           # grava nas cores base e nas exibid
 a.lsl('r4', 'r6', 1); a.ldr_lit('r7', PLTT_BASE + 0x40); a.add_r('r4', 'r4', 'r7'); a.strh_i('r0', 'r4', 0)
 a.ldr_lit('r7', 0x400); a.add_r('r4', 'r4', 'r7'); a.strh_i('r0', 'r4', 0)
 a.addi('r6', 1); a.cmpi('r6', 16); a.bc('lo', 'e_laco')
-a.ldr_lit('r4', D_VTAB); a.mov('r5', 6)
-a.label('v_laco')                            # cópias escurecidas: [origem, destino, fator/16] x 6
-a.ldrb_i('r6', 'r4', 0); a.ldrb_i('r7', 'r4', 1); a.lsl('r6', 'r6', 5); a.lsl('r7', 'r7', 5)
-a.ldr_lit('r0', PLTT_BASE); a.add_r('r6', 'r6', 'r0'); a.add_r('r7', 'r7', 'r0')
-a.push(['r5']); a.mov('r5', 32); a.add_r('r5', 'r5', 'r6')
-a.label('c_laco')
-a.ldrh_i('r0', 'r6', 0)
-a.mov('r1', 31); a.alu('and_', 'r1', 'r0')
-lsr(a, 2, 0, 5); a.mov('r3', 31); a.alu('and_', 'r2', 'r3')
-lsr(a, 3, 0, 10); a.mov('r0', 31); a.alu('and_', 'r3', 'r0')
-a.ldrb_i('r0', 'r4', 2); a.alu('mul', 'r1', 'r0'); a.alu('mul', 'r2', 'r0'); a.alu('mul', 'r3', 'r0')
-lsr(a, 1, 1, 4); lsr(a, 2, 2, 4); lsr(a, 3, 3, 4)
-a.lsl('r2', 'r2', 5); a.lsl('r3', 'r3', 10); a.alu('orr', 'r1', 'r2'); a.alu('orr', 'r1', 'r3')
-a.strh_i('r1', 'r7', 0); a.ldr_lit('r0', 0x400); a.add_r('r0', 'r0', 'r7'); a.strh_i('r1', 'r0', 0)
-a.addi('r6', 2); a.addi('r7', 2); a.alu('cmp', 'r6', 'r5'); a.bc('lo', 'c_laco')
-a.pop(['r5'])
-a.addi('r4', 3); a.subi('r5', 1); a.bc('ne', 'v_laco')
 a.ldr_lit('r4', 0x0600D000); a.ldr_lit('r5', 0x0600D800); a.ldr_lit('r0', 0x6080); a.mov('r1', 0)
 a.label('p_laco')                            # fileiras 0-4 das duas telas do mapa -> blocos 128+i, paleta 6
 a.add_r('r2', 'r0', 'r1'); a.lsl('r3', 'r1', 1)
 a.strh_r('r2', 'r4', 'r3'); a.strh_r('r2', 'r5', 'r3')
 a.addi('r1', 1); a.cmpi('r1', 160); a.bc('lo', 'p_laco')
-a.ldr_lit('r4', 0x0600D000); a.ldr_lit('r5', D_NIVEIS); a.mov('r6', 0)
-a.label('g_laco')                            # vinheta: fileiras 0-13, cada bloco aponta para a cópia do seu nível
-a.h(0x5C00 | 6 << 6 | 5 << 3 | 1)            # ldrb r1, [r5, r6]
-a.cmpi('r1', 0); a.bc('eq', 'g_prox')
-a.lsl('r2', 'r6', 1); a.h(0x5A00 | 2 << 6 | 4 << 3 | 0)   # ldrh r0, [r4, r2]
-lsr(a, 3, 0, 12)
-a.cmpi('r3', 2); a.bc('eq', 'g2'); a.cmpi('r3', 6); a.bc('ne', 'g_prox')
-a.ldr_lit('r7', D_TAB6); a.b('g_set')
-a.label('g2'); a.ldr_lit('r7', D_TAB2)
-a.label('g_set')
-a.h(0x5C00 | 1 << 6 | 7 << 3 | 7)            # ldrb r7, [r7, r1]
-a.lsl('r0', 'r0', 20); lsr(a, 0, 0, 20); a.lsl('r7', 'r7', 12); a.alu('orr', 'r0', 'r7')
-a.h(0x5200 | 2 << 6 | 4 << 3 | 0)            # strh r0, [r4, r2]
-a.label('g_prox')
-a.addi('r6', 1); a.ldr_lit('r0', 14 * 32); a.alu('cmp', 'r6', 'r0'); a.bc('lo', 'g_laco')
 a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r0']); a.bx('r0')
 
 a.label('nuvens')                            # r0 = deslocamento 0..255: desenha os blocos 128..287
@@ -399,7 +356,7 @@ a.pop(['r1', 'r2']); a.movh(8, 'r1'); a.movh(9, 'r2')
 a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r0']); a.bx('r0')
 a.label('c3'); a.bx('r3')
 a.pool()
-code = a.build(); assert D_CODE + len(code) <= D_CASE, hex(len(code))
+code = a.build(); assert D_CODE + len(code) <= D_START, hex(len(code))
 put(D_CODE, code)
 A_TAREFA, A_APLICA, A_NUVENS = a.labels['tarefa'], a.labels['aplica'], a.labels['nuvens']
 
@@ -421,6 +378,7 @@ b.pop(['r4', 'r5']); b.pop(['r0']); b.bx('r0')
 b.label('c3'); b.bx('r3')
 b.pool()
 put(D_START, b.build())
+assert D_START + len(b.build()) <= D_CODE + 0x380
 
 # desvio em DrawMainBattleBackground (0x0803C06C): quando o jogo redesenha o fundo normal (fim de animação de
 # golpe com restorebg, volta da bolsa...), refaz o céu na hora se a tarefa existe e o Distúrbio está em campo
