@@ -15,6 +15,7 @@ D_DRENO, D_DANO, D_CURA, D_FASE = 0x09FEBE00, 0x09FEBF00, 0x09FEBF40, 0x09FEBFC0
 D_TXT, D_PAL, D_ESCURO = 0x09FEE900, 0x09FEE9E0, 0x09FEEA00
 D_ANIM2 = 0x09FEEC80                         # animação geral 62: absorção do Dream Eater (dreno do Distúrbio)
 D_SAI = 0x09FEED00                           # tarefa da saída: a luz volta aos poucos quando o Distúrbio acaba
+D_ROSA, D_ROSA_PAL = 0x09FEEE00, 0x09FEEE60   # tarefa que pinta as bolinhas do dreno de rosa + a paleta rosa
 SAI_QUADROS = 44                             # brilho 5/16 -> 16/16, +1/16 a cada 4 quadros
 # área livre (0xFF) igual nas duas ROMs do Quetzal (a do Coop 3 usa até 0x09FFA31C)
 CASE, NOME_HOOK, SCRIPT, TXT = 0x09FFE000, 0x09FFE080, 0x09FFE100, 0x09FFE200
@@ -285,6 +286,7 @@ D_CODE = 0x09FE4800                          # código (até 0x09FE5FFF)
 D_Q4, D_B4, D_PNUV, D_KQV, D_PFIXO1, D_OUTN = 0x09FE6000, 0x09FE7A40, 0x09FE7A60, 0x09FE7A80, 0x09FE7AC0, 0x09FE7B00
 BUF = 0x0201C000                             # gDecompressionBuffer: cópia dos blocos do terreno enquanto desenha
 OUTS = 0x0201E000                            # tabela de saída do fundo fixo (4 KB, no mesmo rascunho)
+MAPA_COPIA = 0x0201F000                      # cópia do mapa (fileiras 0-13) enquanto a tela fica coberta
 NUV0 = VR.BASE_NUVEM                         # blocos das nuvens 270..419; fundo fixo 0..269
 ESC = struct.unpack('<H', _pal[18:20])[0]
 L1 = VR.lum(ESC); M1 = VR.fator(L1, VR.N_ESC)
@@ -468,6 +470,19 @@ a.ldrh_r('r3', 'r0', 'r2'); a.strh_r('r3', 'r1', 'r2'); a.ldr_lit('r4', 0x400); 
 a.addi('r2', 2); a.cmpi('r2', 12); a.bc('lo', 'p1')
 a.ldr_lit('r0', PAL_FIXO + 12); ldr_sp(a, 1, 0x8C); ldr_sp(a, 2, 0x98); a.mov('r3', VR.N_CHAO); a.bl('rampa')
 a.ldr_lit('r0', D_PNUV); a.mov('r1', VR.PAL_NUVEM * 16); a.mov('r2', 0x20); a.ldr_lit('r3', LOADPAL | 1); a.bl('c3')
+# 7b) o desenho leva vários quadros e a tela está à mostra: antes de mexer nos blocos, o mapa inteiro (fileiras
+#     0-13, as 2 telas) aponta para o bloco 511 todo na cor 2 da paleta 11 (escuro); o mapa certo entra no fim
+a.ldr_lit('r0', 0x0600D000); a.ldr_lit('r1', MAPA_COPIA); a.mov('r2', 0)          # guarda o mapa (fileiras 0-13)
+a.label('cb_cop'); a.ldrh_r('r3', 'r0', 'r2'); a.strh_r('r3', 'r1', 'r2'); a.addi('r2', 2); a.ldr_lit('r3', 14 * 64); a.alu('cmp', 'r2', 'r3'); a.bc('lo', 'cb_cop')
+a.ldr_lit('r0', 0x06008000 + 511 * 32); a.ldr_lit('r1', 0x22222222); a.mov('r2', 0)
+a.label('cb_blo'); a.h(0x5000 | 2 << 6 | 0 << 3 | 1); a.addi('r2', 4); a.cmpi('r2', 32); a.bc('lo', 'cb_blo')   # str r1, [r0, r2]
+a.ldr_lit('r0', 0x0600D000); a.ldr_lit('r1', VR.PAL_FIXO << 12 | 511); a.mov('r2', 0)
+a.label('cb_map'); a.lsl('r3', 'r2', 1); a.strh_r('r1', 'r0', 'r3')
+a.addi('r2', 1)
+a.ldr_lit('r3', 14 * 32); a.alu('cmp', 'r2', 'r3'); a.bc('lo', 'cb_map')
+a.ldr_lit('r0', 0x0600D800); a.mov('r2', 0)
+a.label('cb_map2'); a.lsl('r3', 'r2', 1); a.strh_r('r1', 'r0', 'r3')
+a.addi('r2', 1); a.ldr_lit('r3', 14 * 32); a.alu('cmp', 'r2', 'r3'); a.bc('lo', 'cb_map2')
 # 8) por cor da paleta 2: LMM = lum * m, BASE, MAX
 a.mov('r6', 0)
 a.label('l_laco')
@@ -509,7 +524,7 @@ a.label('t_lin')
 a.mov('r0', 0); str_sp(a, 0, 0x8C)
 a.label('t_col')
 ldr_sp(a, 0, 0x88); a.lsl('r0', 'r0', 5); ldr_sp(a, 1, 0x8C); a.add_r('r0', 'r0', 'r1'); a.lsl('r0', 'r0', 1)
-a.ldr_lit('r1', 0x0600D000); a.ldrh_r('r0', 'r1', 'r0'); str_sp(a, 0, 0x94)
+a.ldr_lit('r1', MAPA_COPIA); a.ldrh_r('r0', 'r1', 'r0'); str_sp(a, 0, 0x94)   # mapa original (o da tela já está coberto)
 a.mov('r0', 0); str_sp(a, 0, 0x9C)
 a.label('t_y')
 ldr_sp(a, 0, 0x88); a.lsl('r0', 'r0', 3); ldr_sp(a, 1, 0x9C); a.add_r('r2', 'r0', 'r1')            # r2 = y
@@ -544,6 +559,11 @@ ldr_sp(a, 0, 0x98); a.addi('r0', 32); str_sp(a, 0, 0x98)
 ldr_sp(a, 0, 0x8C); a.addi('r0', 1); str_sp(a, 0, 0x8C); a.cmpi('r0', VR.COLS); a.bfar('lo', 't_col')
 ldr_sp(a, 0, 0x88); a.addi('r0', 1); str_sp(a, 0, 0x88); a.cmpi('r0', VR.LIN_NUVEM + VR.LIN_FIXO); a.bfar('lo', 't_lin')
 pool_aqui(a, 'pp6')
+# 11) nuvens: as 5 fileiras
+a.mov('r4', 0)
+a.label('nv')
+a.h(0x1C20); ldr_sp(a, 1, 0xA4); a.mov('r2', 0); a.mov('r3', VR.COLS); a.bl('nuvem_linha')
+a.addi('r4', 1); a.cmpi('r4', VR.LIN_NUVEM); a.bc('lo', 'nv')
 # 10) mapa: fileiras 0-4 nuvens (paleta 7), 5-13 fundo fixo (paleta 11); colunas 30-31 repetem a 0; as 2 telas
 a.ldr_lit('r4', 0x0600D000); a.mov('r5', 0)
 a.label('mp_lin')
@@ -561,11 +581,6 @@ a.lsl('r1', 'r5', 6); a.lsl('r2', 'r6', 1); a.add_r('r1', 'r1', 'r2'); a.h(0x520
 a.ldr_lit('r2', 0x800); a.add_r('r1', 'r1', 'r2'); a.h(0x5200 | 1 << 6 | 4 << 3 | 0)
 a.addi('r6', 1); a.cmpi('r6', 32); a.bc('lo', 'mp_col')
 a.addi('r5', 1); a.cmpi('r5', VR.LIN_NUVEM + VR.LIN_FIXO); a.bc('lo', 'mp_lin')
-# 11) nuvens: as 5 fileiras
-a.mov('r4', 0)
-a.label('nv')
-a.h(0x1C20); ldr_sp(a, 1, 0xA4); a.mov('r2', 0); a.mov('r3', VR.COLS); a.bl('nuvem_linha')
-a.addi('r4', 1); a.cmpi('r4', VR.LIN_NUVEM); a.bc('lo', 'nv')
 a.h(0xB000 | 0xA0 >> 2)                      # add sp, #0xA0
 a.pop(['r1']); a.movh(11, 'r1')
 a.pop(['r0', 'r1', 'r2', 'r3']); a.movh(8, 'r1'); a.movh(9, 'r2'); a.movh(10, 'r3')
@@ -743,8 +758,34 @@ put(0x081D5BCC, bytes.fromhex('bb20'))         # limite do número do texto: 744
 _de = w32(0x0846AB1C + 4 * 138) - 0x08000000
 _de = bytearray(ROM[_de:_de + 0x6A])
 assert _de[0x0E:0x13] == b'\x0e' + p32(0x0849DAC3) and _de[0x64:0x69] == b'\x0e' + p32(0x0849DACF) and _de[0x69] == 0x08
-_ret = D_ANIM2 + 7 + len(_de)                # "return" logo depois do script: as duas chamadas não fazem nada
+_ret = D_ANIM2 + 7 + 7 + len(_de)            # "return" logo depois do script: as duas chamadas não fazem nada
 _de[0x0E:0x13] = b'\x0e' + p32(_ret); _de[0x64:0x69] = b'\x0e' + p32(_ret)
+# as bolinhas (tag 0x27A3) usam as cores 1-7, laranja/amarelo; no Dream Eater elas parecem rosadas por estarem meio
+# transparentes em cima do fundo roxo. Sem o fundo, uma tarefa troca essas cores por rosa logo depois de carregar.
+TAG_BOLINHA = 0x27A3
+_pb = w32(0x09128CD8)                        # paleta das bolinhas (tabela de paletas de animação, tag 0x27A3)
+assert struct.unpack_from('<H', ROM, 0x09128CDC - 0x08000000)[0] == TAG_BOLINHA
+_pb = bytearray(lz77(ROM, _pb - 0x08000000)[0][:32])
+for _k, _c in enumerate([(31, 9, 13), (31, 11, 16), (31, 14, 18), (31, 17, 21), (31, 20, 24), (31, 23, 27), (31, 26, 29)]):
+    struct.pack_into('<H', _pb, 2 * (_k + 1), _c[0] | _c[1] << 5 | _c[2] << 10)
+put(D_ROSA_PAL, bytes(_pb))
+a = Asm(D_ROSA)
+a.push(['r4'], lr=True)
+a.h(0x1C04)                                  # r4 = taskId
+a.ldr_lit('r1', 0x03000CF0); a.mov('r2', 0); a.ldr_lit('r0', TAG_BOLINHA)
+a.label('laco'); a.ldr_i('r3', 'r1', 0); a.alu('cmp', 'r3', 'r0'); a.bc('eq', 'achou')
+a.addi('r1', 4); a.addi('r2', 1); a.cmpi('r2', 16); a.bc('lo', 'laco'); a.b('fim')
+a.label('achou')
+a.lsl('r1', 'r2', 4); a.addi('r1', 0x80); a.addi('r1', 0x80)                 # 0x100 + vaga*16
+a.ldr_lit('r0', D_ROSA_PAL); a.mov('r2', 0x20); a.ldr_lit('r3', LOADPAL | 1); a.bl('c3')
+a.label('fim')
+a.h(0x1C20); a.ldr_lit('r3', 0x080F43A9); a.bl('c3')                         # DestroyAnimVisualTask
+a.pop(['r4']); a.pop(['r0']); a.bx('r0')
+a.label('c3'); a.bx('r3')
+a.pool()
+put(D_ROSA, a.build())
+_de[6:6] = b'\x03' + p32(D_ROSA | 1) + b'\x05\x00'     # depois dos 2 loadspritegfx
+assert len(_de) + 7 + 1 <= 0x80
 put(D_ANIM2, bytes.fromhex('03817c1f080500') + bytes(_de) + b'\x0f')
 
 # 1/8 da vida máxima do alvo em gBattleMoveDamage (mínimo 1); callnative: avança 5 bytes
