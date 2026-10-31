@@ -219,6 +219,8 @@ put(MOVES_ANIM + 4 * RAZOR, p32(RL_SCRIPT))
 # (DrawMainBattleBackground) quando nenhum Dusknoir com Distúrbio está em campo.
 GTASKS, BATTLE_CB2, DRAWBG, CREATETASK, DESTROYTASK, LOADPAL = 0x03005640, 0x0803F431, 0x0803C06C, 0x080FADB0, 0x080FAE9C, 0x080F196C
 D_START = D_CODE + 0x300
+PLTT_BASE = 0x020391FC                       # gPlttBufferUnfaded (o Faded fica 0x400 depois)
+PENUMBRA = 9                                 # chão com 9/16 do brilho
 from lz import lz77 as _lz
 _bg = [w32(0x09129530 + 12 * 73 + 4 * k) - 0x08000000 for k in range(3)]
 _tiles = _lz(ROM, _bg[0])[0]; _pal = _lz(ROM, _bg[1])[0]; _map = _lz(ROM, _bg[2])[0]
@@ -304,11 +306,22 @@ a.addi('r1', 1); a.alu('cmp', 'r1', 'r2'); a.bc('lo', 'm_px')
 a.addi('r4', 2); a.subi('r6', 1); a.bc('ne', 'm_laco')
 a.ldr_lit('r0', D_PAL); a.mov('r1', 0x60); a.mov('r2', 0x20); a.ldr_lit('r3', LOADPAL | 1); a.bl('c3')   # paleta 6
 a.mov('r6', 1)
-a.label('e_laco')                            # essas cores (menos a 0) viram escuro na paleta 2
+a.label('e_laco')                            # paleta 2: cores do céu -> escuro; as outras (chão) -> 9/16 (penumbra)
 a.h(0x1C28); a.h(0x40C0 | 6 << 3 | 0)        # r0 = r5 >> r6
-a.mov('r1', 1); a.alu('tst', 'r0', 'r1'); a.bc('eq', 'e_prox')
-a.ldr_lit('r0', D_ESCURO); a.mov('r1', 0x20); a.add_r('r1', 'r1', 'r6'); a.mov('r2', 2); a.ldr_lit('r3', LOADPAL | 1); a.bl('c3')
-a.label('e_prox'); a.addi('r6', 1); a.cmpi('r6', 16); a.bc('lo', 'e_laco')
+a.mov('r1', 1); a.alu('tst', 'r0', 'r1'); a.bc('eq', 'e_chao')
+a.ldr_lit('r0', D_ESCURO); a.ldrh_i('r0', 'r0', 0); a.b('e_grava')
+a.label('e_chao')
+a.lsl('r4', 'r6', 1); a.ldr_lit('r7', PLTT_BASE + 0x40); a.add_r('r4', 'r4', 'r7'); a.ldrh_i('r0', 'r4', 0)
+a.mov('r1', 31); a.alu('and_', 'r1', 'r0')
+lsr(a, 2, 0, 5); a.mov('r3', 31); a.alu('and_', 'r2', 'r3')
+lsr(a, 3, 0, 10); a.mov('r7', 31); a.alu('and_', 'r3', 'r7')
+a.mov('r7', PENUMBRA); a.alu('mul', 'r1', 'r7'); a.alu('mul', 'r2', 'r7'); a.alu('mul', 'r3', 'r7')
+lsr(a, 1, 1, 4); lsr(a, 2, 2, 4); lsr(a, 3, 3, 4)
+a.lsl('r2', 'r2', 5); a.lsl('r3', 'r3', 10); a.alu('orr', 'r1', 'r2'); a.alu('orr', 'r1', 'r3'); a.h(0x1C08)   # r0 = r1
+a.label('e_grava')                           # grava nas cores base e nas exibidas (como o LoadPalette)
+a.lsl('r4', 'r6', 1); a.ldr_lit('r7', PLTT_BASE + 0x40); a.add_r('r4', 'r4', 'r7'); a.strh_i('r0', 'r4', 0)
+a.ldr_lit('r7', 0x400); a.add_r('r4', 'r4', 'r7'); a.strh_i('r0', 'r4', 0)
+a.addi('r6', 1); a.cmpi('r6', 16); a.bc('lo', 'e_laco')
 a.ldr_lit('r4', 0x0600D000); a.ldr_lit('r5', 0x0600D800); a.ldr_lit('r0', 0x6080); a.mov('r1', 0)
 a.label('p_laco')                            # fileiras 0-4 das duas telas do mapa -> blocos 128+i, paleta 6
 a.add_r('r2', 'r0', 'r1'); a.lsl('r3', 'r1', 1)
@@ -357,7 +370,9 @@ b.ldr_i('r3', 'r1', 0); b.alu('cmp', 'r3', 'r5'); b.bc('eq', 'existe')
 b.label('prox'); b.addi('r1', 40); b.addi('r2', 1); b.cmpi('r2', 16); b.bc('lo', 'laco')
 b.h(0x1C28); b.mov('r1', 3); b.ldr_lit('r3', CREATETASK | 1); b.bl('c3')
 b.label('existe')
-b.bl(A_APLICA); b.mov('r0', 0); b.bl(A_NUVENS)
+b.bl(a.labels['marca']); b.cmpi('r0', 0); b.bc('ne', 'ja')     # já aplicado: não escurece de novo
+b.bl(A_APLICA)
+b.label('ja'); b.mov('r0', 0); b.bl(A_NUVENS)
 b.h(0x1C20); b.ldr_lit('r3', 0x080F43A9); b.bl('c3')                # DestroyAnimVisualTask
 b.pop(['r4', 'r5']); b.pop(['r0']); b.bx('r0')
 b.label('c3'); b.bx('r3')
