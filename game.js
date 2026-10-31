@@ -1071,7 +1071,7 @@ function quetzalTipos(rom) {
   return changed;
 }
 // Pokémon Quetzal: habilidade nova 319 "Nuvem Tóxica": ao entrar na batalha mostra o balão da habilidade, toca a
-// animação do Haze em roxo (neblina roxa, os Pokémon viram silhuetas roxas) e envenena
+// animação do Haze em roxo (neblina roxa, os Pokémon viram silhuetas roxas), envenena (e tem a Merciless escondida)
 // todos os adversários (o próprio jogo confere imunidade: tipos Poison/Steel, Immunity, já com status, Safeguard...).
 // Molde: o caso da Intimidate no switch "ao entrar" (tabela 0x08052608, índice habilidade-2, até a 309) e o script
 // dela (0x084B18F8). A tabela é copiada para 0x09FFE400 indo até a 319; GetAbilityName (0x080A5628) desvia para
@@ -1086,6 +1086,10 @@ const QZ_NUVEM = {
     [0x247C4C, "b0715308", "00eaff09"], [0x284704, "b0715308", "00eaff09"], [0x284748, "b0715308", "00eaff09"],
     [0x297700, "ac765308", "00f0ff09"],
     [0xF40AC, "e8b94608", "00f6ff09"],                   // animações gerais -> 0x09FFF600 (com a 60, "Haze roxo")
+    // a Nuvem Tóxica também tem o efeito da Merciless (crítico garantido em alvo envenenado), sem mostrar: o teste da
+    // Merciless no cálculo de crítico (0x0806DB9C) reescrito no mesmo espaço para aceitar 196 ou 319
+    [0x6DB98, "0b4b9c460898c42814d17800c0194001614650314018006888210840002809d0",
+              "0b4b9c460898c42802d0ff38402811d17800c0194001c018006d8821084009d0"],
     // Arboliva (espécie 1259) é a dona da Nuvem Tóxica: Seed Sower/-/Harvest -> Nuvem Tóxica nas 3, e o desenho novo
     // do usuário (folhas roxas pontiagudas, tronco magenta): imagem de frente e paleta (a de costas usa a mesma paleta)
     [0x553D28, "0d0100008b00", "3f013f013f01"],
