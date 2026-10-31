@@ -191,10 +191,10 @@ a.label('fim')
 a.h(0x1C30)                          # add r0, r6, #0
 a.ldr_lit('r3', 0x080F43A9); a.bl('c3')               # DestroyAnimVisualTask
 a.pop(['r4', 'r5', 'r6']); a.pop(['r0']); a.bx('r0')
-a.label('acha')                      # r0 = tag -> r0 = vaga em sSpritePaletteTags (0x030009FE) ou 16
-a.ldr_lit('r1', 0x030009FE); a.mov('r2', 0)
-a.label('laco'); a.ldrh_i('r3', 'r1', 0); a.alu('cmp', 'r3', 'r0'); a.bc('eq', 'achou')
-a.addi('r1', 2); a.addi('r2', 1); a.cmpi('r2', 16); a.bc('lo', 'laco')
+a.label('acha')                      # r0 = tag -> r0 = vaga em sSpritePaletteTags (0x03000CF0, u32 cada) ou 16
+a.ldr_lit('r1', 0x03000CF0); a.mov('r2', 0)          # (o FreeAllSpritePalettes 0x08009604 zera essa lista)
+a.label('laco'); a.ldr_i('r3', 'r1', 0); a.alu('cmp', 'r3', 'r0'); a.bc('eq', 'achou')
+a.addi('r1', 4); a.addi('r2', 1); a.cmpi('r2', 16); a.bc('lo', 'laco')
 a.label('achou'); a.h(0x1C10); a.bx('lr')            # add r0, r2, #0
 a.label('c3'); a.bx('r3')
 a.pool()
