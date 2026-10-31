@@ -213,9 +213,9 @@ put(MOVES_ANIM + 4 * RAZOR, p32(RL_SCRIPT))
 
 # --- Distúrbio (habilidade 320, Dusknoir): ao entrar a terra treme (tremor do Earthquake) e, enquanto ele estiver
 # em campo, o céu da batalha vira as nuvens escuras do fundo de animação 73 (as nuvens andam; o chão fica).
-# O céu = fileiras 0-4 do mapa do fundo (BG3, mapa 0x0600D000, blocos em 0x06008000) apontando para 160 blocos
-# novos (128..287, paleta 6) desenhados a partir de uma faixa 256x40; as cores das listras do céu na paleta 2
-# viram escuro. Uma tarefa (CreateTask) refaz isso quando um golpe troca o fundo e devolve o normal
+# O fundo visível (BG3, 30x14 blocos) é redesenhado pixel a pixel: nuvens do fundo 73 (fileiras 0-4, refeitas uma
+# por vez para andarem) e o terreno em penumbra (fileiras 5-13), com uma vinheta suave (brilho por pixel, rampas de
+# tons e pontilhado fino entre tons vizinhos; modelo em vinheta_ref.py). Uma tarefa (CreateTask) refaz isso quando um golpe troca o fundo e devolve o normal
 # (DrawMainBattleBackground) quando nenhum Dusknoir com Distúrbio está em campo.
 GTASKS, BATTLE_CB2, DRAWBG, CREATETASK, DESTROYTASK, LOADPAL = 0x03005640, 0x0803F431, 0x0803C06C, 0x080FADB0, 0x080FAE9C, 0x080F196C
 D_START = D_CODE + 0x300
@@ -241,6 +241,57 @@ put(D_PAL, _pal[:32])
 put(D_ESCURO, _pal[18:20])                   # cor 9 do fundo 73 (o escuro de baixo das nuvens)
 
 def lsr(a, d, m, imm): a.h(0x0800 | imm << 6 | m << 3 | d)
+def ldr_sp(a, d, off): a.h(0x9800 | d << 8 | off >> 2)
+def str_sp(a, d, off): a.h(0x9000 | d << 8 | off >> 2)
+def add_sp(a, d, off): a.h(0xA800 | d << 8 | off >> 2)      # rd = sp + off
+def swi_div(a): a.h(0xDF06)                                 # BIOS Div: r0 = r0 / r1 (estraga r1, r3)
+
+def pool_aqui(a, nome):
+    """constantes no meio do código (o ldr de constante só alcança 1 KB)"""
+    a.b(nome); a.pool(); a.label(nome)
+
+def oito_px_p(a):
+    """8 pixels: r6 = linha combinada (nível*16 + pontilhado) por pixel, r2 = tabela de saída, r3 = 8 cores -> r4"""
+    a.mov('r4', 0)
+    for xx in range(8):
+        a.ldrb_i('r0', 'r6', xx); a.lsl('r0', 'r0', 4)
+        a.lsl('r1', 'r3', 28); lsr(a, 1, 1, 28); a.add_r('r0', 'r0', 'r1')
+        if xx < 7: lsr(a, 3, 3, 4)
+        a.h(0x5C00 | 0 << 6 | 2 << 3 | 0)    # ldrb r0, [r2, r0]
+        if xx: a.lsl('r0', 'r0', 4 * xx)
+        a.alu('orr', 'r4', 'r0')
+
+def oito_px(a, dec):
+    """8 pixels: r6 = tabela de níveis (dec: aponta 7 antes), r7 = pontilhado da linha, r2 = tabela de saída,
+    r3 = 8 cores de origem (pixel 0 nos 4 bits baixos) -> r4 = linha do bloco"""
+    a.mov('r4', 0)
+    for xx in range(8):
+        a.ldrb_i('r0', 'r6', 7 - xx if dec else xx); a.lsl('r0', 'r0', 4)
+        a.ldrb_i('r1', 'r7', xx & 3); a.add_r('r0', 'r0', 'r1'); a.lsl('r0', 'r0', 4)
+        a.lsl('r1', 'r3', 28); lsr(a, 1, 1, 28); a.add_r('r0', 'r0', 'r1')
+        if xx < 7: lsr(a, 3, 3, 4)
+        a.h(0x5C00 | 0 << 6 | 2 << 3 | 0)    # ldrb r0, [r2, r0]
+        if xx: a.lsl('r0', 'r0', 4 * xx)
+        a.alu('orr', 'r4', 'r0')
+
+# --- vinheta pixel a pixel (modelo em vinheta_ref.py, mesma conta inteira)
+import vinheta_ref as VR
+D_CODE = 0x09FE4800                          # código (até 0x09FE5FFF)
+D_Q4, D_B4, D_PNUV, D_KQV, D_PFIXO1, D_OUTN = 0x09FE6000, 0x09FE7A40, 0x09FE7A60, 0x09FE7A80, 0x09FE7AC0, 0x09FE7B00
+BUF = 0x0201C000                             # gDecompressionBuffer: cópia dos blocos do terreno enquanto desenha
+OUTS = 0x0201E000                            # tabela de saída do fundo fixo (4 KB, no mesmo rascunho)
+NUV0 = VR.BASE_NUVEM                         # blocos das nuvens 270..419; fundo fixo 0..269
+ESC = struct.unpack('<H', _pal[18:20])[0]
+L1 = VR.lum(ESC); M1 = VR.fator(L1, VR.N_ESC)
+put(D_Q4, VR.tabela_quarto4()); put(D_B4, bytes(VR.B4)); put(D_KQV, bytes(VR.KQV))
+_pn, _lm0 = VR.nuvem_dados(bytes(faixa), _pal[:32])
+put(D_PNUV, struct.pack('<16H', *_pn))
+put(D_OUTN, VR.tabela_saida([(l, 1, 14) for l in _lm0]))
+D_PNV = 0x09FE8C00                          # linha da tabela de saída por pixel da área das nuvens (240x40)
+put(D_PNV, bytes(VR.kql_esp(VR.tabela_quarto4(), x, y) * 16 + VR.B4[(y & 3) * 4 + (x & 3)] for y in range(40) for x in range(240)))
+put(D_PFIXO1, struct.pack('<6H', 0, *VR.rampa(ESC, L1, VR.N_ESC)))
+PAL_FIXO = PLTT_BASE + VR.PAL_FIXO * 32
+
 a = Asm(D_CODE)
 a.label('tarefa')                            # tarefa permanente (r0 = id)
 a.push(['r4', 'r5', 'r6', 'r7'], lr=True)
@@ -259,12 +310,17 @@ a.label('presente')
 a.bl('embatalha'); a.cmpi('r0', 0); a.bc('eq', 'mata')
 a.bl('pode'); a.cmpi('r0', 0); a.bc('eq', 'fim')
 a.bl('marca'); a.cmpi('r0', 0); a.bc('ne', 'anda')
-a.bl('aplica'); a.ldrh_i('r0', 'r6', 8); a.bl('nuvens'); a.b('fim')
-a.label('anda')
-a.ldrh_i('r0', 'r6', 10); a.addi('r0', 1); a.strh_i('r0', 'r6', 10)
-a.mov('r1', 3); a.alu('and_', 'r0', 'r1'); a.bc('ne', 'fim')     # anda 1 pixel a cada 4 quadros
-a.ldrh_i('r0', 'r6', 8); a.addi('r0', 1); a.mov('r1', 0xFF); a.alu('and_', 'r0', 'r1'); a.strh_i('r0', 'r6', 8)
-a.bl('nuvens')
+a.ldrh_i('r0', 'r6', 8); a.bl('aplica'); a.b('fim')
+a.label('anda')                              # 1/3 de fileira de nuvens por quadro (10 blocos); 15 quadros = 1 pixel
+a.ldrh_i('r0', 'r6', 12); a.addi('r0', 1); a.cmpi('r0', 3); a.bc('lo', 'a_parte')     # +12 = terço (0..2)
+a.mov('r0', 0)
+a.ldrh_i('r1', 'r6', 10); a.addi('r1', 1); a.cmpi('r1', 5); a.bc('lo', 'a_fil')       # +10 = fileira (0..4)
+a.mov('r1', 0)
+a.ldrh_i('r2', 'r6', 8); a.addi('r2', 1); a.mov('r3', 0xFF); a.alu('and_', 'r2', 'r3'); a.strh_i('r2', 'r6', 8)   # +8 = deslocamento
+a.label('a_fil'); a.strh_i('r1', 'r6', 10)
+a.label('a_parte'); a.strh_i('r0', 'r6', 12)
+a.mov('r2', 10); a.alu('mul', 'r2', 'r0'); a.h(0x1C13); a.addi('r3', 10)                # colunas terço*10 .. +10
+a.ldrh_i('r0', 'r6', 10); a.ldrh_i('r1', 'r6', 8); a.bl('nuvem_linha')
 a.label('fim')
 a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r0']); a.bx('r0')
 
@@ -275,8 +331,9 @@ a.mov('r0', 1); a.bx('lr')
 a.label('nao'); a.mov('r0', 0); a.bx('lr')
 a.label('embatalha')                         # gMain.inBattle (0x03002660 + 0x439, bit 1)
 a.ldr_lit('r0', 0x03002A99); a.ldrb_i('r0', 'r0', 0); a.mov('r1', 2); a.alu('and_', 'r0', 'r1'); a.bx('lr')
-a.label('marca')                             # 1 se o céu escuro está no mapa
-a.ldr_lit('r0', 0x0600D000); a.ldrh_i('r0', 'r0', 0); a.ldr_lit('r1', 0x6080); a.alu('cmp', 'r0', 'r1'); a.bc('ne', 'nao')
+a.label('marca')                             # 1 se o céu escuro está no mapa (bloco 270 no canto)
+a.ldr_lit('r0', 0x0600D000); a.ldrh_i('r0', 'r0', 0); a.lsl('r0', 'r0', 22); lsr(a, 0, 0, 22)
+a.ldr_lit('r1', NUV0); a.alu('cmp', 'r0', 'r1'); a.bc('ne', 'nao')
 a.mov('r0', 1); a.bx('lr')
 a.label('tem')                               # 1 se algum batalhador tem Distúrbio e vida
 a.ldr_lit('r0', 0x0806DBC8); a.ldr_i('r0', 'r0', 0)
@@ -288,28 +345,38 @@ a.ldrh_i('r3', 'r0', 0x20); a.alu('cmp', 'r3', 'r2'); a.bc('ne', 't_prox')
 a.ldrh_i('r3', 'r0', 0x2A); a.cmpi('r3', 0); a.bc('ne', 't_sim')
 a.label('t_prox'); a.addi('r0', 0x60); a.subi('r1', 1); a.b('t_laco')
 a.label('t_sim'); a.mov('r0', 1); a.bx('lr')
+a.label('c3'); a.bx('r3')
+a.pool()
 
+# ---------------- aplica(r0 = deslocamento das nuvens): desenha o fundo inteiro com a vinheta
+# quadro na pilha: 0x00 cnt[16] u16, 0x20 LMM[16] u32, 0x60 BASE[16], 0x70 MAX[16], 0x80 máscara do céu,
+# 0x88.. temporários; 0xA0 r11 salvo, 0xA4 deslocamento, 0xA8.. r8-r10
 a.label('aplica')
 a.push(['r4', 'r5', 'r6', 'r7'], lr=True)
+a.movh('r1', 8); a.movh('r2', 9); a.movh('r3', 10); a.push(['r0', 'r1', 'r2', 'r3'])
+a.movh('r1', 11); a.push(['r1'])
+a.h(0xB080 | 0xA0 >> 2)                      # sub sp, #0xA0
+# 1) máscara das cores do céu (blocos das fileiras 0-4 do terreno)
 a.ldr_lit('r4', 0x0600D000); a.mov('r5', 0); a.mov('r6', 160)
-a.label('m_laco')                            # cores usadas pelos blocos das fileiras 0-4 (o céu)
+a.label('m_laco')
 a.ldrh_i('r0', 'r4', 0); a.lsl('r0', 'r0', 22); lsr(a, 0, 0, 17)
 a.ldr_lit('r1', 0x06008000); a.add_r('r1', 'r1', 'r0')
-a.h(0x1C0A); a.addi('r2', 32)                # add r2, r1, #0 ; +32
+a.h(0x1C0A); a.addi('r2', 32)
 a.label('m_px')
 a.ldrb_i('r3', 'r1', 0)
 a.mov('r7', 15); a.alu('and_', 'r7', 'r3')
-a.mov('r0', 1); a.h(0x4080 | 7 << 3 | 0); a.alu('orr', 'r5', 'r0')     # lsl r0, r7
+a.mov('r0', 1); a.h(0x4080 | 7 << 3 | 0); a.alu('orr', 'r5', 'r0')
 lsr(a, 7, 3, 4)
 a.mov('r0', 1); a.h(0x4080 | 7 << 3 | 0); a.alu('orr', 'r5', 'r0')
 a.addi('r1', 1); a.alu('cmp', 'r1', 'r2'); a.bc('lo', 'm_px')
 a.addi('r4', 2); a.subi('r6', 1); a.bc('ne', 'm_laco')
-a.ldr_lit('r0', D_PAL); a.mov('r1', 0x60); a.mov('r2', 0x20); a.ldr_lit('r3', LOADPAL | 1); a.bl('c3')   # paleta 6
+str_sp(a, 5, 0x80)
+# 2) paleta 2: cores do céu -> escuro, chão -> 9/16 (penumbra); é a base das cores
 a.mov('r6', 1)
-a.label('e_laco')                            # paleta 2: cores do céu -> escuro; as outras (chão) -> 9/16 (penumbra)
-a.h(0x1C28); a.h(0x40C0 | 6 << 3 | 0)        # r0 = r5 >> r6
+a.label('e_laco')
+a.h(0x1C28); a.h(0x40C0 | 6 << 3 | 0)
 a.mov('r1', 1); a.alu('tst', 'r0', 'r1'); a.bc('eq', 'e_chao')
-a.ldr_lit('r0', D_ESCURO); a.ldrh_i('r0', 'r0', 0); a.b('e_grava')
+a.ldr_lit('r0', ESC); a.b('e_grava')
 a.label('e_chao')
 a.lsl('r4', 'r6', 1); a.ldr_lit('r7', PLTT_BASE + 0x40); a.add_r('r4', 'r4', 'r7'); a.ldrh_i('r0', 'r4', 0)
 a.mov('r1', 31); a.alu('and_', 'r1', 'r0')
@@ -317,48 +384,254 @@ lsr(a, 2, 0, 5); a.mov('r3', 31); a.alu('and_', 'r2', 'r3')
 lsr(a, 3, 0, 10); a.mov('r7', 31); a.alu('and_', 'r3', 'r7')
 a.mov('r7', PENUMBRA); a.alu('mul', 'r1', 'r7'); a.alu('mul', 'r2', 'r7'); a.alu('mul', 'r3', 'r7')
 lsr(a, 1, 1, 4); lsr(a, 2, 2, 4); lsr(a, 3, 3, 4)
-a.lsl('r2', 'r2', 5); a.lsl('r3', 'r3', 10); a.alu('orr', 'r1', 'r2'); a.alu('orr', 'r1', 'r3'); a.h(0x1C08)   # r0 = r1
-a.label('e_grava')                           # grava nas cores base e nas exibidas (como o LoadPalette)
+a.lsl('r2', 'r2', 5); a.lsl('r3', 'r3', 10); a.alu('orr', 'r1', 'r2'); a.alu('orr', 'r1', 'r3'); a.h(0x1C08)
+a.label('e_grava')
 a.lsl('r4', 'r6', 1); a.ldr_lit('r7', PLTT_BASE + 0x40); a.add_r('r4', 'r4', 'r7'); a.strh_i('r0', 'r4', 0)
 a.ldr_lit('r7', 0x400); a.add_r('r4', 'r4', 'r7'); a.strh_i('r0', 'r4', 0)
 a.addi('r6', 1); a.cmpi('r6', 16); a.bc('lo', 'e_laco')
-a.ldr_lit('r4', 0x0600D000); a.ldr_lit('r5', 0x0600D800); a.ldr_lit('r0', 0x6080); a.mov('r1', 0)
-a.label('p_laco')                            # fileiras 0-4 das duas telas do mapa -> blocos 128+i, paleta 6
-a.add_r('r2', 'r0', 'r1'); a.lsl('r3', 'r1', 1)
-a.strh_r('r2', 'r4', 'r3'); a.strh_r('r2', 'r5', 'r3')
-a.addi('r1', 1); a.cmpi('r1', 160); a.bc('lo', 'p_laco')
+pool_aqui(a, 'pp1')
+# 3) copia os blocos do terreno (8 KB) para o rascunho
+a.ldr_lit('r0', 0x06008000); a.ldr_lit('r1', BUF); a.ldr_lit('r2', 0x06008000 + 0x2000)
+a.label('cp')
+a.ldr_i('r3', 'r0', 0); a.str_i('r3', 'r1', 0); a.addi('r0', 4); a.addi('r1', 4); a.alu('cmp', 'r0', 'r2'); a.bc('lo', 'cp')
+# 4) conta as cores nas fileiras 5-13, colunas 0-29
+a.mov('r0', 0); a.mov('r1', 0)
+a.label('z')
+a.movh('r2', 13); a.add_r('r2', 'r2', 'r1'); a.str_i('r0', 'r2', 0); a.addi('r1', 4); a.cmpi('r1', 0x20); a.bc('lo', 'z')
+a.ldr_lit('r4', 0x0600D000 + 5 * 64); a.mov('r5', VR.LIN_FIXO)
+a.label('c_lin'); a.mov('r6', 0)
+a.label('c_col')
+a.lsl('r0', 'r6', 1); a.ldrh_r('r0', 'r4', 'r0'); a.lsl('r0', 'r0', 22); lsr(a, 0, 0, 17)
+a.ldr_lit('r1', BUF); a.add_r('r1', 'r1', 'r0'); a.h(0x1C0A); a.addi('r2', 32)
+a.label('c_px')
+a.ldrb_i('r3', 'r1', 0)
+a.mov('r7', 15); a.alu('and_', 'r7', 'r3'); a.lsl('r7', 'r7', 1)
+a.movh('r0', 13); a.add_r('r0', 'r0', 'r7'); a.ldrh_i('r7', 'r0', 0); a.addi('r7', 1); a.strh_i('r7', 'r0', 0)
+lsr(a, 7, 3, 4); a.lsl('r7', 'r7', 1)
+a.movh('r0', 13); a.add_r('r0', 'r0', 'r7'); a.ldrh_i('r7', 'r0', 0); a.addi('r7', 1); a.strh_i('r7', 'r0', 0)
+a.addi('r1', 1); a.alu('cmp', 'r1', 'r2'); a.bc('lo', 'c_px')
+a.addi('r6', 1); a.cmpi('r6', VR.COLS); a.bc('lo', 'c_col')
+a.addi('r4', 64); a.subi('r5', 1); a.bc('ne', 'c_lin')
+pool_aqui(a, 'pp2')
+# 5) cor média e brilho máximo do chão (cores fora do céu, menos a 0)
+a.mov('r0', 0)
+for off in (0x88, 0x8C, 0x90, 0x94, 0x98): str_sp(a, 0, off)
+a.mov('r6', 0)
+a.label('k_laco')
+a.cmpi('r6', 0); a.bc('eq', 'k_prox')
+ldr_sp(a, 0, 0x80); a.h(0x40C0 | 6 << 3 | 0); a.mov('r1', 1); a.alu('tst', 'r0', 'r1'); a.bc('ne', 'k_prox')
+a.lsl('r1', 'r6', 1); a.movh('r0', 13); a.add_r('r0', 'r0', 'r1'); a.ldrh_i('r5', 'r0', 0)
+a.cmpi('r5', 0); a.bc('eq', 'k_prox')
+a.lsl('r1', 'r6', 1); a.ldr_lit('r0', PLTT_BASE + 0x40); a.add_r('r0', 'r0', 'r1'); a.ldrh_i('r4', 'r0', 0)
+ldr_sp(a, 0, 0x88); a.add_r('r0', 'r0', 'r5'); str_sp(a, 0, 0x88)
+for sh, off in ((0, 0x8C), (5, 0x90), (10, 0x94)):
+    if sh: lsr(a, 1, 4, sh)
+    else: a.h(0x1C21)                        # add r1, r4, #0
+    a.mov('r2', 31); a.alu('and_', 'r1', 'r2'); a.alu('mul', 'r1', 'r5')
+    ldr_sp(a, 0, off); a.add_r('r0', 'r0', 'r1'); str_sp(a, 0, off)
+a.mov('r1', 31); a.alu('and_', 'r1', 'r4')
+lsr(a, 2, 4, 5); a.mov('r3', 31); a.alu('and_', 'r2', 'r3'); a.add_r('r1', 'r1', 'r2')
+lsr(a, 2, 4, 10); a.alu('and_', 'r2', 'r3'); a.add_r('r1', 'r1', 'r2')
+ldr_sp(a, 0, 0x98); a.alu('cmp', 'r1', 'r0'); a.bc('ls', 'k_prox'); str_sp(a, 1, 0x98)
+a.label('k_prox'); a.addi('r6', 1); a.cmpi('r6', 16); a.bc('lo', 'k_laco')
+# 6) cor do chão (hue2) em 0x8C e multiplicador m2 em 0x90
+ldr_sp(a, 0, 0x88); a.cmpi('r0', 0); a.bc('ne', 'tem2')
+a.ldr_lit('r0', ESC); str_sp(a, 0, 0x8C); a.mov('r0', L1); str_sp(a, 0, 0x98); a.b('hue_ok')
+a.label('tem2')
+a.mov('r4', 0)
+for sh, off in ((0, 0x8C), (5, 0x90), (10, 0x94)):
+    ldr_sp(a, 0, off); ldr_sp(a, 1, 0x88); swi_div(a)
+    if sh: a.lsl('r0', 'r0', sh)
+    a.alu('orr', 'r4', 'r0')
+str_sp(a, 4, 0x8C)
+a.label('hue_ok')
+ldr_sp(a, 1, 0x98); a.cmpi('r1', 0); a.bc('ne', 'lm_ok'); a.mov('r1', 1); str_sp(a, 1, 0x98)
+a.label('lm_ok')
+a.ldr_lit('r0', 9 * 16384); swi_div(a); str_sp(a, 0, 0x90)
+pool_aqui(a, 'pp3')
+# 7) paletas: 11 = [0, 5 tons do escuro, 10 tons do chão]; 7 = nuvens
+a.ldr_lit('r0', D_PFIXO1); a.ldr_lit('r1', PAL_FIXO); a.mov('r2', 0)
+a.label('p1')
+a.ldrh_r('r3', 'r0', 'r2'); a.strh_r('r3', 'r1', 'r2'); a.ldr_lit('r4', 0x400); a.add_r('r4', 'r4', 'r1'); a.strh_r('r3', 'r4', 'r2')
+a.addi('r2', 2); a.cmpi('r2', 12); a.bc('lo', 'p1')
+a.ldr_lit('r0', PAL_FIXO + 12); ldr_sp(a, 1, 0x8C); ldr_sp(a, 2, 0x98); a.mov('r3', VR.N_CHAO); a.bl('rampa')
+a.ldr_lit('r0', D_PNUV); a.mov('r1', VR.PAL_NUVEM * 16); a.mov('r2', 0x20); a.ldr_lit('r3', LOADPAL | 1); a.bl('c3')
+# 8) por cor da paleta 2: LMM = lum * m, BASE, MAX
+a.mov('r6', 0)
+a.label('l_laco')
+a.lsl('r1', 'r6', 1); a.ldr_lit('r0', PLTT_BASE + 0x40); a.add_r('r0', 'r0', 'r1'); a.ldrh_i('r4', 'r0', 0)
+a.mov('r1', 31); a.alu('and_', 'r1', 'r4')
+lsr(a, 2, 4, 5); a.mov('r3', 31); a.alu('and_', 'r2', 'r3'); a.add_r('r1', 'r1', 'r2')
+lsr(a, 2, 4, 10); a.alu('and_', 'r2', 'r3'); a.add_r('r1', 'r1', 'r2')          # r1 = lum
+a.cmpi('r6', 0); a.bc('eq', 'l_esc')
+ldr_sp(a, 0, 0x80); a.h(0x40C0 | 6 << 3 | 0); a.mov('r2', 1); a.alu('tst', 'r0', 'r2'); a.bc('ne', 'l_esc')
+ldr_sp(a, 0, 0x90); a.mov('r2', 1 + VR.N_ESC); a.mov('r3', VR.N_CHAO - 1); a.b('l_grava')
+a.label('l_esc')
+a.ldr_lit('r0', M1); a.mov('r2', 1); a.mov('r3', VR.N_ESC - 1)
+a.label('l_grava')
+a.alu('mul', 'r1', 'r0')
+add_sp(a, 0, 0x20); a.lsl('r4', 'r6', 2); a.h(0x5000 | 4 << 6 | 0 << 3 | 1)       # str r1, [r0, r4]
+add_sp(a, 0, 0x60); a.h(0x5400 | 6 << 6 | 0 << 3 | 2)                            # strb r2, [r0, r6]
+add_sp(a, 0, 0x70); a.h(0x5400 | 6 << 6 | 0 << 3 | 3)                            # strb r3, [r0, r6]
+a.addi('r6', 1); a.cmpi('r6', 16); a.bc('lo', 'l_laco')
+pool_aqui(a, 'pp4')
+# 8b) tabela de saída do fundo fixo: OUTS[(nível * 16 + pontilhado) * 16 + cor]
+a.ldr_lit('r4', OUTS); a.mov('r5', 0)
+a.label('o_lin')
+lsr(a, 0, 5, 4); a.ldr_lit('r1', D_KQV); a.h(0x5C0F)                             # r7 = KQV[nível]
+a.mov('r6', 0)
+a.label('o_cor')
+add_sp(a, 0, 0x20); a.lsl('r1', 'r6', 2); a.h(0x5840); a.alu('mul', 'r0', 'r7'); lsr(a, 0, 0, 16)
+a.mov('r1', 15); a.alu('and_', 'r1', 'r5'); a.add_r('r0', 'r0', 'r1'); lsr(a, 0, 0, 4)
+add_sp(a, 1, 0x70); a.h(0x5D89); a.alu('cmp', 'r0', 'r1'); a.bc('ls', 'o_ok'); a.h(0x1C08)
+a.label('o_ok'); add_sp(a, 1, 0x60); a.h(0x5D89); a.add_r('r0', 'r0', 'r1')
+a.strb_i('r0', 'r4', 0); a.addi('r4', 1)
+a.addi('r6', 1); a.cmpi('r6', 16); a.bc('lo', 'o_cor')
+a.addi('r5', 1); lsr(a, 0, 5, 8); a.bc('eq', 'o_lin')
+pool_aqui(a, 'pp5')
+# 9) fundo fixo: fileiras 5-13, colunas 0-29 -> blocos 0..269 (0x88 fileira, 0x8C coluna, 0x94 entrada,
+#    0x98 destino, 0x9C yy)
+a.mov('r0', VR.LIN_NUVEM); str_sp(a, 0, 0x88)
+a.ldr_lit('r0', 0x06008000); str_sp(a, 0, 0x98)
+a.label('t_lin')
+a.mov('r0', 0); str_sp(a, 0, 0x8C)
+a.label('t_col')
+ldr_sp(a, 0, 0x88); a.lsl('r0', 'r0', 5); ldr_sp(a, 1, 0x8C); a.add_r('r0', 'r0', 'r1'); a.lsl('r0', 'r0', 1)
+a.ldr_lit('r1', 0x0600D000); a.ldrh_r('r0', 'r1', 'r0'); str_sp(a, 0, 0x94)
+a.mov('r0', 0); str_sp(a, 0, 0x9C)
+a.label('t_y')
+ldr_sp(a, 0, 0x88); a.lsl('r0', 'r0', 3); ldr_sp(a, 1, 0x9C); a.add_r('r2', 'r0', 'r1')            # r2 = y
+a.mov('r0', 3); a.alu('and_', 'r0', 'r2'); a.lsl('r0', 'r0', 2); a.ldr_lit('r7', D_B4); a.add_r('r7', 'r7', 'r0')
+a.cmpi('r2', 56); a.bc('lo', 'ym_ok'); a.mov('r0', 111); a.h(0x1A80); a.b('ym_x')
+a.label('ym_ok'); a.h(0x1C10)
+a.label('ym_x'); a.mov('r1', 120); a.alu('mul', 'r0', 'r1'); a.ldr_lit('r6', D_Q4); a.add_r('r6', 'r6', 'r0')
+ldr_sp(a, 0, 0x8C); a.mov('r5', 0); a.cmpi('r0', 15); a.bc('lo', 't_esq')
+a.lsl('r0', 'r0', 3); a.mov('r1', 232); a.h(0x1A08); a.add_r('r6', 'r6', 'r0'); a.mov('r5', 1); a.b('t_w')   # r0 = 232 - c*8
+a.label('t_esq'); a.lsl('r0', 'r0', 3); a.add_r('r6', 'r6', 'r0')
+a.label('t_w')
+ldr_sp(a, 0, 0x94); lsr(a, 1, 0, 11); a.mov('r2', 1); a.alu('and_', 'r1', 'r2')                # vf
+ldr_sp(a, 2, 0x9C); a.cmpi('r1', 0); a.bc('eq', 'sy_ok'); a.mov('r1', 7); a.h(0x1A89); a.h(0x1C0A)
+a.label('sy_ok')
+a.lsl('r2', 'r2', 2); a.lsl('r0', 'r0', 22); lsr(a, 0, 0, 17); a.add_r('r0', 'r0', 'r2')
+a.ldr_lit('r1', BUF); a.h(0x5800 | 0 << 6 | 1 << 3 | 3)                                         # r3 = 8 cores
+ldr_sp(a, 0, 0x94); lsr(a, 0, 0, 10); a.mov('r1', 1); a.alu('tst', 'r0', 'r1'); a.bc('eq', 't_nf')
+a.mov('r0', 0)                                                                                  # espelho: inverte a ordem
+for _ in range(8):
+    a.lsl('r0', 'r0', 4); a.lsl('r1', 'r3', 28); lsr(a, 1, 1, 28); a.alu('orr', 'r0', 'r1'); lsr(a, 3, 3, 4)
+a.h(0x1C03)                                                                                     # r3 = r0
+a.label('t_nf')
+a.ldr_lit('r2', OUTS)
+a.cmpi('r5', 0); a.bc('ne', 't_dec')
+oito_px(a, False); a.b('t_grava')
+a.label('t_dec')
+oito_px(a, True)
+a.label('t_grava')
+ldr_sp(a, 0, 0x98); ldr_sp(a, 1, 0x9C); a.lsl('r1', 'r1', 2); a.h(0x5000 | 1 << 6 | 0 << 3 | 4)     # str r4, [r0, r1]
+ldr_sp(a, 0, 0x9C); a.addi('r0', 1); str_sp(a, 0, 0x9C); a.cmpi('r0', 8); a.bfar('lo', 't_y')
+ldr_sp(a, 0, 0x98); a.addi('r0', 32); str_sp(a, 0, 0x98)
+ldr_sp(a, 0, 0x8C); a.addi('r0', 1); str_sp(a, 0, 0x8C); a.cmpi('r0', VR.COLS); a.bfar('lo', 't_col')
+ldr_sp(a, 0, 0x88); a.addi('r0', 1); str_sp(a, 0, 0x88); a.cmpi('r0', VR.LIN_NUVEM + VR.LIN_FIXO); a.bfar('lo', 't_lin')
+pool_aqui(a, 'pp6')
+# 10) mapa: fileiras 0-4 nuvens (paleta 7), 5-13 fundo fixo (paleta 11); colunas 30-31 repetem a 0; as 2 telas
+a.ldr_lit('r4', 0x0600D000); a.mov('r5', 0)
+a.label('mp_lin')
+a.cmpi('r5', VR.LIN_NUVEM); a.bc('hs', 'mp_fixo')
+a.mov('r7', 30); a.alu('mul', 'r7', 'r5'); a.ldr_lit('r0', VR.PAL_NUVEM << 12 | NUV0); a.add_r('r7', 'r7', 'r0'); a.b('mp_ok')
+a.label('mp_fixo')
+a.h(0x1C2F); a.subi('r7', VR.LIN_NUVEM); a.mov('r0', 30); a.alu('mul', 'r7', 'r0')                # (r - 5) * 30
+a.ldr_lit('r0', VR.PAL_FIXO << 12); a.add_r('r7', 'r7', 'r0')
+a.label('mp_ok')
+a.mov('r6', 0)
+a.label('mp_col')
+a.h(0x1C38); a.cmpi('r6', VR.COLS); a.bc('hs', 'mp_w'); a.add_r('r0', 'r0', 'r6')
+a.label('mp_w')
+a.lsl('r1', 'r5', 6); a.lsl('r2', 'r6', 1); a.add_r('r1', 'r1', 'r2'); a.h(0x5200 | 1 << 6 | 4 << 3 | 0)   # strh r0, [r4, r1]
+a.ldr_lit('r2', 0x800); a.add_r('r1', 'r1', 'r2'); a.h(0x5200 | 1 << 6 | 4 << 3 | 0)
+a.addi('r6', 1); a.cmpi('r6', 32); a.bc('lo', 'mp_col')
+a.addi('r5', 1); a.cmpi('r5', VR.LIN_NUVEM + VR.LIN_FIXO); a.bc('lo', 'mp_lin')
+# 11) nuvens: as 5 fileiras
+a.mov('r4', 0)
+a.label('nv')
+a.h(0x1C20); ldr_sp(a, 1, 0xA4); a.mov('r2', 0); a.mov('r3', VR.COLS); a.bl('nuvem_linha')
+a.addi('r4', 1); a.cmpi('r4', VR.LIN_NUVEM); a.bc('lo', 'nv')
+a.h(0xB000 | 0xA0 >> 2)                      # add sp, #0xA0
+a.pop(['r1']); a.movh(11, 'r1')
+a.pop(['r0', 'r1', 'r2', 'r3']); a.movh(8, 'r1'); a.movh(9, 'r2'); a.movh(10, 'r3')
 a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r0']); a.bx('r0')
-
-a.label('nuvens')                            # r0 = deslocamento 0..255: desenha os blocos 128..287
-a.push(['r4', 'r5', 'r6', 'r7'], lr=True)
-a.movh('r1', 8); a.movh('r2', 9); a.push(['r1', 'r2'])
-lsr(a, 1, 0, 3); a.mov('r7', 31); a.alu('and_', 'r1', 'r7'); a.movh(9, 'r1')       # r9 = coluna inicial
-a.lsl('r2', 'r0', 29); lsr(a, 2, 2, 27)                                             # r2 = (off & 7) * 4
-a.mov('r3', 32); a.h(0x1A9B)                                                        # r3 = 32 - r2
-a.ldr_lit('r4', D_NUVEM)
-a.mov('r7', 0); a.movh(8, 'r7')
-a.label('n_linha')
-a.movh('r7', 8)
-lsr(a, 5, 7, 3); a.lsl('r5', 'r5', 10); a.ldr_lit('r6', 0x06009000); a.add_r('r5', 'r5', 'r6')
-a.lsl('r6', 'r7', 29); lsr(a, 6, 6, 27); a.add_r('r5', 'r5', 'r6')
-a.mov('r6', 1); a.lsl('r6', 'r6', 10); a.add_r('r6', 'r6', 'r5')
-a.movh('r0', 9)
-a.label('n_col')
-a.lsl('r7', 'r0', 2); a.h(0x5800 | 7 << 6 | 4 << 3 | 1)          # ldr r1, [r4, r7]
-a.addi('r0', 1); a.mov('r7', 31); a.alu('and_', 'r0', 'r7')
-a.lsl('r7', 'r0', 2); a.h(0x5800 | 7 << 6 | 4 << 3 | 7)          # ldr r7, [r4, r7]
-a.h(0x40C0 | 2 << 3 | 1); a.h(0x4080 | 3 << 3 | 7)               # lsr r1, r2 ; lsl r7, r3
-a.alu('orr', 'r1', 'r7'); a.str_i('r1', 'r5', 0)
-a.addi('r5', 32); a.alu('cmp', 'r5', 'r6'); a.bc('lo', 'n_col')
-a.addi('r4', 128)
-a.movh('r7', 8); a.addi('r7', 1); a.movh(8, 'r7'); a.cmpi('r7', 40); a.bc('lo', 'n_linha')
-a.pop(['r1', 'r2']); a.movh(8, 'r1'); a.movh(9, 'r2')
-a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r0']); a.bx('r0')
-a.label('c3'); a.bx('r3')
 a.pool()
-code = a.build(); assert D_CODE + len(code) <= D_START, hex(len(code))
+
+# ---------------- nuvem_linha(r0 = fileira 0..4, r1 = deslocamento): blocos 270 + fileira*30 ..
+# pilha: 0 destino do bloco, 4 coluna, 8 yy, 12 fileira; r8 = linha do brilho, r9 = pontilhado, r11 = deslocamento
+a.label('nuvem_linha')
+a.push(['r4', 'r5', 'r6', 'r7'], lr=True)
+a.movh('r2', 11); a.push(['r2'])
+a.h(0xB080 | 16 >> 2)
+a.movh(11, 'r1'); str_sp(a, 0, 12)
+a.movh('r1', 10); a.push(['r1']); a.movh(10, 'r3')                  # r10 = coluna final
+str_sp(a, 2, 8)                                                  # (a pilha andou 4) coluna inicial
+a.mov('r1', 30); a.alu('mul', 'r1', 'r0'); a.add_r('r1', 'r1', 'r2'); a.ldr_lit('r2', NUV0); a.add_r('r1', 'r1', 'r2'); a.lsl('r1', 'r1', 5)
+a.ldr_lit('r2', 0x06008000); a.add_r('r1', 'r1', 'r2'); str_sp(a, 1, 4)
+a.label('nl_col')
+a.mov('r0', 0); str_sp(a, 0, 12)
+a.label('nl_y')
+ldr_sp(a, 0, 16); a.lsl('r0', 'r0', 3); ldr_sp(a, 1, 12); a.add_r('r2', 'r0', 'r1')               # y (< 56)
+a.mov('r0', 240); a.alu('mul', 'r0', 'r2'); a.ldr_lit('r6', D_PNV); a.add_r('r6', 'r6', 'r0')
+ldr_sp(a, 0, 8); a.lsl('r0', 'r0', 3); a.add_r('r6', 'r6', 'r0')                               # + coluna*8
+a.label('nl_w')                              # 8 cores da faixa a partir de (coluna*8 + deslocamento) & 255
+ldr_sp(a, 1, 8); a.lsl('r1', 'r1', 3); a.movh('r0', 11); a.add_r('r1', 'r1', 'r0'); a.mov('r0', 0xFF); a.alu('and_', 'r1', 'r0')
+a.lsl('r0', 'r2', 7); a.ldr_lit('r3', D_NUVEM); a.add_r('r3', 'r3', 'r0')
+lsr(a, 0, 1, 3); a.lsl('r0', 'r0', 2); a.h(0x5800 | 0 << 6 | 3 << 3 | 4)                        # r4 = palavra k
+a.addi('r0', 4); a.lsl('r0', 'r0', 25); lsr(a, 0, 0, 25); a.h(0x5818)                          # r0 = palavra k+1
+a.lsl('r1', 'r1', 29); lsr(a, 1, 1, 27)                                                         # r1 = s
+a.h(0x40CC); a.mov('r2', 32); a.h(0x1A52); a.h(0x4090); a.alu('orr', 'r4', 'r0'); a.h(0x1C23)   # r3 = cores
+a.ldr_lit('r2', D_OUTN)
+oito_px_p(a)
+a.label('nl_grava')
+ldr_sp(a, 0, 4); ldr_sp(a, 1, 12); a.lsl('r1', 'r1', 2); a.h(0x5000 | 1 << 6 | 0 << 3 | 4)
+ldr_sp(a, 0, 12); a.addi('r0', 1); str_sp(a, 0, 12); a.cmpi('r0', 8); a.bfar('lo', 'nl_y')
+ldr_sp(a, 0, 4); a.addi('r0', 32); str_sp(a, 0, 4)
+ldr_sp(a, 0, 8); a.addi('r0', 1); str_sp(a, 0, 8); a.movh('r1', 10); a.alu('cmp', 'r0', 'r1'); a.bfar('lo', 'nl_col')
+a.pop(['r1']); a.movh(10, 'r1')
+a.h(0xB000 | 16 >> 2)
+a.pop(['r2']); a.movh(11, 'r2')
+a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r0']); a.bx('r0')
+a.pool()
+
+# ---------------- rampa(r0 = destino nas cores base, r1 = cor, r2 = brilho máximo, r3 = tons)
+# grava também nas cores exibidas (+0x400). r8 = lum da cor, r9 = divisor, r10 = metade, r11 = j; pilha: 0 cor acumulada
+a.label('rampa')
+a.push(['r4', 'r5', 'r6', 'r7'], lr=True)
+a.movh('r4', 8); a.movh('r5', 9); a.movh('r6', 10); a.movh('r7', 11); a.push(['r4', 'r5', 'r6', 'r7'])
+a.h(0xB080 | 8 >> 2)
+a.h(0x1C04); a.h(0x1C0D); a.h(0x1C16); a.h(0x1C1F)               # r4 = destino, r5 = cor, r6 = brilho, r7 = tons
+a.mov('r0', 31); a.alu('and_', 'r0', 'r5')
+lsr(a, 1, 5, 5); a.mov('r2', 31); a.alu('and_', 'r1', 'r2'); a.add_r('r0', 'r0', 'r1')
+lsr(a, 1, 5, 10); a.alu('and_', 'r1', 'r2'); a.add_r('r0', 'r0', 'r1'); a.movh(8, 'r0')          # lh
+a.h(0x1C39); a.subi('r1', 1); a.alu('mul', 'r0', 'r1')                                            # lh * (n - 1)
+a.cmpi('r0', 0); a.bc('ne', 'rp_d'); a.mov('r0', 1)
+a.label('rp_d'); a.movh(9, 'r0'); lsr(a, 0, 0, 1); a.movh(10, 'r0')
+a.mov('r0', 0); a.movh(11, 'r0')
+a.label('rp_j')
+a.mov('r0', 0); str_sp(a, 0, 0)
+for sh in (0, 5, 10):
+    if sh: lsr(a, 0, 5, sh)
+    else: a.h(0x1C28)
+    a.mov('r1', 31); a.alu('and_', 'r0', 'r1'); a.alu('mul', 'r0', 'r6'); a.movh('r1', 11); a.alu('mul', 'r0', 'r1')
+    a.movh('r1', 10); a.add_r('r0', 'r0', 'r1'); a.movh('r1', 9); swi_div(a)
+    a.cmpi('r0', 31); a.bc('ls', 'rp_ok%d' % sh); a.mov('r0', 31)
+    a.label('rp_ok%d' % sh)
+    if sh: a.lsl('r0', 'r0', sh)
+    ldr_sp(a, 1, 0); a.alu('orr', 'r1', 'r0'); str_sp(a, 1, 0)
+ldr_sp(a, 0, 0); a.movh('r1', 11); a.lsl('r1', 'r1', 1); a.h(0x5200 | 1 << 6 | 4 << 3 | 0)
+a.ldr_lit('r2', 0x400); a.add_r('r2', 'r2', 'r4'); a.h(0x5200 | 1 << 6 | 2 << 3 | 0)
+a.movh('r0', 11); a.addi('r0', 1); a.movh(11, 'r0'); a.alu('cmp', 'r0', 'r7'); a.bfar('lo', 'rp_j')
+a.h(0xB000 | 8 >> 2)
+a.pop(['r4', 'r5', 'r6', 'r7']); a.movh(8, 'r4'); a.movh(9, 'r5'); a.movh(10, 'r6'); a.movh(11, 'r7')
+a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r0']); a.bx('r0')
+a.pool()
+code = a.build(); assert D_CODE + len(code) <= D_Q4, hex(len(code))
 put(D_CODE, code)
-A_TAREFA, A_APLICA, A_NUVENS = a.labels['tarefa'], a.labels['aplica'], a.labels['nuvens']
+A_TAREFA, A_APLICA = a.labels['tarefa'], a.labels['aplica']
 
 b = Asm(D_START)                             # tarefa visual da animação 61: liga o céu e cria a tarefa permanente
 b.push(['r4', 'r5'], lr=True)
@@ -370,15 +643,14 @@ b.ldr_i('r3', 'r1', 0); b.alu('cmp', 'r3', 'r5'); b.bc('eq', 'existe')
 b.label('prox'); b.addi('r1', 40); b.addi('r2', 1); b.cmpi('r2', 16); b.bc('lo', 'laco')
 b.h(0x1C28); b.mov('r1', 3); b.ldr_lit('r3', CREATETASK | 1); b.bl('c3')
 b.label('existe')
-b.bl(a.labels['marca']); b.cmpi('r0', 0); b.bc('ne', 'ja')     # já aplicado: não escurece de novo
-b.bl(A_APLICA)
-b.label('ja'); b.mov('r0', 0); b.bl(A_NUVENS)
+b.bl(a.labels['marca']); b.cmpi('r0', 0); b.bc('ne', 'ja')     # já aplicado: não refaz
+b.mov('r0', 0); b.bl(A_APLICA)
+b.label('ja')
 b.h(0x1C20); b.ldr_lit('r3', 0x080F43A9); b.bl('c3')                # DestroyAnimVisualTask
 b.pop(['r4', 'r5']); b.pop(['r0']); b.bx('r0')
 b.label('c3'); b.bx('r3')
 b.pool()
 put(D_START, b.build())
-assert D_START + len(b.build()) <= D_CODE + 0x380
 
 # desvio em DrawMainBattleBackground (0x0803C06C): quando o jogo redesenha o fundo normal (fim de animação de
 # golpe com restorebg, volta da bolsa...), refaz o céu na hora se a tarefa existe e o Distúrbio está em campo
@@ -399,7 +671,7 @@ c.label('prox'); c.addi('r1', 40); c.addi('r2', 1); c.cmpi('r2', 16); c.bc('lo',
 c.h(0x1C18); c.mov('r1', 3); c.ldr_lit('r3', CREATETASK | 1); c.bl('c3')   # a bolsa/o time apagam as tarefas: recria
 c.lsl('r1', 'r0', 2); c.add_r('r1', 'r1', 'r0'); c.lsl('r1', 'r1', 3); c.ldr_lit('r0', GTASKS); c.add_r('r1', 'r1', 'r0')
 c.label('achou')
-c.push(['r1']); c.bl(A_APLICA); c.pop(['r1']); c.ldrh_i('r0', 'r1', 8); c.bl(A_NUVENS)
+c.ldrh_i('r0', 'r1', 8); c.bl(A_APLICA)
 c.label('sai')
 c.pop(['r0']); c.bx('r0')
 c.label('c3'); c.bx('r3')
