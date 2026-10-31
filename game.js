@@ -1086,6 +1086,7 @@ const QZ_NUVEM = {
     [0x247C4C, "b0715308", "00eaff09"], [0x284704, "b0715308", "00eaff09"], [0x284748, "b0715308", "00eaff09"],
     [0x297700, "ac765308", "00f0ff09"],
     [0xF40AC, "e8b94608", "00f6ff09"],                   // animações gerais -> 0x09FFF600 (com a 60, "Haze roxo")
+    [0x5532E4, "f4003a006500", "3f013f013f01"],          // Toxtricity Low Key (espécie 1186): Punk Rock/Minus/Technician -> Nuvem Tóxica nas 3
   ],
   novo: [   // [endereço, bytes] em área livre (0xFF)
     [0x1FFE000, "0c48554669005144c9000b18187c800700280bdb08480570187c0221084318740648074900f004f806488746064887460847c046f83302020432020200e1ff09058d0508ae83050804860508"],
