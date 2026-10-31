@@ -1051,9 +1051,11 @@ function cheatPresetsRender() {
   }
 }
 // Pokémon Quetzal: tabela de espécies em 0x548C04 (0x24 bytes cada, nº nacional; tipos em +6/+7: Ghost 0x07,
-// Dark 0x11). Duskull (#355) vira Ghost/Dark. Só muda se o Duskull estiver lá com os status e tipos originais.
+// Dark 0x11). Duskull, Dusclops e Dusknoir viram Ghost/Dark. Só muda se o Duskull estiver lá com os status e tipos originais.
 const QZ_TIPOS = [
-  [0x54BDF0, "14285a191e5a0707", "14285a191e5a0711"],   // Duskull: Ghost/Ghost -> Ghost/Dark
+  [0x54BDF0, "14285a191e5a0707", "14285a191e5a0711"],   // Duskull (#355): Ghost/Ghost -> Ghost/Dark
+  [0x54BE14, "284682193c820707", "284682193c820711"],   // Dusclops (#356)
+  [0x54CF18, "2d64872d41870707", "2d64872d41870711"],   // Dusknoir (#477)
 ];
 function quetzalTipos(rom) {
   if (String.fromCharCode(...rom.subarray(0xA0, 0xAB)) !== "PKM QUETZAL") return 0;
