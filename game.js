@@ -1070,7 +1070,8 @@ function quetzalTipos(rom) {
   }
   return changed;
 }
-// Pokémon Quetzal: habilidade nova 319 "Nuvem Tóxica": ao entrar na batalha mostra o balão da habilidade e envenena
+// Pokémon Quetzal: habilidade nova 319 "Nuvem Tóxica": ao entrar na batalha mostra o balão da habilidade, toca a
+// animação do Haze em roxo (neblina roxa, os Pokémon viram silhuetas roxas) e envenena
 // todos os adversários (o próprio jogo confere imunidade: tipos Poison/Steel, Immunity, já com status, Safeguard...).
 // Molde: o caso da Intimidate no switch "ao entrar" (tabela 0x08052608, índice habilidade-2, até a 309) e o script
 // dela (0x084B18F8). A tabela é copiada para 0x09FFE400 indo até a 319; GetAbilityName (0x080A5628) desvia para
@@ -1084,20 +1085,27 @@ const QZ_NUVEM = {
     [0xA5628, "00b50004010c0b1c", "0049084781e0ff09"],   // GetAbilityName -> 0x09FFE080
     [0x247C4C, "b0715308", "00eaff09"], [0x284704, "b0715308", "00eaff09"], [0x284748, "b0715308", "00eaff09"],
     [0x297700, "ac765308", "00f0ff09"],
+    [0xF40AC, "e8b94608", "00f6ff09"],                   // animações gerais -> 0x09FFF600 (com a 60, "Haze roxo")
   ],
   novo: [   // [endereço, bytes] em área livre (0xFF)
     [0x1FFE000, "0c48554669005144c9000b18187c800700280bdb08480570187c0221084318740648074900f004f806488746064887460847c046f83302020432020200e1ff09058d0508ae83050804860508"],
     [0x1FFE080, "00b50004010c0b1c0348814202d1034802bc0847024800473f01000000e2ff0931560a08"],
-    [0x1FFE100, "ff91980808760136394000760f622e05320202002c05320202043202020153e1ff0976013753e1ff0976006153e1ff091d000000000153e1ff092e1e350202022e1f350202002e1c350202022e1d35020200162f05320202012d05320202443002020114e1ff0931073502020432020201760f62ffb19808083930003f"],
+    [0x1FFE100, "ff9198080876013639400045013c003502020a760f622e05320202002c0532020204320202015be1ff097601375be1ff097600615be1ff091d00000000015be1ff092e1e350202022e1f350202002e1c350202022e1d35020200162f05320202012d0532020244300202011ce1ff0931073502020432020201760f62ffb19808083930003f"],
     [0x1FFE200, "c8e9ead9e100ce23ecddd7d5ff"],   // "Nuvem Tóxica"
     [0x1FFE220, "bfe2ead9e2d9e2d500e3e700e6ddead5dde700d5e300d9e2e8e6d5e6adff"],
     [0x1FFE260, "bbe300d9e2e8e6d5e600d9e100d7e3e1d6d5e8d9b800e7e3e0e8d5fee9e1d500e2e9ead9e100e823ecddd7d500e5e9d900d9e2ead9e2d9e2d5fee8e3d8e3e700e3e700dde2dde1dddbe3e7adff"],
+    // animação "Haze roxo" (script do Haze 0x084988F2 escurecendo para roxo), paleta roxa da neblina e a tarefa que
+    // roda a neblina do Haze (0x0817AF3C), troca a paleta e põe o adversário da frente como alvo da animação
+    [0x1FFE2C0, "0519f600000341e3ff090500041e03fd6818080a051e000200000010009258045a03fd6818080a051e00010010000000925808"],
+    [0x1FFE300, "0000397d397d397dae48f3601569166dd050397d397d397df25816713879397d"],
+    [0x1FFE340, "10b584b00c4900f015f868460b4900f011f86846017a090109482022094b00f00af80948017801225140417004b010bc01bc0047084718473daf17084d790f0800e3ff096d190f081e9f0302"],
   ],
   // tabelas copiadas da própria ROM: [de, para, entradas copiadas, total, valor das que faltam, valor da 319]
   tabelas: [
     [0x52608, 0x1FFE400, 308, 318, 0x08058604, 0x09FFE000],   // switch "ao entrar" (habilidade - 2)
     [0x5371B0, 0x1FFEA00, 319, 320, 0, 0x09FFE220],           // descrição curta
     [0x5376AC, 0x1FFF000, 319, 320, 0, 0x09FFE260],           // descrição longa
+    [0x46B9E8, 0x1FFF600, 60, 61, 0, 0x09FFE2C0],             // animações gerais: a 60 é o "Haze roxo"
   ],
 };
 function quetzalNuvem(rom) {

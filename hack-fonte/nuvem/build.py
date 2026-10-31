@@ -10,6 +10,9 @@ NOVA = 319
 # área livre (0xFF) igual nas duas ROMs do Quetzal (a do Coop 3 usa até 0x09FFA31C)
 CASE, NOME_HOOK, SCRIPT, TXT = 0x09FFE000, 0x09FFE080, 0x09FFE100, 0x09FFE200
 JTAB, DESC_C, DESC_L = 0x09FFE400, 0x09FFEA00, 0x09FFF000
+ANIM, PAL, TASK, GERAL = 0x09FFE2C0, 0x09FFE300, 0x09FFE340, 0x09FFF600   # animação "Haze roxo"
+OLD_GERAL, N_GERAL = 0x0846B9E8, 60          # gBattleAnims_General (só LaunchBattleAnimation 0x080F4088 usa)
+ROXO = 18 | 4 << 5 | 22 << 10                # cor que os Pokémon ganham (no Haze é preto)
 OLD_JTAB, OLD_DESC_C, OLD_DESC_L = 0x08052608, 0x085371B0, 0x085376AC
 DEFAULT, EFEITO_OK, PUSH_SCRIPT = 0x08058604, 0x080583AE, 0x08058D05
 
@@ -83,6 +86,8 @@ def jmp(name): fix.append((len(s), name)); s.extend(b'\0\0\0\0')
 s += bytes.fromhex('ff91980808')                 # savetarget
 s += bytes.fromhex('760136')                     # showabilitypopup BS_ATTACKER
 s += bytes.fromhex('394000')                     # pause
+s += bytes([0x45, 0x01, N_GERAL]) + p32(0x02023500)   # playanimation BS_ATTACKER, Haze roxo, sB_ANIM_ARG1
+s += bytes.fromhex('0a')                         # waitanimation
 s += bytes.fromhex('760f62')                     # destroyabilitypopup
 s += bytes.fromhex('2e0532020200')               # setbyte gBattlerTarget, 0
 lab['laco'] = len(s)
@@ -102,6 +107,53 @@ s += bytes.fromhex('393000')                     # pause
 s += bytes.fromhex('3f')                         # end3
 for at, name in fix: s[at:at + 4] = p32(SCRIPT + lab[name])
 put(SCRIPT, s)
+
+# --- animação "Haze roxo": o script do Haze (0x084988F2) com a neblina roxa e escurecendo para roxo, não preto
+h16 = lambda v: struct.pack('<H', v & 0xFFFF)
+blend = lambda a, b, c: bytes.fromhex('03fd6818080a05') + h16(0x1E) + h16(a) + h16(b) + h16(c) + h16(ROXO)
+anim = bytes.fromhex('0519f60000') + b'' + p32(TASK | 1) + bytes.fromhex('0500') + bytes.fromhex('041e')      + blend(2, 0, 16) + bytes.fromhex('045a') + blend(1, 16, 0) + b''
+put(ANIM, anim)
+# paleta da neblina (0x091756D8, 16 cores cinza) puxada para o roxo
+pal = b''
+for k in range(16):
+    c = struct.unpack_from('<H', ROM, 0x011756D8 + 2 * k)[0]
+    l = max(c & 31, c >> 5 & 31, c >> 10 & 31)
+    pal += h16(0 if k == 0 else round(l * 0.8) | round(l * 0.3) << 5 | l << 10)
+put(PAL, pal)
+# tarefa da neblina: roda a do Haze (0x0817AF3C, carrega a paleta cinza) e troca pela roxa; o alvo da animação
+# vira o adversário da frente (atacante ^ 1) para os dois lados ficarem roxos, como no Haze de um golpe
+a = Asm(TASK)
+a.push(['r4'], lr=True)
+a.h(0xB084)                          # sub sp, #0x10
+a.ldr_lit('r1', 0x0817AF3D)
+a.bl('c1')
+a.movh('r0', 13)                     # r0 = sp (BattleAnimBgData)
+a.ldr_lit('r1', 0x080F794D)          # GetBattleAnimBg
+a.bl('c1')
+a.movh('r0', 13)
+a.ldrb_i('r1', 'r0', 8)              # paletteId
+a.lsl('r1', 'r1', 4)
+a.ldr_lit('r0', PAL)
+a.mov('r2', 0x20)
+a.ldr_lit('r3', 0x080F196D)          # LoadPalette
+a.bl('c3')
+a.ldr_lit('r0', 0x02039F1E)          # gBattleAnimAttacker
+a.ldrb_i('r1', 'r0', 0)
+a.mov('r2', 1)
+a.alu('eor', 'r1', 'r2')
+a.strb_i('r1', 'r0', 1)              # gBattleAnimTarget = atacante ^ 1
+a.h(0xB004)                          # add sp, #0x10
+a.pop(['r4'])
+a.pop(['r0'])
+a.bx('r0')
+a.label('c1'); a.bx('r1')
+a.label('c3'); a.bx('r3')
+a.pool()
+put(TASK, a.build())
+assert w32(0x080F40AC) == OLD_GERAL
+g = [w32(OLD_GERAL + 4 * i) for i in range(N_GERAL)] + [ANIM]
+put(GERAL, b''.join(p32(x) for x in g))
+put(0x080F40AC, p32(GERAL))
 
 # --- textos
 nome = enc('Nuvem Tóxica')
