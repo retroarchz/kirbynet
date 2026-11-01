@@ -34,6 +34,13 @@
     if (m < 1080) { const n = sobe(990, 1080); return [1 - n, n]; }    // 16:30 a 18:00, anoitece
     return [0, 1];
   }
+  // Luz única sobre a cena, para o céu e o chão combinarem: tira um pouco da cor, multiplica pela luz e puxa as sombras para o frio.
+  const TARDE_LUZ = { tira: 0.18, luz: [1.0, 0.8, 0.58], sombra: [16, 0, 30] };
+  const NOITE_LUZ = { tira: 0.32, luz: [0.3, 0.42, 0.66], sombra: [6, 10, 22] };
+  const luz = (p, L) => {
+    const y = (0.3 * p[0] + 0.59 * p[1] + 0.11 * p[2]);
+    return p.map((x, k) => (x + (y - x) * L.tira) * L.luz[k] + (1 - y / 255) * L.sombra[k]);
+  };
   function create(ram, modo, min) {
     const st = { modo: modo === "jogo" ? "jogo" : "real", base: +min || 720, f0: 0, frames: 0 };
     const cache = new Map(); let passo = -1;
@@ -58,7 +65,7 @@
         let t = receita(TARDE, p), v = receita(NOITE, p);
         if (obj) { t = t.map((x, k) => 0.62 * x + 0.38 * p[k]); v = v.map((x, k) => 0.5 * x + 0.4 * p[k]); }
         if (!obj && ARVORES[c & 0x7FFF]) v = ARVORES[c & 0x7FFF];
-        if (bat) v = v.map((x) => x * 0.62);                      // céu e chão da batalha, sem o brilho das paredes
+        if (bat) { t = luz(p, TARDE_LUZ); v = luz(p, NOITE_LUZ); }  // batalha: céu e chão sob a mesma luz
         if (chave & 0x10000) v = v.map((x) => x * 0.72);          // caminhos claros
         if (chave & 0x20000) { t = [0x8F, 0xA0, 0xC8]; v = [0xF8, 0xE0, 0x60]; }   // vidro de porta e janela
         if (chave & 0x40000) { t = p; v = p.map((x, k) => 0.32 * x + 0.68 * [255, 230, 100][k]); }   // luz: acende antes do jogo
