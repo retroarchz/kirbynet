@@ -4,16 +4,18 @@
 # Estado na EWRAM livre (0x0203FF80+, igual nas duas ROMs), 16 bytes por batalhador (6 lugares do Coop 3):
 #   +0 fase (0 nada, 1 placa, 2 coroa)  +1 rodadas  +2 quem usou  +3 sprite+1  +4 personalidade de quem tem o escudo
 #   +8 personalidade de quem usou       +12 rodadas até poder usar de novo     +13 fase desenhada  +14 mosaico  +15 sumiço
+# Pontos do Nv. 2 ficam em 0x0203FF60 (ordem.py). G+9.. = rodadas que faltam para o medo do perigo (por batalhador).
 # A personalidade confere se ainda é o mesmo Pokémon: quem sai de campo perde o escudo sem precisar de outro gancho.
 ID_PG = 681
 EF_PG = 14                                   # efeito sem nenhum golpe (o 204 tem regra de golpe condicional: vira Struggle)
-PG_FOGO_T, PG_GELO_T, PG_AGUA_T = 0x0A, 0x0F, 0x0B
+PG_FOGO_T, PG_GELO_T, PG_AGUA_T, PG_LUTA_T = 0x0A, 0x0F, 0x0B, 0x01
 PG_BASE, PG_G = 0x0203FF80, 0x0203FFE0       # globais: +0 já contou a rodada, +1 fogo pendente (alvo+1), +2 viu o tracker
                                              # andar, +4 retorno do fim de turno
 PG_DONE, PG_FOGO, PG_VIU, PG_QUEBRA, PG_RET, PG_MAX = 0, 1, 2, 3, 4, 8    # +3 quebrar ao fim da animação do golpe (alvo+1); +8 quem vai ao máximo (+1)
 ID_FORTE = 752
 STAGE_DEF, STAGE_DEFE, STAGE_MAX = 0x1A, 0x1D, 12                  # 6 = normal, 12 = +6
-PG_CONTA, GOLPES_MEDO = 9, 3                  # G+9.. golpes parados por batalhador; 3 = medo do perigo
+PG_CONTA, RODADAS_MEDO = 9, 3                 # G+9.. contagem do medo do perigo: o escudo chegou inteiro ao fim da rodada 3
+HITMARKER_ = 0x02023274
 INSTR, ATK, ALVO, CURMOVE, DMG, NBAT = 0x0202320C, 0x02023204, 0x02023205, 0x020231E2, 0x020231E8, 0x02023044
 MOVES, BS, RESULT = 0x0853AD34, 0x0202352C, 0x02023272
 MONS_LIT, STATUS3_LIT, SPRIDS_LIT = 0x0806DBC8, 0x08042A54, 0x08037CE8    # literais do jogo: o Coop 3 moveu essas tabelas
@@ -40,6 +42,7 @@ assert len(_gfx) == 0x1400
 # --- scripts de batalha
 _id = lambda n: struct.pack('<H', n)
 ID_ENVOLVE, ID_CRESCEU, ID_BLOQUEOU, ID_DERRETEU, ID_DESFEZ = 747, 748, 749, 750, 751
+ID_RACHOU, ID_QUEBROU = 755, 756
 _fim = b'\x28' + p32(PG_MOVEEND)
 _esp = bytes.fromhex('124000')               # waitmessage
 _falou = lambda i: b'\x10' + _id(i) + _esp
@@ -58,10 +61,17 @@ escr('falha', _ini + _falou(229) + _fim)                        # "Mas isso falh
 _esc['quebra_ret'] = _pgat; _pgat += 0x30          # preenchido no fim (fase 1 + fogo com dano: volta ao golpe)
 escr('cresce_ret', bytes.fromhex('392000') + _falou(ID_CRESCEU) + b'\x3c')    # Haze: cresce e volta ao golpe
 _esc['fim'] = _pgat; _pgat += 0x30                 # preenchido no fim (acabaram as rodadas)
+_esc['racha'] = _pgat; _pgat += 0x20               # preenchido no fim (Nv. 2 perdeu pontos e aguentou)
+_esc['quebra_ret_l'] = _pgat; _pgat += 0x30        # como quebra_ret, com golpe de lutador
+_esc['derrete_l'] = _pgat; _pgat += 0x38           # como derrete, com golpe de lutador
+_esc['fim_forte'] = _pgat; _pgat += 0x30           # preenchido no fim (rodada 3 com o Nv. 2 ainda de pé)
+
+def mv(a, d, s): a.h(0x1C00 | s << 3 | d)    # rd = rs (registradores baixos)
+from lz import lz77
+exec(open(os.path.join(_dir, 'ordem.py'), encoding='utf8').read())
 
 # --- código
 a = Asm(PG_CODE)
-def mv(a, d, s): a.h(0x1C00 | s << 3 | d)    # rd = rs (registradores baixos)
 
 # DrawMainBattleBackground acabou: na montagem da batalha limpa tudo; na volta de um menu (tarefas e sprites apagados)
 # recria a tarefa e os sprites, sem repetir o efeito de transformação
@@ -80,8 +90,8 @@ a.addi('r4', 16); a.addi('r5', 1); a.cmpi('r5', 6); a.bc('lo', 'd_laco')
 a.cmpi('r3', 0); a.bc('eq', 'd_fim')
 a.bl('t_cria'); a.b('d_fim')
 a.label('d_limpa')
-a.ldr_lit('r1', PG_BASE); a.mov('r0', 0); a.mov('r2', 0)
-a.label('d_l2'); a.strb_r('r0', 'r1', 'r2'); a.addi('r2', 1); a.cmpi('r2', 0x80); a.bc('lo', 'd_l2')
+a.ldr_lit('r1', PG2); a.mov('r0', 0); a.mov('r2', 0)
+a.label('d_l2'); a.strb_r('r0', 'r1', 'r2'); a.addi('r2', 1); a.cmpi('r2', 0xA0); a.bc('lo', 'd_l2')
 a.label('d_fim')
 a.ldr_lit('r3', IMP_STUB_FUNDO | 1); a.bl('c3')
 a.pop(['r4', 'r5']); a.pop(['r0']); a.bx('r0')
@@ -113,9 +123,11 @@ a.ldr_i('r1', 'r0', 0x4C); a.ldr_i('r2', 'r4', 4); a.alu('cmp', 'r1', 'r2'); a.b
 mv(a, 0, 4); a.b('a_fim')
 a.label('a_nao'); a.mov('r0', 0)
 a.label('a_fim'); a.pop(['r4', 'r5']); a.pop(['r1']); a.bx('r1')
-a.label('acaba')                             # r0 = entrada: tira o escudo e libera quem usou
+a.label('acaba')                             # r0 = entrada: tira o escudo e libera quem usou (o que não quebra: 2 rodadas de espera)
 a.mov('r1', 0); a.strb_i('r1', 'r0', 0)
-a.ldrb_i('r0', 'r0', 2); a.lsl('r0', 'r0', 4); a.ldr_lit('r2', PG_BASE); a.add_r('r0', 'r0', 'r2'); a.strb_i('r1', 'r0', 12)
+a.ldr_lit('r2', PG_BASE); a.h(0x1A00 | 2 << 6 | 0 << 3 | 3); lsr(a, 3, 3, 4)   # r3 = quem tem o escudo
+a.ldr_lit('r1', PG2); a.ldrb_r('r3', 'r1', 'r3'); lsr(a, 3, 3, 7); a.lsl('r3', 'r3', 1)
+a.ldrb_i('r0', 'r0', 2); a.lsl('r0', 'r0', 4); a.add_r('r0', 'r0', 'r2'); a.strb_i('r3', 'r0', 12)
 a.bx('lr')
 a.label('salta')                             # r0 = script: o golpe termina nele, marcado como sem efeito
 a.ldr_lit('r1', INSTR); a.str_i('r0', 'r1', 0)
@@ -135,6 +147,7 @@ a.bl('forca'); a.cmpi('r0', 0); a.bc('eq', 'acc_orig')           # golpe de stat
 a.label('acc_ini')
 a.bl('tipo')
 a.cmpi('r0', PG_FOGO_T); a.bc('eq', 'acc_fogo')
+a.cmpi('r0', PG_LUTA_T); a.bc('eq', 'acc_fogo')
 a.cmpi('r0', PG_GELO_T); a.bc('eq', 'acc_cresce')
 a.cmpi('r0', PG_AGUA_T); a.bc('eq', 'acc_cresce')
 a.label('acc_bloq')
@@ -143,14 +156,24 @@ a.label('acc_cresce')
 a.ldrb_i('r0', 'r4', 0); a.cmpi('r0', 1); a.bc('ne', 'acc_bloq')  # a coroa não cresce de novo
 a.ldr_lit('r0', _esc['cresce']); a.ldr_lit('r1', INSTR); a.str_i('r0', 'r1', 0); a.b('acc_fim')   # anima primeiro, cresce depois
 a.label('acc_fogo')
-a.ldrb_i('r0', 'r4', 0); a.cmpi('r0', 1); a.bc('ne', 'acc_quebra')
+a.ldrb_i('r0', 'r4', 0); a.cmpi('r0', 1); a.bc('ne', 'acc_nv2')
 a.bl('forca'); a.cmpi('r0', 0); a.bc('eq', 'acc_quebra')
 a.ldr_lit('r0', PG_G); a.addi('r5', 1); a.strb_i('r5', 'r0', PG_FOGO)   # fase 1 com dano: segue, adjustdamage faz 10%
 a.b('acc_orig')
+a.label('acc_nv2')                           # Nv. 2: 1 ponto até potência 59, 2 até 119, 3 de 120 em diante
+a.ldr_lit('r7', PG2); a.ldrb_r('r6', 'r7', 'r5'); a.cmpi('r6', 0x80); a.bc('hs', 'acc_bloq')   # o do Imperador do golpe fatal não quebra
+a.bl('forca'); a.mov('r1', 1); a.cmpi('r0', 60); a.bc('lo', 'acc_pt'); a.mov('r1', 2); a.cmpi('r0', 120); a.bc('lo', 'acc_pt'); a.mov('r1', 3)
+a.label('acc_pt')
+a.h(0x1A00 | 1 << 6 | 6 << 3 | 6)            # sub r6, r6, r1
+a.strb_r('r6', 'r7', 'r5'); a.cmpi('r6', 0); a.bc('le', 'acc_quebra')
+a.ldr_lit('r0', _esc['racha']); a.ldr_lit('r1', INSTR); a.str_i('r0', 'r1', 0); a.b('acc_fim')
 a.label('acc_quebra')
-a.ldr_lit('r0', _esc['derrete']); a.ldr_lit('r1', INSTR); a.str_i('r0', 'r1', 0); a.b('acc_fim')
+a.bl('tipo'); a.cmpi('r0', PG_LUTA_T)
+a.ldr_lit('r0', _esc['derrete']); a.bc('ne', 'acc_qb'); a.ldr_lit('r0', _esc['derrete_l'])
+a.label('acc_qb')
+a.ldr_lit('r1', INSTR); a.str_i('r0', 'r1', 0); a.b('acc_fim')
 a.label('acc_orig')
-a.ldr_lit('r3', CMD_ACC); a.bl('c3')
+a.ldr_lit('r3', OL['mira'] | 1); a.bl('c3')
 a.label('acc_fim')
 a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r0']); a.bx('r0')
 a.pool()
@@ -177,9 +200,10 @@ a.ldr_i('r0', 'r4', 0); a.alu('cmp', 'r0', 'r5'); a.bc('eq', 'es_fim')    # aind
 a.ldr_lit('r3', PG_G); a.ldrb_i('r0', 'r3', PG_QUEBRA); a.cmpi('r0', 0); a.bc('eq', 'es_fim')
 a.mov('r1', 0); a.strb_i('r1', 'r3', PG_QUEBRA); a.subi('r0', 1); mv(a, 5, 0)
 a.bl('ativo'); a.cmpi('r0', 0); a.bc('eq', 'es_fim'); a.bl('acaba')
-mv(a, 0, 5); a.bl('forte')
 a.ldr_i('r0', 'r4', 0); a.ldr_lit('r3', PUSHSCR); a.bl('c3')
-a.ldr_lit('r0', _esc['quebra_ret']); a.str_i('r0', 'r4', 0)
+a.bl('tipo'); a.cmpi('r0', PG_LUTA_T)
+a.ldr_lit('r0', _esc['quebra_ret']); a.bc('ne', 'es_q'); a.ldr_lit('r0', _esc['quebra_ret_l'])
+a.label('es_q'); a.str_i('r0', 'r4', 0)
 a.label('es_fim')
 a.pop(['r4', 'r5']); a.pop(['r0']); a.bx('r0')
 a.pool()
@@ -188,23 +212,21 @@ a.pool()
 a.label('quebra')
 a.push([], lr=True)
 a.ldr_lit('r0', ALVO); a.ldrb_i('r0', 'r0', 0); a.bl('ativo'); a.cmpi('r0', 0); a.bc('eq', 'qb_m'); a.bl('acaba')
-a.ldr_lit('r0', ALVO); a.ldrb_i('r0', 'r0', 0); a.bl('forte')
 a.label('qb_m')
 a.ldr_lit('r1', RESULT); a.ldrh_i('r2', 'r1', 0); a.mov('r3', 1); a.alu('orr', 'r2', 'r3'); a.strh_i('r2', 'r1', 0)
 a.ldr_lit('r1', INSTR); a.ldr_i('r0', 'r1', 0); a.addi('r0', 5); a.str_i('r0', 'r1', 0)
 a.pop(['r0']); a.bx('r0')
 a.pool()
 
-# callnative: mais um golpe parado pelo escudo (a Defesa não muda agora, tudo vem de uma vez no fim)
-a.label('conta')
-a.ldr_lit('r0', ALVO); a.ldrb_i('r0', 'r0', 0); a.ldr_lit('r1', PG_G + PG_CONTA); a.ldrb_r('r2', 'r1', 'r0'); a.addi('r2', 1); a.strb_r('r2', 'r1', 'r0')
+# callnative: golpe de fogo ou lutador tirou pontos do Nv. 2, que aguentou; o golpe anima e fica sem efeito
+a.label('so_racha')
+a.ldr_lit('r1', RESULT); a.ldrh_i('r2', 'r1', 0); a.mov('r3', 1); a.alu('orr', 'r2', 'r3'); a.strh_i('r2', 'r1', 0)
 a.ldr_lit('r1', INSTR); a.ldr_i('r0', 'r1', 0); a.addi('r0', 5); a.str_i('r0', 'r1', 0)
 a.bx('lr')
-# escudo acabou: com 3 golpes parados, Defesa e Def. Especial vão ao máximo (r0 = batalhador)
+# o escudo chegou inteiro ao fim da rodada 3: Defesa e Def. Especial vão ao máximo (r0 = batalhador)
 a.label('forte')
 a.push(['r4', 'r5'], lr=True)
 mv(a, 4, 0); a.bl('mon'); mv(a, 5, 0)
-a.ldr_lit('r2', PG_G + PG_CONTA); a.ldrb_r('r1', 'r2', 'r4'); a.cmpi('r1', GOLPES_MEDO); a.bc('lo', 'fo_fim')
 a.ldr_lit('r2', PG_G); a.ldrb_i('r3', 'r2', PG_MAX); a.cmpi('r3', 0); a.bc('ne', 'fo_ja')
 a.addi('r4', 1); a.strb_i('r4', 'r2', PG_MAX); a.b('fo_fim')
 a.label('fo_ja')                             # dois escudos acabando juntos: o segundo sobe sem repetir a fala
@@ -233,7 +255,6 @@ a.label('cresce_agora')
 a.push([], lr=True)
 a.ldr_lit('r0', ALVO); a.ldrb_i('r0', 'r0', 0); a.bl('ativo'); a.cmpi('r0', 0); a.bc('eq', 'ca_m')
 a.mov('r1', 2); a.strb_i('r1', 'r0', 0); a.mov('r1', 5); a.strb_i('r1', 'r0', 1)
-a.ldr_lit('r0', ALVO); a.ldrb_i('r0', 'r0', 0); a.ldr_lit('r1', PG_G + PG_CONTA); a.ldrb_r('r2', 'r1', 'r0'); a.addi('r2', 1); a.strb_r('r2', 'r1', 'r0')
 a.label('ca_m')
 a.ldr_lit('r1', RESULT); a.ldrh_i('r2', 'r1', 0); a.mov('r3', 1); a.alu('orr', 'r2', 'r3'); a.strh_i('r2', 'r1', 0)
 a.ldr_lit('r1', INSTR); a.ldr_i('r0', 'r1', 0); a.addi('r0', 5); a.str_i('r0', 'r1', 0)
@@ -300,10 +321,17 @@ a.ldr_lit('r5', ALVO); a.ldrb_i('r5', 'r5', 0); a.ldr_lit('r6', ATK); a.ldrb_i('
 mv(a, 0, 5); a.bl('ent'); mv(a, 4, 0)
 a.mov('r0', 1); a.strb_i('r0', 'r4', 0); a.mov('r0', 3); a.strb_i('r0', 'r4', 1); a.strb_i('r6', 'r4', 2)
 a.mov('r0', 0); a.strb_i('r0', 'r4', 15)
-a.ldr_lit('r1', PG_G + PG_CONTA); a.strb_r('r0', 'r1', 'r5')
+a.mov('r0', RODADAS_MEDO); a.ldr_lit('r1', PG_G + PG_CONTA); a.strb_r('r0', 'r1', 'r5')
+a.mov('r0', 3); a.ldr_lit('r1', PG2); a.strb_r('r0', 'r1', 'r5')
 mv(a, 0, 5); a.bl('mon'); a.ldr_i('r0', 'r0', 0x4C); a.str_i('r0', 'r4', 4)
 mv(a, 0, 6); a.bl('ent'); mv(a, 7, 0); a.mov('r0', 2); a.strb_i('r0', 'r7', 12)
 mv(a, 0, 6); a.bl('mon'); a.ldr_i('r0', 'r0', 0x4C); a.str_i('r0', 'r7', 8)
+mv(a, 0, 6); a.ldr_lit('r3', OL['rota_b'] | 1); a.bl('c3'); a.cmpi('r0', 0); a.bc('eq', 'us_n')     # Imperador: já nasce Nv. 2
+a.mov('r1', 2); a.strb_i('r1', 'r4', 0); a.mov('r1', 5); a.strb_i('r1', 'r4', 1)
+a.mov('r1', 0); a.ldr_lit('r2', PG_G + PG_CONTA); a.strb_r('r1', 'r2', 'r5')
+a.cmpi('r0', 2); a.bc('ne', 'us_n')
+a.ldr_lit('r1', PG2); a.mov('r2', 0x80); a.strb_r('r2', 'r1', 'r5'); a.mov('r2', 0x7F); a.strb_i('r2', 'r7', 12)
+a.label('us_n')
 a.bl('t_acha'); a.cmpi('r0', 0); a.bc('ne', 'us_ok'); a.bl('t_cria')
 a.label('us_ok')
 a.ldr_lit('r1', INSTR); a.ldr_i('r0', 'r1', 0); a.addi('r0', 5); a.str_i('r0', 'r1', 0)
@@ -326,7 +354,7 @@ a.ldr_lit('r1', BS); a.ldr_i('r1', 'r1', 0); a.ldrb_i('r1', 'r1', 2)
 a.ldr_lit('r2', PG_G); a.cmpi('r1', 0); a.bc('eq', 'fd_v'); a.mov('r1', 1); a.strb_i('r1', 'r2', PG_VIU)
 a.label('fd_v'); a.ldr_i('r3', 'r2', PG_RET); a.bx('r3')
 a.label('fim_conta')                         # 1 = rodou um script nosso; 0 = segue o jogo
-a.push(['r4', 'r5', 'r6'], lr=True)
+a.push(['r4', 'r5', 'r6', 'r7'], lr=True)
 a.ldr_lit('r4', PG_G)
 a.ldr_lit('r0', BS); a.ldr_i('r0', 'r0', 0); a.ldrb_i('r0', 'r0', 2); a.cmpi('r0', 0); a.bc('ne', 'fc_nao')
 a.ldrb_i('r0', 'r4', PG_VIU); a.cmpi('r0', 0); a.bc('eq', 'fc_d')    # rodada nova: o tracker voltou a zero
@@ -334,29 +362,35 @@ a.mov('r0', 0); a.strb_i('r0', 'r4', PG_VIU); a.strb_i('r0', 'r4', PG_DONE)
 a.label('fc_d')
 a.ldrb_i('r0', 'r4', PG_DONE); a.cmpi('r0', 0); a.bc('ne', 'fc_nao')
 a.mov('r0', 1); a.strb_i('r0', 'r4', PG_DONE)
-a.mov('r5', 0); a.mov('r6', 0)
+a.mov('r5', 0)
+a.label('fc_dec')                            # primeiro as esperas: a que o escudo der ao acabar conta a partir da próxima rodada
+mv(a, 0, 5); a.bl('ent'); a.ldrb_i('r1', 'r0', 12); a.cmpi('r1', 0); a.bc('eq', 'fc_e'); a.subi('r1', 1); a.strb_i('r1', 'r0', 12)
+a.label('fc_e'); a.addi('r5', 1); a.cmpi('r5', 6); a.bc('lo', 'fc_dec')
+a.mov('r5', 0); a.mov('r6', 0); a.mov('r7', 0)
 a.label('fc_laco')
 mv(a, 0, 5); a.bl('ent'); mv(a, 4, 0)
-a.ldrb_i('r1', 'r4', 12); a.cmpi('r1', 0); a.bc('eq', 'fc_e'); a.subi('r1', 1); a.strb_i('r1', 'r4', 12)
-a.label('fc_e')
 a.ldrb_i('r1', 'r4', 0); a.cmpi('r1', 0); a.bc('eq', 'fc_prox')
 mv(a, 0, 5); a.bl('ativo'); a.cmpi('r0', 0); a.bc('ne', 'fc_vale')
 mv(a, 0, 4); a.bl('acaba'); a.b('fc_prox')                        # saiu de campo ou desmaiou
 a.label('fc_vale')
+a.ldr_lit('r2', PG_G + PG_CONTA); a.ldrb_r('r1', 'r2', 'r5'); a.cmpi('r1', 0); a.bc('eq', 'fc_r')
+a.subi('r1', 1); a.strb_r('r1', 'r2', 'r5'); a.cmpi('r1', 0); a.bc('ne', 'fc_r')
+a.mov('r7', 1); mv(a, 0, 5); a.bl('forte')
+a.label('fc_r')
 a.ldrb_i('r1', 'r4', 1); a.subi('r1', 1); a.strb_i('r1', 'r4', 1); a.cmpi('r1', 0); a.bc('ne', 'fc_prox')
 mv(a, 0, 4); a.bl('acaba'); a.mov('r6', 1)
-mv(a, 0, 5); a.bl('forte')
 a.label('fc_prox')
 a.addi('r5', 1); a.cmpi('r5', 6); a.bc('lo', 'fc_laco')
-a.cmpi('r6', 0); a.bc('eq', 'fc_nao')
-a.ldr_lit('r0', _esc['fim']); a.ldr_lit('r3', EXECSCR); a.bl('c3')
+a.ldr_lit('r0', _esc['fim']); a.cmpi('r6', 0); a.bc('ne', 'fc_ex')
+a.ldr_lit('r0', _esc['fim_forte']); a.cmpi('r7', 0); a.bc('eq', 'fc_nao')
+a.label('fc_ex'); a.ldr_lit('r3', EXECSCR); a.bl('c3')
 a.mov('r0', 1); a.b('fc_fim')
 a.label('fc_nao'); a.mov('r0', 0)
-a.label('fc_fim'); a.pop(['r4', 'r5', 'r6']); a.pop(['r1']); a.bx('r1')
+a.label('fc_fim'); a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r1']); a.bx('r1')
 a.pool()
 
 # t_acha / t_cria: a tarefa fica em endereço fixo (PG_TAREFA), montada à parte
-PG_TAREFA = 0x09FFAB00
+PG_TAREFA = 0x09FFAB40
 a.label('t_acha')                            # r0 = 1 se a tarefa existe
 a.ldr_lit('r1', GTASKS); a.mov('r2', 0); a.ldr_lit('r3', PG_TAREFA | 1)
 a.label('ta_l')
@@ -498,11 +532,15 @@ put(PG_GFX, _gfx)
 
 _forte = b'\xff' + p32(L['pergunta'] | 1) + bytes.fromhex('2e0b35020200') + bytes.fromhex('48002400') + b'\xff' + p32(L['aplica_max'] | 1) + _falou(ID_FORTE)
 assert len(_forte) == 5 + 21
-put(_esc['bloq'], _ini + b'\xff' + p32(L['conta'] | 1) + _falou(ID_BLOQUEOU) + _fim)
-put(_esc['quebra_ret'], bytes.fromhex('392000') + _falou(ID_DERRETEU) + _forte + b'\x3c')
+put(_esc['bloq'], _ini + _falou(ID_BLOQUEOU) + _fim)
+put(_esc['quebra_ret'], bytes.fromhex('392000') + _falou(ID_DERRETEU) + b'\x3c')
+put(_esc['quebra_ret_l'], bytes.fromhex('392000') + _falou(ID_QUEBROU) + b'\x3c')
+put(_esc['racha'], bytes.fromhex('0203090a') + b'\xff' + p32(L['so_racha'] | 1) + bytes.fromhex('392000') + _falou(ID_RACHOU) + _fim)
+put(_esc['fim_forte'], bytes.fromhex('392000') + _forte + b'\x3e')
 put(_esc['fim'], bytes.fromhex('392000') + _falou(ID_DESFEZ) + _forte + b'\x3e')
 put(_esc['cresce'], bytes.fromhex('0203090a') + b'\xff' + p32(L['cresce_agora'] | 1) + bytes.fromhex('392000') + _falou(ID_CRESCEU) + _fim)
-put(_esc['derrete'], bytes.fromhex('0203090a') + b'\xff' + p32(L['quebra'] | 1) + bytes.fromhex('392000') + _falou(ID_DERRETEU) + _forte + _fim)
+put(_esc['derrete'], bytes.fromhex('0203090a') + b'\xff' + p32(L['quebra'] | 1) + bytes.fromhex('392000') + _falou(ID_DERRETEU) + _fim)
+put(_esc['derrete_l'], bytes.fromhex('0203090a') + b'\xff' + p32(L['quebra'] | 1) + bytes.fromhex('392000') + _falou(ID_QUEBROU) + _fim)
 
 # --- ganchos nos comandos do script de batalha
 for _cmd, _orig, _nome in ((0x01, CMD_ACC, 'acc'), (0x07, CMD_ADJ, 'adj'), (0x0A, CMD_WAIT, 'espera'), (0x8A, CMD_HAZE, 'haze'), (0xB2, CMD_PERISH, 'perish')):
@@ -541,7 +579,7 @@ put(LS_TAB + 4 * CUBCHOO, p32(PG_LS))
 
 # descrição do golpe (tabela achada pelo texto do Pound, índice = golpe - 1)
 DESC_TAB, PG_DESC = 0x092DB0A4, 0x09FEFFA0
-put(PG_DESC, enc('Escudo de gelo que\nbloqueia golpes por 3\nrodadas. Fogo derrete.'))
+put(PG_DESC, enc('Escudo de gelo por 3\nrodadas. Fogo derrete,\nlutador quebra.'))
 put(DESC_TAB + 4 * (ID_PG - 1), p32(PG_DESC))
 
 exec(open(os.path.join(_dir, 'imperador.py'), encoding='utf8').read())

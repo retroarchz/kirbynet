@@ -759,6 +759,8 @@ for _b in _pgt: _pgp.append(_at); put(_at, _b); _at += 0x30
 _pgp.append(0x09FEFF08); put(0x09FEFF08, enc('O medo do perigo deixou\n')[:-1] + b'\xfd\x10' + enc(' mais forte!'))
 _pgp.append(IMP_TXT); put(IMP_TXT, enc('O Tempo do Imperador de\n')[:-1] + b'\xfd\x10' + enc(' começou!'))
 _pgp.append(IMP_TXT + 0x40); put(IMP_TXT + 0x40, b'\xfd\x10' + enc(' agora domina\no Sheer Cold!'))
+_pgp.append(0x09FFCC00); put(0x09FFCC00, enc('O Protetor Glacial rachou!'))
+_pgp.append(0x09FFCC30); put(0x09FFCC30, enc('O Protetor Glacial quebrou!'))
 _tab = [w32(OLD_TABTXT + 4 * i) for i in range(N_TXT)] + [D_MSG, D_MSG2] + _pgp
 put(D_TABTXT, b''.join(p32(x) for x in _tab))
 _v = p32(OLD_TABTXT); _i = ROM.find(_v); _n = 0
@@ -768,7 +770,7 @@ while _i != -1:
     _i = ROM.find(_v, _i + 1)
 assert _n == 24, _n
 assert ROM[0x1D5BCC:0x1D5BD0] == bytes.fromhex('ba208000')
-put(0x081D5BCC, bytes.fromhex('bd20'))         # limite do número do texto: 744 -> 756
+put(0x081D5BCC, bytes.fromhex('be20'))         # limite do número do texto: 744 -> 760
 
 # animação geral 62: a tarefa do dreno do Leech Seed (quem recebe/quem perde vêm do argumento) + a do Dream Eater
 # o script do Dream Eater copiado sem trocar o fundo (o "call SetPsychicBackground" e o "call UnsetPsychicBg" chamam
@@ -1054,7 +1056,7 @@ for at, data in sorted(patches):
     o = at - 0x08000000
     orig = ROM[o:o + len(data)]
     livre = all(b == 0xFF for b in orig)
-    assert livre or at < 0x09000000 or at == DESC_TAB + 4 * (ID_PG - 1), hex(at)
+    assert livre or at < 0x09000000 or at in (DESC_TAB + 4 * (ID_PG - 1), DESC_TAB + 4 * (ID_ORDEM - 1)), hex(at)
     out.append([o, None if livre else orig.hex(), data.hex()])
     rom[o:o + len(data)] = data
 json.dump(out, open(os.path.join(os.path.dirname(__file__), 'nuvem.json'), 'w'))
