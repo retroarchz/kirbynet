@@ -334,9 +334,11 @@ function tick() {
             const b = LinkHLE.encode(run.me, msg);
             if (b) postMessage({ t: "cabo", bytes: b }, [b.buffer]);
           });
+          if (run.hle && run.caboAuto) run.hle.autoLiga();
           if (run.hle) for (const d of run.caboEarly.splice(0)) d.left != null ? run.hle.left(d.left) : run.hle.recv(d.from, d.m);
         }
-        if (run.hle) run.hle.pre();
+        if (run.hle && run.meNovo != null && run.hle.troca(run.meNovo)) { run.me = run.meNovo; run.meNovo = null; }
+        if (run.hle) { run.hle.pre(); k[0] = run.hle.teclas(k[0]); }
         run.s.runFrame(k);
         relogio();
         if (run.hle) run.hle.post();
@@ -457,7 +459,7 @@ onmessage = async (ev) => {
               free: !!m.free, me: m.me | 0, cs: m.free && SNES ? [CoopSync.create(m.me | 0)] : null, lastG: [], peerSnaps: {},
               pendingHits: [], sentIds: new Set(),
               // GBA: cabo link pela internet (só nos jogos que o linkhle.js conhece)
-              cabo: m.free && !SNES ? m.cabo || null : null, hle: null, caboEarly: [],
+              cabo: m.free && !SNES ? m.cabo || null : null, hle: null, caboEarly: [], caboAuto: !!m.auto, meNovo: null,
               especial: !m.net && !SNES && m.especial ? m.especial : 0,
               rb: m.net && s.canSnapshot && !NO_RB ? { snaps: new Map(), spare: [], count: 0, resim: 0 } : null };
       run.snapT = performance.now();
@@ -519,6 +521,8 @@ onmessage = async (ev) => {
     if (d) { if (run.hle) run.hle.recv(d.from, d.m); else if (run.caboEarly.length < 500) run.caboEarly.push(d); }
   }
   else if (m.t === "caboLeft") { if (run && run.cabo) { if (run.hle) run.hle.left(m.from); else run.caboEarly.push({ left: m.from }); } }
+  else if (m.t === "caboMe") { if (run && run.cabo) run.meNovo = m.me; }      // coop automático: vaga na sala nova
+  else if (m.t === "caboFim") { if (run && run.hle) run.hle.soltaTodos(); }   // coop automático: a sala acabou
   else if (m.t === "bufs") { for (const b of m.bufs) if (b.byteLength === FRAME_BYTES && pool.length < 48) pool.push(b); }
   else if (m.t === "vs") { if (run && iv) tick(); }   // a tela atualizou: roda o quadro que já está na hora
   else if (m.t === "aport") audioPort = m.port;

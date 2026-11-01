@@ -633,6 +633,7 @@ function netJoin(url, hello, cb) {
 
   ws.onopen = () => { net.opened = true; net.send("H", JSON.stringify(hello)); };
   ws.onmessage = (ev) => {
+    net.ouviu = performance.now();
     const u8 = new Uint8Array(ev.data), kind = String.fromCharCode(u8[0]), data = u8.subarray(1);
     const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
     if (kind === "W") net.slot = json(data).slot;
@@ -648,7 +649,8 @@ function netJoin(url, hello, cb) {
         S.players = j.names; renderGame(S, false);
         run.worker.postMessage({ t: "resend" });   // manda de novo os desenhos do meu boneco para quem chegou
         if (run.cabo && j.left != null) run.worker.postMessage({ t: "caboLeft", from: j.left });   // o jogo sai do coop com ele
-        if (j.left == null) toast("Alguém entrou na partida!");
+        if (run.auto) AutoCoop.mudou(j);
+        else if (j.left == null) toast("Alguém entrou na partida!");
         else toast(`P${j.left + 1} saiu. Pode entrar de novo pela sala que aparece no site.`);
       }
     }
@@ -701,6 +703,10 @@ function startRun(opts) {
     opts = { ...opts, worldN: opts.n, n: 1, saves: [mine && mine.length ? mine : new Uint8Array(0)] };
     if (SYS.id === "gba" && typeof LinkHLE !== "undefined" && LinkHLE.supports(opts.romSha1)) opts.cabo = opts.romSha1;
   }
+  // Coop automático (Quetzal pelo site): é uma partida sozinho de verdade, com prontos e tudo. Só o cabo fica pronto, e
+  // quem aparece no mesmo Wi-Fi é ligado em paralelo (AutoCoop, em sitenet.js), sem parar o jogo.
+  opts = { ...opts, auto: !!opts.auto && autoCoopServe(opts.romSha1) };
+  if (opts.auto) opts.cabo = opts.romSha1;
   // ?semrollback no endereço da página: sala sem rollback (só espera, como antes) — para comparar
   const worker = new Worker(`engine-worker.js?sys=${SYS.id}&v=${ASSET_V}${/[?&]semrollback\b/.test(location.search) ? "&rb=0" : ""}`);
   const run = { ...opts, worker, desync: null, raf: 0, lastKeys: "",
@@ -729,7 +735,7 @@ function startRun(opts) {
   quetzalTipos(roms);   // ajustes fixos do Quetzal: valem sempre (também online, todos iguais)
   run.moto = quetzalNuvem(roms);   // deu certo: a tecla 0 pode trocar o desenho da moto
   worker.postMessage({ t: "start", module: Play.mod, n: run.n, rom: roms, saves: opts.saves,
-                       net: !!run.net && !run.free, free: !!run.free, me: run.slot | 0, slot: run.free ? 0 : run.slot,
+                       net: !!run.net && !run.free, free: !!run.free || run.auto, auto: run.auto, me: run.slot | 0, slot: run.free ? 0 : run.slot,
                        cabo: run.cabo || null, especial: Cheats.usable(run) ? CheatPresets.especial() : 0,
                        delay: run.delay || 0, cheats: cheats.length ? cheats : null }, [roms.buffer]);
   $("btn-cheats").classList.toggle("hidden", !Cheats.usable(run));
@@ -784,15 +790,18 @@ function cycleTurboSpeed() {
   const run = Play.run;
   if (run && run.ff) { run.ff = Turbo.speed; run.worker.postMessage({ t: "speed", speed: Turbo.speed }); }
 }
+// em coop automático o turbo só para enquanto houver outra pessoa ligada
+const emGrupo = (run) => !!run.net || !!(run.link && run.link.nPeers > 0);
 function toggleTurbo() {
-  if (Play.run && Play.run.net) return toast("⏩ Acelerar só funciona jogando sozinho.");
+  if (Play.run && emGrupo(Play.run)) return toast("⏩ Acelerar só funciona jogando sozinho.");
   Turbo.locked = !Turbo.locked; updateTurboButton();
   if (Play.run) sendKeys(Play.run);
 }
 function sendKeys(run) {
   const want = !cheatsOpen() && turboHeld();   // Espaço digitado no código não acelera
-  if (run.net) {
+  if (emGrupo(run)) {
     if (want && down.has("Space") && !Turbo.warned) { Turbo.warned = true; toast("⏩ Acelerar só funciona jogando sozinho."); }
+    if (run.ff) { run.ff = 0; run.worker.postMessage({ t: "speed", speed: 1 }); }
   } else if ((want ? Turbo.speed : 0) !== (run.ff || 0)) {
     run.ff = want ? Turbo.speed : 0;
     run.worker.postMessage({ t: "speed", speed: want ? Turbo.speed : 1 });
@@ -1445,7 +1454,7 @@ function onWorker(run, m) {
     drawDue(run, performance.now() + run.vsync * 0.5);   // já pronto? desenha agora (entra no próximo vsync)
   }
   else if (m.t === "net") { if (run.net) run.net.send(m.kind, m.bytes); }
-  else if (m.t === "cabo") { if (run.net) run.net.send("C", new Uint8Array(m.bytes)); }   // cabo pela internet
+  else if (m.t === "cabo") { const n = run.net || run.link; if (n) n.send("C", new Uint8Array(m.bytes)); }   // cabo pela internet
   // Mundo livre: inimigos dos quais sou dono, golpes nos dos outros, abates e o desenho do meu boneco
   else if (m.t === "osnap") { if (run.net && run.net.objs) run.net.objs(new Uint8Array(m.bytes)); }
   else if (m.t === "ohit") { if (run.net) run.net.send("A", new Uint8Array(m.bytes)); }
@@ -1497,6 +1506,7 @@ function persistSaves(run, saves, unload) {
 function endRun() {
   const run = Play.run;
   if (!run) return;
+  AutoCoop.desliga();
   Play.run = null;
   $("cheats").classList.add("hidden");
   Turbo.locked = false; Turbo.warned = false; updateTurboButton();   // a próxima partida começa normal

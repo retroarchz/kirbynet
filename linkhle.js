@@ -58,6 +58,14 @@ const LinkHLE = (() => {
 
   function supports(romSha1) { return !!GAMES[romSha1]; }
 
+  // Coop automático: sem menu COOP, sem escolher jogadores e sem o A do host. Quem está na sala e parado no mapa avisa
+  // que está livre; o host dá a largada e cada jogo cria a tarefa de conexão do próprio Quetzal, sem as mensagens.
+  // Tudo no cabo virtual e na memória: a ROM não muda. Mesmos endereços na Alpha 9 e na Coop 3.
+  const AUTO = { cb1: 0x03002660, cb2: 0x03002664, field: 0x080C2965, over: 0x080C28E1, coop: 0x080C5761,
+                 tasks: 0x03005640, lock: 0x03000FDC, ctx: 0x03000EE8, ctxLivre: 2, fade: 0x02039AC3, avatar: 0x02039070,
+                 linkType: 0x020229C6, tipo: 2, abre: 0x0825FD45, passo: 0x0825FD8D, mestre: 0x0825FEB1, escravo: 0x0825FFA1 };
+  const AUTO_B = 2, AUTO_AVISO = 30, AUTO_VALE = 1500, AUTO_PEDIDO = 4000, AUTO_LIMITE = 8000, AUTO_PAUSA = 10000, AUTO_REVE = 1500, AUTO_CALMA = 1000;
+
   const DEAD_MS = 15000;   // ligado comigo e sem dar notícia há tanto tempo: caiu (o jogo recebe o "desconectar")
 
   // ram: KnCore game.ram(i). me: número do jogador na sala (vaga). send(msg): manda para todos da sala.
@@ -84,6 +92,11 @@ const LinkHLE = (() => {
     const cur = () => sub || ids;
     const linkPeers = () => openPeers().filter(s => duo ? duo.includes(s) : !busy.has(s));
     let armed = false, open = false, ids = null, go = null, lastSt = 0, role = null, beat = 0;
+    // auto: fase 0 = jogando, 1 = abrindo o cabo, 2 = conectando, 3 = desistindo (B da própria tarefa do jogo)
+    let auto = false, fase = 0, lista = null, tarefa = 0, faseT = 0, pedido = null, pausa = 0, avisos = 0;
+    // desligou: o jogador usou DESCONECTAR, então fica sozinho até abrir o COOP de novo. saindo/expulso: a saída não foi dele
+    let desligou = false, saindo = false, expulso = false, grupo = "", grupoT = 0;
+    const avisados = new Map();   // vaga -> { n: nível (0 ocupado, 1 livre e sozinho, 2 parado no coop), t }
 
     const r8 = (o) => ram.r8(L + o), w8 = (o, v) => ram.w8(L + o, v);
     const r16 = (o) => ram.r16(L + o), w16 = (o, v) => ram.w16(L + o, v);
@@ -170,6 +183,82 @@ const LinkHLE = (() => {
       if (!savedBackup) return;
       savedBackup.bytes.forEach((v, j) => ram.w8(C.saved + j, v)); ram.w8(C.savedCount, savedBackup.count); savedBackup = null;
     }
+    // 1 = sozinho no mapa, 2 = no coop no mapa; sem menu, script ou transição. 0 = ocupado. Andando conta como livre:
+    // a conexão só espera acabar o passo (entrePassos), senão quem nunca para de andar nunca entraria
+    function nivel() {
+      if (desligou || fase || saindo || sub || duo) return 0;
+      if (ram.r32(AUTO.cb2) !== AUTO.field || ram.r8(AUTO.lock) || ram.r8(AUTO.ctx) !== AUTO.ctxLivre) return 0;
+      if (ram.r8(AUTO.fade) & 0x80) return 0;
+      const cb1 = ram.r32(AUTO.cb1);
+      if (!open && cb1 === AUTO.over) return 1;
+      return open && ids && cb1 === AUTO.coop ? 2 : 0;
+    }
+    const entrePassos = () => ram.r8(AUTO.avatar + 3) !== 1;
+    const comNivel = (n, t) => [...avisados].filter(([, v]) => v.n === n && t - v.t < AUTO_VALE).map(([s]) => s);
+    // cabo solto: cada um recebe o "desconectar" dos outros, o jogo volta ao normal sozinho, sem mudar nada no mapa
+    function byeDe(from) {
+      dead.add(from);
+      if (!inbox.has(from)) inbox.set(from, []);
+      for (const c of G.bye(lastCmd.get(from))) inbox.get(from).push(c);
+    }
+    function solta() {
+      saindo = true;
+      for (const s of ids) if (s !== me && !dead.has(s)) byeDe(s);
+    }
+    // cria a tarefa entre dois quadros, no fim da lista do jogo
+    function criaTarefa(func) {
+      let cauda = -1, vaga = -1;
+      for (let t = 0; t < 16; t++) {
+        const b = AUTO.tasks + 40 * t;
+        if (ram.r8(b + 4)) { if (ram.r8(b + 6) === 0xFF) cauda = t; } else if (vaga < 0) vaga = t;
+      }
+      if (cauda < 0 || vaga < 0) return 0;
+      const c = AUTO.tasks + 40 * cauda, b = AUTO.tasks + 40 * vaga;
+      for (let j = 0; j < 40; j++) ram.w8(b + j, 0);
+      ram.w16(b, func & 0xFFFF); ram.w16(b + 2, func >>> 16);
+      ram.w8(b + 4, 1); ram.w8(b + 5, cauda); ram.w8(b + 6, 0xFF); ram.w8(b + 7, ram.r8(c + 7));
+      ram.w8(c + 6, vaga);
+      return b;
+    }
+    function conecta(list) {
+      const b = criaTarefa(AUTO.abre);
+      if (!b) return false;
+      ram.w16(AUTO.linkType, AUTO.tipo); ram.w8(AUTO.lock, 1);
+      lista = list.slice(); tarefa = b; fase = 1; faseT = now(); pedido = null;
+      return true;
+    }
+    function autoPasso() {
+      const t = now();
+      if (fase === 0) {
+        const n = nivel();
+        if (++avisos % AUTO_AVISO === 0) send({ k: "au", n });
+        if (pedido && t - pedido.t > AUTO_PEDIDO) pedido = null;
+        if (n === 1 && entrePassos()) {
+          if (pedido) { const l = pedido.ids; pedido = null; conecta(l); }
+          else if (t > pausa) {
+            // só comanda quem vê a mesma lista há 1 s: chegando juntos, cada um ainda enxerga só parte do grupo
+            const l = [me, ...comNivel(1, t)].sort((a, b) => a - b), chave = l.join();
+            if (chave !== grupo) { grupo = chave; grupoT = t; }
+            else if (l.length > 1 && l[0] === me && t - grupoT >= AUTO_CALMA && conecta(l)) send({ k: "vem", ids: l });
+          }
+        } else if (n === 2 && ids[0] === me && t > pausa && comNivel(1, t).length) {
+          // chegou mais alguém: todos soltam o cabo por um instante e religam juntos, já com ele
+          const juntos = comNivel(2, t);
+          if (ids.every(s => s === me || juntos.includes(s))) { send({ k: "sai" }); solta(); }
+        }
+      } else if (fase === 1) {
+        // a tarefa abriu o cabo: em vez de escrever "Aguardando", vai direto para a espera do jogo
+        if (ram.r32(tarefa) === AUTO.passo) {
+          const f = lista[0] === me ? AUTO.mestre : AUTO.escravo;
+          ram.w16(tarefa, f & 0xFFFF); ram.w16(tarefa + 2, f >>> 16);
+          ram.w16(tarefa + 10, lista.length); ram.w16(tarefa + 12, lista.length);
+          fase = 2; faseT = t;
+        }
+      } else if (fase === 2) {
+        if (ram.r32(AUTO.cb1) === AUTO.coop) { fase = 0; lista = null; avisados.clear(); }
+        else if (t - faseT > AUTO_LIMITE && ram.r32(AUTO.cb2) === AUTO.field) { fase = 3; pausa = t + AUTO_PAUSA; }
+      } else if (fase === 4) { fase = 0; lista = null; }
+    }
     function release(list, t) {
       if (t === 2) { duo = list.slice(); duoBattle = false; duoSaved(list); enterSub(list); }
       ram.w8(C.mail + 1, 1);
@@ -230,8 +319,15 @@ const LinkHLE = (() => {
         const nowOpen = st >= ST_HANDSHAKE;
         if (nowOpen !== open) {
           open = nowOpen;
-          role = open ? (me === 0 ? "m" : "s") : null;
-          if (!open) { reset(); dead.clear(); }
+          role = open ? (me === (fase ? lista[0] : 0) ? "m" : "s") : null;
+          if (open) { if (!fase) desligou = false; saindo = expulso = false; }   // abriu pelo menu: volta a valer o automático
+          else {
+            if (auto && ids && !saindo && !expulso) desligou = true;
+            saindo = false; expulso = false;
+            // cabo solto: espera todos dizerem como estão, senão cada um religaria por conta própria com quem viu primeiro
+            avisados.clear(); pausa = Math.max(pausa, now() + AUTO_REVE);
+            reset(); dead.clear();
+          }
           status();
         }
         else if (st !== lastSt && st === ST_HANDSHAKE) status();
@@ -240,10 +336,12 @@ const LinkHLE = (() => {
         if (st === ST_HANDSHAKE && !go) {
           // o mestre apertou A em "Pressione A para começar": todos que estão com o cabo aberto entram
           const list = [me, ...linkPeers()];
-          if (role === "m" && list.length > 1 && ram.r8(G.adv) === 1) {
+          const largada = fase === 2 && lista.every(s => list.includes(s));
+          if (role === "m" && list.length > 1 && (ram.r8(G.adv) === 1 || largada)) {
             ram.w8(G.adv, 0);
-            send({ k: "go", ids: list });
-            establish(list);
+            const quem = largada ? lista : list;
+            send({ k: "go", ids: quem });
+            establish(quem);
           }
         }
         if (st === ST_CONN && ids) {
@@ -272,13 +370,36 @@ const LinkHLE = (() => {
           if (ask && now() - ask.at > 5000) ask = null;   // ninguém respondeu: continua esperando
           if (!waiting()) ram.w8(C.mail + 1, 0);          // liberação velha não vale para a próxima espera
         }
+        if (auto) autoPasso();
+      },
+      // liga o coop automático neste aparelho
+      autoLiga() { auto = true; },
+      // entrou em outra sala: nova vaga. Só com o cabo fechado (quem estava no coop sai antes)
+      troca(novo) {
+        if (open || fase) return false;
+        me = novo; go = null; pedido = null;
+        peers.clear(); avisados.clear(); inbox.clear(); lastCmd.clear(); dead.clear();
+        return true;
+      },
+      // a sala acabou: o jogo recebe o "desconectar" de todos que estavam ligados comigo
+      soltaTodos() { for (const s of [...(ids || [])]) if (s !== me) this.left(s); peers.clear(); avisados.clear(); },
+      get fase() { return fase; },
+      get desligou() { return desligou; },
+      // teclas do jogador: durante a conexão (1 s) o jogo não recebe nada, senão o B cancelaria
+      teclas(k) {
+        if (!fase) return k;
+        if (fase === 3) { fase = 4; return AUTO_B; }
+        return 0;
       },
       // mensagem de outro jogador da sala
       recv(from, m) {
         if (from === me || !m) return;
         const p = peers.get(from);
         if (p) p.t = now();
-        if (m.k === "st") {
+        if (m.k === "au") avisados.set(from, { n: m.n, t: now() });
+        else if (m.k === "vem") { if (auto && !fase && !open && Array.isArray(m.ids) && m.ids[0] === from && m.ids.includes(me)) pedido = { ids: m.ids, t: now() }; }
+        else if (m.k === "sai") { if (auto && ids && from === ids[0] && !saindo) solta(); }
+        else if (m.k === "st") {
           const known = peers.has(from);
           peers.set(from, { open: !!m.open, master: !!m.master, t: now() });
           if (m.open) dead.delete(from);
@@ -309,6 +430,7 @@ const LinkHLE = (() => {
           // numa dupla: só os comandos dos dois; fora dela: nada de quem está numa dupla sem mim
           if (sub ? !sub.includes(from) : busy.has(from)) return;
           if (C && rejoin.has(from) && (m.w[0] & 0xFFFF) === 0x2222 && ids && r8(STATE) === ST_CONN) { rejoin.clear(); ram.w16(C.linkType, m.w[1] & 0xFFFF); }
+          if ((m.w[0] & 0xFFFF) === 0xCAFE) expulso = true;   // o "desconectar" veio de outro jogador
           if (!inbox.has(from)) inbox.set(from, []);
           const c = m.w.map(v => v & 0xFFFF);
           inbox.get(from).push(c); lastCmd.set(from, c);
@@ -316,18 +438,16 @@ const LinkHLE = (() => {
       },
       // alguém saiu da sala: se estava no coop comigo, o meu jogo recebe o "desconectar" dele
       left(from) {
-        peers.delete(from);
-        if (ids && ids.includes(from) && !dead.has(from) && G.bye) {
-          dead.add(from);
-          if (!inbox.has(from)) inbox.set(from, []);
-          for (const c of G.bye(lastCmd.get(from))) inbox.get(from).push(c);
-        } else inbox.delete(from);
+        peers.delete(from); avisados.delete(from);
+        if (ids && ids.includes(from) && !dead.has(from) && G.bye) { expulso = true; byeDe(from); }
+        else inbox.delete(from);
       },
     };
   }
   // Mensagens pela sala, em bytes: [vaga de quem manda, tipo, ...]
   //   1 = comando (8 números de 16 bits), 2 = cabo aberto/fechado + se é o mestre, 3 = "começar" (vagas de quem entra)
   //   coop de teste: 4 = pedido do host (tipo, vagas), 5/6 = aceito/recusado, 7 = entrei na dupla (vagas), 8 = saí da dupla
+  //   coop automático: 10 = nível (0 ocupado, 1 livre, 2 parado no coop), 11 = largada (vagas), 12 = soltem o cabo
   // Pokémon Quetzal, tecla Alt: alterna o valor de trapaça do save (embaralhado com o ID de treinador) entre 1 e 0.
   // Sem trapaça, os personagens de fim de jogo também somem: eles entregariam a visita à Fronteira de Batalha.
   // É ele que a troca compara. Só vale para quem começou com cheats: save+0x2CE fica marcado, mesmo com o valor em 0.
@@ -362,6 +482,9 @@ const LinkHLE = (() => {
     if (m.k === "sub") return new Uint8Array([from, 7, m.ids.length, ...m.ids]);
     if (m.k === "full") return new Uint8Array([from, 8]);
     if (m.k === "md") return new Uint8Array([from, 9, m.v ? 1 : 0]);
+    if (m.k === "au") return new Uint8Array([from, 10, m.n]);
+    if (m.k === "vem") return new Uint8Array([from, 11, m.ids.length, ...m.ids]);
+    if (m.k === "sai") return new Uint8Array([from, 12]);
     return null;
   }
   function decode(b) {
@@ -376,6 +499,9 @@ const LinkHLE = (() => {
     if (b[1] === 7 && b.length >= 3 + b[2]) return { from, m: { k: "sub", ids: Array.from(b.subarray(3, 3 + b[2])) } };
     if (b[1] === 8) return { from, m: { k: "full" } };
     if (b[1] === 9 && b.length >= 3) return { from, m: { k: "md", v: b[2] } };
+    if (b[1] === 10 && b.length >= 3) return { from, m: { k: "au", n: b[2] } };
+    if (b[1] === 11 && b.length >= 3 + b[2]) return { from, m: { k: "vem", ids: Array.from(b.subarray(3, 3 + b[2])) } };
+    if (b[1] === 12) return { from, m: { k: "sai" } };
     return null;
   }
   return { supports, create, encode, decode, trocaModo, GAMES };

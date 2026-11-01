@@ -169,7 +169,12 @@ function openPeer(id) {
 const netErr = (e) => ["network", "server-error", "socket-error", "socket-closed"].includes(e && e.type)
   ? "Sem internet para criar a sala." : "Não consegui criar a sala" + (e && e.type ? " (" + e.type + ")." : ".");
 // abre a sala no "apresentador" com o primeiro código livre desta internet
-async function roomListen(onConn) {
+async function roomListen(onConn, fixo) {
+  if (fixo) {   // coop automático: um código só, quem chega depois descobre que a sala já existe (unavailable-id)
+    const peer = await openPeer(SITE_PREFIX + fixo);
+    peer.on("connection", onConn);
+    return { peer, code: fixo };
+  }
   const pre = await netPrefix();
   const codes = pre ? [...ROOM_DIGITS].map(d => pre + d) : [];
   for (let i = 0; i < 3; i++) codes.push(newCode());   // endereço desconhecido ou as 4 ocupadas
@@ -225,6 +230,100 @@ async function scanRooms() {
   });
   return (await Promise.all([...ROOM_DIGITS].map(d => probe(pre + d)))).filter(Boolean);
 }
+// ---------------------------------------------------------------- coop automático
+// Pokémon Quetzal pelo site: tocou em Jogar, o jogo abre na hora como sempre. Em paralelo, quem está no mesmo Wi-Fi com a
+// mesma ROM se acha: o primeiro vira a sala (sem tela), os outros entram, e o cabo liga sozinho (autoPasso no linkhle.js).
+// Nada aqui pode parar o jogo: sem internet, sem servidor ou se a sala cair, cada um segue jogando e tenta de novo depois.
+const FORA_DO_WIFI = "fora-do-wifi", SALA_FECHOU = "A sala fechou.", AUTO_SEM_RESPOSTA = 6000;
+function autoCoopServe(sha1) {
+  return typeof SITE !== "undefined" && SITE && typeof Peer !== "undefined" && SYS.id === "gba" && typeof LinkHLE !== "undefined" && LinkHLE.supports(sha1);
+}
+// a conexão aberta foi direto pela rede local? (endereço "host" dos dois lados, sem passar pela internet)
+async function mesmaRede(conn) {
+  const pc = conn.peerConnection;
+  for (let i = 0; pc && i < 24; i++) {
+    const st = await pc.getStats(), par = [...st.values()].find(v => v.type === "candidate-pair" && v.state === "succeeded" && (v.nominated || v.selected));
+    if (par) return st.get(par.localCandidateId)?.candidateType === "host" && st.get(par.remoteCandidateId)?.candidateType === "host";
+    await new Promise(ok => setTimeout(ok, 250));
+  }
+  return false;
+}
+const AutoCoop = {
+  run: null, nome: "", gen: 0, net: null, timer: 0, vigia: 0,
+  liga(run, nome) {
+    if (!run || !run.auto) return;
+    this.desliga();
+    this.run = run; this.nome = nome;
+    // aba fechada à força nem sempre derruba a conexão: o ping 4x por segundo sem resposta conta como queda
+    this.vigia = setInterval(() => {
+      const n = this.net;
+      if (n && n.ouviu && performance.now() - n.ouviu > AUTO_SEM_RESPOSTA) { const g = this.gen; this.caiu(g, n, ""); n.close(); }
+    }, 1000);
+    this.tenta(++this.gen);
+  },
+  desliga() {
+    this.gen++;
+    clearTimeout(this.timer); clearInterval(this.vigia);
+    const net = this.net, run = this.run;
+    this.net = null; this.run = null;
+    if (run) run.link = null;
+    if (SiteRoom.on && SiteRoom.auto) SiteRoom.end(SALA_FECHOU);
+    if (net) net.close();
+  },
+  depois(ms, gen) { clearTimeout(this.timer); this.timer = setTimeout(() => { if (gen === this.gen) this.tenta(gen); }, ms); },
+  async tenta(gen) {
+    const run = this.run, pre = await netPrefix();
+    if (gen !== this.gen || !run) return;
+    if (!pre) return this.depois(15000, gen);
+    const code = "A" + pre + run.romSha1.slice(0, 4).toUpperCase();
+    try {
+      await SiteRoom.create(run.romSha1, () => {}, null, "", code);
+      if (gen !== this.gen) return SiteRoom.close();
+      this.entra(gen, SiteRoom.localSocket());
+    } catch (e) {
+      if (gen !== this.gen) return;
+      SiteRoom.close();
+      if (e && e.type === "unavailable-id") this.entra(gen, siteSocket(code));   // já tem alguém: entra na sala dele
+      else this.depois(15000, gen);
+    }
+  },
+  entra(gen, sock) {
+    const run = this.run;
+    const net = this.net = netJoin(sock, { name: this.nome, rom: run.romSha1, save: "", eng: SYS.engineV }, {
+      onLobby: () => { if (gen === this.gen && SiteRoom.on && SiteRoom.auto && !SiteRoom.running) SiteRoom.handle({ t: "start", delay: 1, rtc: false }); },
+      onStart: (info) => {
+        if (gen !== this.gen) return;
+        run.link = net;
+        net.onCabo = (u8) => { const b = u8.slice(); run.worker.postMessage({ t: "cabo", bytes: b.buffer }, [b.buffer]); };
+        run.worker.postMessage({ t: "caboMe", me: net.slot });
+        run.names = info.names; this.antes = info.names.slice();
+        const outros = info.names.filter((n, i) => n != null && i !== net.slot);
+        if (outros.length) toast(`🎮 ${outros.join(" e ")} no seu Wi-Fi!`);
+      },
+      onError: (msg) => this.caiu(gen, net, msg),
+    });
+  },
+  // alguém entrou ou saiu da sala
+  mudou(j) {
+    const run = this.run;
+    if (!run) return;
+    if (j.left != null) toast(`${(this.antes && this.antes[j.left]) || "Alguém"} saiu.`);
+    else { const novo = j.names.find((n, i) => n != null && !(this.antes || [])[i]); if (novo && novo !== this.nome) toast(`🎮 ${novo} no seu Wi-Fi!`); }
+    this.antes = j.names.slice();
+  },
+  // a sala acabou (o host saiu, a internet caiu): os outros seguem jogando sozinhos e procuram de novo
+  caiu(gen, net, msg) {
+    if (gen !== this.gen || net !== this.net) return;
+    const run = this.run;
+    this.net = null;
+    if (run) { run.link = null; run.worker.postMessage({ t: "caboFim" }); }
+    if (SiteRoom.on && SiteRoom.auto) SiteRoom.close();
+    // recusado (outra casa na mesma internet, sala cheia, site antigo): nada a fazer agora, só olha de novo de vez em quando
+    const recusado = net.gotError && msg !== SALA_FECHOU;
+    this.depois(recusado ? 60000 : 1500 + Math.random() * 1500, gen);
+  },
+};
+
 // ---------------------------------------------------------------- o jogo vai de quem cria a sala para quem entra
 // Como a pasta roms do kirbynet: quem entra não precisa ter a ROM, ela vem direto do host
 // (de aparelho para aparelho; não passa por nenhum site). G (pedido) {have: sha1 que já tenho}
@@ -267,23 +366,24 @@ function siteGetRom(code, have) {
 }
 
 const SiteRoom = {
-  on: false, gen: 0, peer: null, code: null, sha1: "", rom: null, romName: "", players: [], running: false, hashes: new Map(), onState: null,
+  on: false, gen: 0, peer: null, code: null, sha1: "", rom: null, romName: "", players: [], running: false, hashes: new Map(), onState: null, auto: false,
   // sha1/rom/romName = jogo do host (vai para quem entra); onState(estado) atualiza a tela da sala
-  create(sha1, onState, rom, romName) {
+  // fixo: código do coop automático (sala sem tela, só para quem está no mesmo Wi-Fi)
+  create(sha1, onState, rom, romName, fixo) {
     this.close();
-    Object.assign(this, { on: true, sha1, onState, rom, romName, players: [], running: false, hashes: new Map() });
+    Object.assign(this, { on: true, sha1, onState, rom, romName, players: [], running: false, hashes: new Map(), auto: !!fixo });
     if (typeof Peer === "undefined") return Promise.reject(new Error("Não consegui carregar a conexão."));
     const gen = this.gen;
-    return roomListen((pc) => this.remote(pc)).then(({ peer, code }) => {
+    return roomListen((pc) => this.remote(pc), fixo).then(({ peer, code }) => {
       if (gen !== this.gen || !this.on) return peer.destroy();
       this.peer = peer; this.code = code;
       keepAlive(peer, () => this.peer === peer);
       this.push();
-    }, (e) => { throw new Error(e && e.type ? netErr(e) : (e.message || String(e))); });
+    }, (e) => { throw Object.assign(new Error(e && e.type ? netErr(e) : (e.message || String(e))), { type: e && e.type }); });
   },
   // um jogador que chegou pelo código
   remote(pc) {
-    const c = { closed: false, local: false };
+    const c = { closed: false, local: false, pc };
     c.send = (kind, payload) => {
       if (c.closed) return;
       try { chunkSend(pc, packMsg(kind, payload)); } catch (e) {}
@@ -343,6 +443,12 @@ const SiteRoom = {
       c.send("G", romPacket(this.running && !this.free ? { error: "A partida já começou." }
         : { name: this.romName, sha1: this.sha1, have }, this.rom).subarray(1));
     } else if (kind === "H") {
+      // coop automático: mesmo endereço público não prova que é o mesmo Wi-Fi. Só entra quem chega direto pela rede local
+      if (this.auto && !c.local && !c.perto) {
+        const copia = u8.slice();
+        mesmaRede(c.pc).then(ok => { if (ok) { c.perto = true; this.msg(c, copia); } else fail(FORA_DO_WIFI); });
+        return;
+      }
       let info; try { info = JSON.parse(dec(data)); } catch (e) { return; }
       if (this.running && !this.free) fail("A partida já começou.");
       else if (info.rom !== this.sha1) fail("A sua ROM é diferente da do host. Todos precisam da MESMA ROM.");
@@ -419,7 +525,8 @@ const SiteRoom = {
       for (const p of this.players) if (p) p.c.seen = performance.now();
       const iv = setInterval(() => {
         if (!this.on || this.gen !== gen) return clearInterval(iv);
-        for (const p of this.players) if (p && !p.c.local && performance.now() - (p.c.seen || 0) > 45000) { this.gone(p.c); try { p.c.close(); } catch (e) {} }
+        const limite = this.auto ? AUTO_SEM_RESPOSTA * 2 : 45000;   // no coop automático quem some religa sozinho depois
+        for (const p of this.players) if (p && !p.c.local && performance.now() - (p.c.seen || 0) > limite) { this.gone(p.c); try { p.c.close(); } catch (e) {} }
       }, 5000);
     }
   },

@@ -69,6 +69,17 @@ function showGuestPage(msg) {
 function setRom(name, bytes) {
   Guest.rom = bytes; Guest.romName = name; Guest.romSha1 = sha1Hex(bytes);
   $("g-rom").textContent = `${name}  ·  ${(bytes.length / 1048576).toFixed(1)} MB`;
+  mostraCoopAuto();
+}
+// Pokémon Quetzal pelo site: não existe sala, quem joga no mesmo Wi-Fi se encontra sozinho
+function mostraCoopAuto() {
+  if (!SITE) return;
+  const auto = autoCoopServe(Guest.romSha1);
+  $("g-create").classList.toggle("hidden", auto);
+  if (auto) $("g-rooms-box").classList.add("hidden");
+  $("g-sub").textContent = auto
+    ? "Escolha um jogo da lista. O save fica guardado neste navegador. É só tocar em Jogar: quem estiver no mesmo Wi-Fi aparece no jogo sozinho."
+    : "Escolha um jogo da lista. O save fica guardado neste navegador. Para jogar junto: um aperta “Criar sala” e os outros tocam na sala que aparece aqui.";
 }
 
 // Catálogo publicado junto com o site, usando caminhos relativos ao GitHub Pages.
@@ -205,8 +216,9 @@ async function guestSolo() {
   const name = ($("g-name").value || "").trim() || "Jogador";
   try { localStorage.setItem("kirbynet.name", name); } catch (e) {}
   try {
-    startRun({ n: 1, rom: Guest.rom, saves: [loadMySave()], names: [name], net: null, slot: 0, delay: 0,
-               onSave: guestSaveWriter() });
+    startRun({ n: 1, rom: Guest.rom, romSha1: Guest.romSha1, saves: [loadMySave()], names: [name], net: null, slot: 0, delay: 0,
+               auto: SITE, onSave: guestSaveWriter() });
+    AutoCoop.liga(Play.run, name);
   } catch (err) { showGuestPage("Não deu pra iniciar: " + (err.message || err)); }
 }
 
@@ -240,7 +252,8 @@ function renderRooms(rooms) {
     b.onclick = () => guestJoin(r.code);
     list.appendChild(b);
   }
-  $("g-rooms-box").classList.toggle("hidden", !rooms.length);   // sem sala: nem aparece (quem chega primeiro cria)
+  // sem sala: nem aparece (quem chega primeiro cria). Quetzal: nunca, quem está no Wi-Fi se acha sozinho
+  $("g-rooms-box").classList.toggle("hidden", !rooms.length || autoCoopServe(Guest.romSha1));
 }
 
 async function guestJoin(roomCode) {
