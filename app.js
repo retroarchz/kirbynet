@@ -57,8 +57,12 @@ function boundKeys() {
   profiles.forEach(p => Object.values(p.kb).forEach(c => c && s.add(c)));
   return s;
 }
+// Alt sozinho, na partida: troca de modo no Pokémon Quetzal. Vale ao soltar e sem outra tecla no meio (Alt+Tab não conta).
+let altSo = false;
 addEventListener("keydown", (e) => {
   if (capture) { e.preventDefault(); return finishCapture("kb", e.code); }
+  if (e.key === "Alt") { if (Play.run && !typing()) { e.preventDefault(); if (!e.repeat) altSo = true; } return; }
+  altSo = false;
   if (e.code === "F2" && Play.run) { e.preventDefault(); toggleRunView(); return; }
   if (e.code === "F3" && Play.run) { e.preventDefault(); Fit.cycle(); return; }
   if (DEBUG_KEYS) toast(`tecla: key=${e.key} code=${e.code || "—"} keyCode=${e.keyCode}`);
@@ -71,10 +75,15 @@ addEventListener("keydown", (e) => {
   if (Play.run) sendKeys(Play.run);   // manda o botão NA HORA (não espera o próximo timer)
 });
 addEventListener("keyup", (e) => {
+  if (e.key === "Alt") {
+    if (Play.run && !typing()) e.preventDefault();
+    if (altSo && Play.run) Play.run.worker.postMessage({ t: "modo" });
+    altSo = false; return;
+  }
   if (Play.run && (XBOX || e.code === "Space") && !typing()) e.preventDefault();   // Espaço = acelerar, não "clicar" botão
   down.delete(e.code); if (Play.run) sendKeys(Play.run);
 });
-addEventListener("blur", () => down.clear());
+addEventListener("blur", () => { down.clear(); altSo = false; });
 
 function padActive(pad, bind) {
   if (!pad || !bind) return false;

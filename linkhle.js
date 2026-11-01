@@ -180,6 +180,8 @@ const LinkHLE = (() => {
       get duo() { return duo; },
       get ids() { return ids; },
       get open() { return open; },
+      // a trapaça do meu jogador mudou (Alt): o jogo só manda esse valor ao abrir o cabo, então avisa quem já conectou
+      modo(v) { const k = (ids || []).indexOf(me); if (k >= 0) ram.w8(MODO.players + k * MODO.size + MODO.cheat, v); send({ k: "md", v }); },
       // antes de rodar o quadro
       pre() {
         if (!armed) return;
@@ -283,6 +285,9 @@ const LinkHLE = (() => {
           if (!known) status();   // quem chegou agora fica sabendo de mim
           // os comandos dele que já chegaram ficam: o último costuma ser justamente o "pronto para
           // fechar o cabo" (LINKCMD_READY_CLOSE_LINK), que chega junto com o aviso de que ele fechou
+        } else if (m.k === "md") {
+          const k = (ids || []).indexOf(from);
+          if (k >= 0) ram.w8(MODO.players + k * MODO.size + MODO.cheat, m.v ? 1 : 0);
         } else if (m.k === "go") {
           if (r8(STATE) === ST_HANDSHAKE && m.ids.includes(me)) go = m.ids;
         } else if (C && m.k === "ask") {
@@ -323,6 +328,21 @@ const LinkHLE = (() => {
   // Mensagens pela sala, em bytes: [vaga de quem manda, tipo, ...]
   //   1 = comando (8 números de 16 bits), 2 = cabo aberto/fechado + se é o mestre, 3 = "começar" (vagas de quem entra)
   //   coop de teste: 4 = pedido do host (tipo, vagas), 5/6 = aceito/recusado, 7 = entrei na dupla (vagas), 8 = saí da dupla
+  // Pokémon Quetzal, tecla Alt: alterna o valor de trapaça do save (embaralhado com o ID de treinador) entre 1 e 0.
+  // É ele que a troca compara. Só vale para quem começou com cheats: save+0x2CE fica marcado, mesmo com o valor em 0.
+  const MODO = { save: 0x030055C0, players: 0x020229F0, size: 0x24, cheat: 0x1F };
+  function trocaModo(ram) {
+    if (!ram) return null;
+    const sb = ram.r32(MODO.save);
+    if (sb < 0x02000000 || sb >= 0x02040000 - 0x1000) return null;
+    if (!(ram.r8(sb + 0x2CE) & 0x80) || !(ram.r8(sb + 0x2C7) & 0x20)) return null;
+    const chave = (ram.r8(sb + 0xC) | ram.r8(sb + 0xA) << 8 | ram.r8(sb + 0xD) << 16 | ram.r8(sb + 0xB) << 24) >>> 0;
+    const v = (ram.r32(sb + 0x2C8) ^ chave) >>> 0;
+    if (v > 1) return null;
+    const novo = v ^ 1, c = (chave ^ novo) >>> 0;
+    ram.w16(sb + 0x2C8, c & 0xFFFF); ram.w16(sb + 0x2CA, c >>> 16);
+    return novo;
+  }
   function encode(from, m) {
     if (m.k === "c") {
       const b = new Uint8Array(2 + 2 * CMD), dv = new DataView(b.buffer);
@@ -337,6 +357,7 @@ const LinkHLE = (() => {
     if (m.k === "no") return new Uint8Array([from, 6]);
     if (m.k === "sub") return new Uint8Array([from, 7, m.ids.length, ...m.ids]);
     if (m.k === "full") return new Uint8Array([from, 8]);
+    if (m.k === "md") return new Uint8Array([from, 9, m.v ? 1 : 0]);
     return null;
   }
   function decode(b) {
@@ -350,8 +371,9 @@ const LinkHLE = (() => {
     if (b[1] === 6) return { from, m: { k: "no" } };
     if (b[1] === 7 && b.length >= 3 + b[2]) return { from, m: { k: "sub", ids: Array.from(b.subarray(3, 3 + b[2])) } };
     if (b[1] === 8) return { from, m: { k: "full" } };
+    if (b[1] === 9 && b.length >= 3) return { from, m: { k: "md", v: b[2] } };
     return null;
   }
-  return { supports, create, encode, decode, GAMES };
+  return { supports, create, encode, decode, trocaModo, GAMES };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = LinkHLE;

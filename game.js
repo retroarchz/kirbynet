@@ -1406,6 +1406,7 @@ function onWorker(run, m) {
     if (run.net) { run.net.close(); run.net.cb.onError(msg); } else toast(msg);
   }
   else if (m.t === "cheats") cheatsResult(run, m.res);
+  else if (m.t === "modo") toast(m.v ? "↩ Voltou" : "✓ Pronto");
   else if (m.t === "snap") persistSaves(run, m.saves, false);   // o jogo gravou algo novo
   else if (m.t === "saves") finishRun(run, m.saves);
 }

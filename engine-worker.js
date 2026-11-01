@@ -434,9 +434,11 @@ onmessage = async (ev) => {
       const eng = await Core.load(m.module);
       const s = eng.create(m.n, m.rom, m.saves);
       if (s.fps > 30 && s.fps < 90) FPS = s.fps;
+      const rom0 = m.rom && m.rom[0] && m.rom[0].length ? m.rom[0] : m.rom;
       run = { n: m.n, net: m.net, slot: m.slot, delay: m.delay || 0, s, frames: 0, sent: m.delay || 0,
               waitSince: null, t0: performance.now(), fpsT: performance.now(), fpsN: 0, book: new Map(),
               win: { t: performance.now(), waited: 0, events: 0 }, calmT: performance.now(), minDelay: Math.min(2, m.delay || 2),
+              quetzal: !!rom0 && String.fromCharCode(...rom0.subarray(0xA0, 0xAB)) === "PKM QUETZAL",
               busy: 0, busyN: 0, marg: {}, pm: { n: 0, late: 0, tight: 0, min: 99, by: {} }, mw: {}, slew: 0, startT: performance.now(),
               // rollback: quadros antes de 'confirmed' já rodaram com os botões de verdade de todos
               confirmed: 0, used: new Map(), lastKnown: [], costAvg: 0,
@@ -476,6 +478,12 @@ onmessage = async (ev) => {
   }
   else if (m.t === "view") { view = m.view; applyView(); }
   else if (m.t === "cheats") { if (run) setCheats(m.cheats); }
+  else if (m.t === "modo") {   // Pokémon Quetzal, tecla Alt; nunca na sala por rollback (lá todos rodam o mesmo jogo)
+    if (run && run.quetzal && !run.rb && !SNES) {
+      const v = LinkHLE.trocaModo(run.s.ram(0));
+      if (v != null) { if (run.hle) run.hle.modo(v); postMessage({ t: "modo", v }); }
+    }
+  }
   // Mundo livre (SNES): inimigos/golpes/abates dos outros e "manda de novo os desenhos" (alguém entrou)
   else if (m.t === "kill") { if (run && run.free && m.k) CoopSync.addKill(run.cs[0], m.k); }
   else if (m.t === "rooms") {}
