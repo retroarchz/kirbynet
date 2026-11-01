@@ -7,3 +7,7 @@ O jogo já tem dia e noite (Opções > Outros > DIA/NOITE, bit 7 em SaveBlock2 +
 - Não mexe em luzes do jogo, nem nas paletas 13 a 15 de fundo (menus), nem em casas e cavernas (tipo do mapa em 0x02038CB0 + 0x17). Espera a transição de tela acabar (0x02039AC3, bit 7).
 - Sombra: a oval do jogo (16x8, bloco 1) vira afim na OAM em 0x03002698, com a matriz 0x90, 0, -0x38, 0x88.
 - Hora do jogo: 150 quadros por minuto, um dia em uma hora.
+
+## Batalha
+
+Fundo nas paletas 2 e 3, fora de caverna, prédio e debaixo d'água. `ter.py` separa as cores de céu e chão de cada terreno a partir das capturas de dia; `gt.py` desenha as rampas de tarde e noite e grava a tabela `TERRENOS` no `dianoite.js`. Noite segue as cores das árvores do jogo: verde-oliva escuro com contraste. Cor fora da tabela usa `luz()`.
