@@ -9,7 +9,7 @@ const V = (location.search.match(/[?&]v=(\w+)/) || [])[1] || "";   // mesma vers
 const NO_RB = /[?&]rb=0\b/.test(location.search);   // página aberta com ?semrollback
 // SNES: também o Mundo livre (fantasma dos outros e inimigos compartilhados, do snesnet v1.6)
 // GBA: o cabo link pela internet (linkhle.js) para o coop do Pokémon Quetzal
-importScripts(...(SNES ? ["sncore.js", "ghost-core.js", "objlayout.js", "coop-sync.js"] : ["kncore.js", "linkhle.js"]).map(f => f + "?v=" + V));
+importScripts(...(SNES ? ["sncore.js", "ghost-core.js", "objlayout.js", "coop-sync.js"] : ["kncore.js", "linkhle.js", "dianoite.js"]).map(f => f + "?v=" + V));
 const Core = SNES ? SnCore : KnCore;
 
 const W = Core.W, H = Core.H, FRAME_BYTES = W * H * 4;
@@ -256,6 +256,16 @@ function ffAudio(bufs, rate, ms) {
   return { rate, samples: out };
 }
 
+// Pokémon Quetzal: relógio e cores de dia e noite, depois de cada quadro (dianoite.js). Nunca na sala por rollback.
+function relogio() {
+  if (run.dnPed && run.frames >= 120 && run.frames % 60 === 0) {
+    const r = run.s.ram(0);
+    if (r) { run.dn = DiaNoite.create(r, run.dnPed.modo, run.dnPed.min); run.dnJogo = run.dnPed.modo === "jogo"; run.dnPed = null; }
+  }
+  if (!run.dn) return;
+  run.dn.quadro();
+  if (run.dnJogo && run.frames % 1800 === 0) postMessage({ t: "relogio", min: run.dn.minuto() });
+}
 function tick() {
   if (!run) return;
   const now = performance.now();
@@ -301,7 +311,7 @@ function tick() {
           run.waitSince = null;
         }
         if (run.rb) spec = stepNet(use, full);
-        else run.s.runFrame(row);
+        else { run.s.runFrame(row); relogio(); }
         run.book.delete(run.frames - 600);
       } else {
         const k = [];
@@ -328,6 +338,7 @@ function tick() {
         }
         if (run.hle) run.hle.pre();
         run.s.runFrame(k);
+        relogio();
         if (run.hle) run.hle.post();
       }
       // acelerando: só a imagem do último quadro da rodada vai para a tela; o som de todos entra no ffAudio
@@ -488,6 +499,12 @@ onmessage = async (ev) => {
     if (run && run.quetzal && !SNES) {
       if (run.rb || !run.s.romWrite) postMessage({ t: "moto", v: null });
       else { run.s.romWrite(0xF4E7D4, new Uint8Array(m.bytes)); postMessage({ t: "moto", v: m.v }); }
+    }
+  }
+  else if (m.t === "relogio") {   // Pokémon Quetzal: hora real ou hora do jogo
+    if (run && run.quetzal && !run.rb && !SNES) {
+      run.dnJogo = m.modo === "jogo";
+      if (run.dn) run.dn.modo(m.modo, m.min); else run.dnPed = { modo: m.modo, min: m.min };
     }
   }
   // Mundo livre (SNES): inimigos/golpes/abates dos outros e "manda de novo os desenhos" (alguém entrou)

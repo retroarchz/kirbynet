@@ -733,6 +733,8 @@ function startRun(opts) {
                        cabo: run.cabo || null, especial: Cheats.usable(run) ? CheatPresets.especial() : 0,
                        delay: run.delay || 0, cheats: cheats.length ? cheats : null }, [roms.buffer]);
   $("btn-cheats").classList.toggle("hidden", !Cheats.usable(run));
+  $("btn-relogio").classList.toggle("hidden", !run.moto);
+  Relogio.rotulo();
   if (run.cabo && run.net) run.net.onCabo = (u8) => { const b = u8.slice(); run.worker.postMessage({ t: "cabo", bytes: b.buffer }, [b.buffer]); };
   if (run.free && !run.cabo) ghostInit(run);
   if (run.free && !run.cabo && run.net) {
@@ -1151,6 +1153,7 @@ const QZ_NUVEM = {
     [0x53ED0C, "06003c0d6414640000000001000000000000008000000000", "0e00000f0005000090000702000003120000000000000000"],   // Distúrbio e Protetor Glacial
     [0x5B4F18, "34f45508", "40fffe09"],   // Distúrbio e Protetor Glacial
     [0xE15AC, "8ef1fafa0006002803d02078022108432070", "00480047817fff09c046c046c046c046c046"],   // L troca a bike em movimento: leitura do botão -> 0x09FF7F80; fonte: hack-fonte/nuvem/moto/troca.py
+    [0x2CA8C, "10b5054c201cfff7", "00480047617fff09"],   // relógio do jogo lê 0x0203FF58 (dianoite.js)
     [0x12DC884, "ee782d09", "007fff09"],   // descrição longa do Protetor Glacial (tela de detalhes), texto em 0x1FF7F00
     [0x12DBB44, "11712c09", "a0fffe09"],   // Distúrbio e Protetor Glacial
     [0x538F7C, "2de80608", "95a6ff09"],   // Distúrbio e Protetor Glacial
@@ -1170,6 +1173,7 @@ const QZ_NUVEM = {
   ],
   novo: [
     [0x1FF7F80, "154800f028f80006002803d02078022108432070114b124a19780620084202d10020107015e080208000284201d001201070107800280cd0002f04d0022f08d14846002805d1002010706078012108436070044800470047a5fb2608709003025fff0302bf150e08"],   // L troca a bike em movimento
+    [0x1FF7F60, "0448054902788a704278ca7082780a717047c04658ff0302f8540003"],   // relógio do jogo
     [0x1FF7F00, "cae6e3e8d9dbd900d500e7dd00e3e900e9e100d5e0ddd5d8e300d8d900e8e9d8e300e4e3e600a400e6e3d8d5d8d5e7ad00c1d9e0e300d90017dbe9d500e6d9dae3e619d5e13600dae3dbe300d900e0e9e8d5d8e3e600e5e9d9d6e6d5e1adff"],   // texto longo do Protetor Glacial   // [endereço, bytes] em área livre (0xFF)
     [0x1FFE000, "0c480068554669005144c9000b18187c800700280bdb08480570187c0221084318740648064900f004f806488746064887460847c03305080432020200e1ff09058d0508ae83050804860508"],
     [0x1FFE080, "00b50004010c0b1c0648814204d00130814204d004480047044802bc0847044802bc08473f01000031560a0800e2ff0900e9fe09"],
@@ -1319,6 +1323,15 @@ const Moto = {
     this.avisar = false;
   },
 };
+// Relógio do dia e noite no Quetzal: hora real do aparelho ou hora do jogo (um dia passa em uma hora).
+const Relogio = {
+  ler(k, d) { try { return localStorage.getItem(k) || d; } catch { return d; } },
+  gravar(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  modo() { return this.ler("kn-relogio", "real"); },
+  rotulo() { $("btn-relogio").textContent = this.modo() === "jogo" ? "⏳ Hora do jogo" : "🕐 Hora real"; },
+  enviar(run) { if (run && run.moto) run.worker.postMessage({ t: "relogio", modo: this.modo(), min: +this.ler("kn-relogio-min", "720") }); },
+  troca() { this.gravar("kn-relogio", this.modo() === "jogo" ? "real" : "jogo"); this.rotulo(); this.enviar(Play.run); },
+};
 function quetzalNuvem(rom) {
   if (String.fromCharCode(...rom.subarray(0xA0, 0xAB)) !== "PKM QUETZAL") return 0;
   const hex = (h) => Uint8Array.from(h.match(/../g), (b) => parseInt(b, 16));
@@ -1408,6 +1421,7 @@ function cheatsResult(run, res) {
   $("cheats-msg").textContent = bad ? "" : "✔ Pronto!";
 }
 $("btn-cheats").onclick = openCheats;
+$("btn-relogio").onclick = () => Relogio.troca();
 $("cheats-close").onclick = closeCheats;
 $("cheats-apply").onclick = applyCheats;
 $("cheats-add").onclick = () => {
@@ -1464,7 +1478,8 @@ function onWorker(run, m) {
   else if (m.t === "cheats") cheatsResult(run, m.res);
   else if (m.t === "modo") toast(m.v ? "↩ Voltou" : "✓ Pronto");
   else if (m.t === "moto") Moto.feito(m.v);
-  else if (m.t === "started") { if (Moto.ligado()) Moto.aplica(run, true); }   // volta com o capacete escolhido
+  else if (m.t === "relogio") Relogio.gravar("kn-relogio-min", String(m.min));
+  else if (m.t === "started") { Relogio.enviar(run); if (Moto.ligado()) Moto.aplica(run, true); }   // volta com o capacete escolhido
   else if (m.t === "snap") persistSaves(run, m.saves, false);   // o jogo gravou algo novo
   else if (m.t === "saves") finishRun(run, m.saves);
 }
