@@ -402,8 +402,10 @@ t.ldr_lit('r0', SPRIDS_LIT); t.ldr_i('r0', 'r0', 0); t.ldrb_r('r0', 'r0', 'r5');
 t.bl('indice'); t.lsl('r0', 'r0', 1); t.ldr_lit('r1', PG_DADOS + 0x98); t.add_r('r3', 'r0', 'r1')
 t.ldrh_i('r0', 'r7', 0x20); t.ldrb_i('r1', 'r3', 0); t.lsl('r1', 'r1', 24); t.h(0x1609); t.add_r('r0', 'r0', 'r1'); t.strh_i('r0', 'r6', 0x20)
 t.ldrh_i('r0', 'r7', 0x22); t.ldrb_i('r1', 'r3', 1); t.lsl('r1', 'r1', 24); t.h(0x1609); t.add_r('r0', 'r0', 'r1'); t.strh_i('r0', 'r6', 0x22)
+t.ldr_lit('r0', 0x02039EE5); t.ldrb_i('r0', 'r0', 0); t.cmpi('r0', 0); t.bc('ne', 's_mos')   # animação esconde o Pokémon de propósito: o escudo fica
 t.mov('r2', 0x3E); t.ldrb_r('r0', 'r7', 'r2'); t.mov('r3', 4); t.alu('and_', 'r0', 'r3')
 t.ldrb_r('r1', 'r6', 'r2'); t.alu('bic', 'r1', 'r3'); t.alu('orr', 'r1', 'r0'); t.strb_r('r1', 'r6', 'r2')
+t.label('s_mos')
 t.ldrb_i('r0', 'r4', 14); t.cmpi('r0', 0); t.bc('eq', 's_fim')
 t.subi('r0', 1); t.strb_i('r0', 'r4', 14)
 t.ldrh_i('r1', 'r6', 0); t.ldr_lit('r2', 0x1000)
@@ -427,14 +429,16 @@ for _k, (_p, _s, _t) in enumerate(_folhas): struct.pack_into('<IHH', _d, 8 * _k,
 struct.pack_into('<IHH', _d, 0x20, PG_DADOS + 0xC0, TAG_PG_PAL, 0)
 _dummy = ROM[0x4C32E4:0x4C32FC]
 assert _dummy[:4] == bytes.fromhex('0000ffff')
-_alto, _quad = PG_DADOS + 0x88, PG_DADOS + 0xA0
+_alto, _quad, _alto_f = PG_DADOS + 0x88, PG_DADOS + 0xA0, PG_DADOS + 0xA8
 for _k, (_p, _s, _t) in enumerate(_folhas):
-    _m = bytearray(_dummy); struct.pack_into('<HHI', _m, 0, _t, TAG_PG_PAL, _quad if _k == 2 else _alto)
+    _m = bytearray(_dummy); struct.pack_into('<HHI', _m, 0, _t, TAG_PG_PAL, _quad if _k == 2 else _alto_f if _k == 1 else _alto)
     _d[0x28 + 24 * _k:0x28 + 24 * _k + 24] = _m
-struct.pack_into('<HHHH', _d, 0x88, 2 << 14, 3 << 14, 2 << 10, 0)     # 32x64
+# prioridade 3 = atrás do Pokémon mesmo quando a animação o desenha numa camada de fundo; só a placa do oponente fica na frente
+struct.pack_into('<HHHH', _d, 0x88, 2 << 14, 3 << 14, 3 << 10, 0)     # 32x64
+struct.pack_into('<HHHH', _d, 0xA8, 2 << 14, 3 << 14, 2 << 10, 0)     # 32x64, na frente
 _d[0x90:0x94] = bytes((40, 10, 40, 40))                               # plano: como nos prints, só a placa do oponente fica na frente
 _d[0x98:0xA0] = struct.pack('<8b', 17, -2, -20, 9, -1, -8, -21, 0)    # x, y de cada índice, medidos nos prints (Pokémon em 72,92 e 176,52)
-struct.pack_into('<HHHH', _d, 0xA0, 0, 3 << 14, 2 << 10, 0)           # 64x64
+struct.pack_into('<HHHH', _d, 0xA0, 0, 3 << 14, 3 << 10, 0)           # 64x64
 _d[0xC0:0xE0] = _pal
 put(PG_DADOS, bytes(_d))
 put(PG_GFX, _gfx)
