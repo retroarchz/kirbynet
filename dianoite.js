@@ -8,8 +8,10 @@
   // árvores à noite: as cores do próprio jogo, escolhidas pelo usuário, só para estas cores exatas do mapa
   const ARVORES = {"327":[24,33,0],"13072":[57,82,57],"6695":[24,57,24],"17398":[74,115,74],"6376":[24,24,24],"11629":[41,33,49]};
   const A = { hora: 0x0203FF58, local: 0x030054F8, un: 0x020391FC, fa: 0x020395FC, cb2: 0x03002664, fade: 0x02039AC3, fadeY: 0x02039AC0,
-              sb2: 0x030055C0, opcao: 0x2B9, mapa: 0x02038CB0, oam: 0x03002698, CAMPO: 0x080C2965 };
+              sb2: 0x030055C0, opcao: 0x2B9, mapa: 0x02038CB0, oam: 0x03002698, terreno: 0x02022FC0, BAT_INI: 0x0803D24D, BAT: 0x0803F431 };
   const K = 8.226, TIPOS = new Set([1, 2, 3, 6]);
+  const CAMPO = new Set([0x080C2965, 0x080C2959]);                // mapa normal e mapa durante a entrada da batalha
+  const SEM_CEU = new Set([3, 7, 8]);                             // terrenos debaixo d'água, caverna e prédio
   const q = (v) => Math.round(Math.max(0, Math.min(255, v)) / K);
   const receita = (J, p) => {
     const o = J.M.map((l) => l[0] * p[0] + l[1] * p[1] + l[2] * p[2] + l[3] * 255);
@@ -48,14 +50,15 @@
       if (st.modo === "jogo") return (st.base + (st.frames - st.f0) / 150) % 1440;
       const d = new Date(); return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
     };
-    const cor = (c, i, a, n) => {
-      const obj = i >= 256, chave = (c & 0x7FFF) | (obj ? 0x8000 : 0) | (i === 0x12 || i === 0x13 ? 0x10000 : 0) | (i === 0x1A ? 0x20000 : 0) | (c & 0x8000 ? 0x40000 : 0);
+    const cor = (c, i, a, n, bat) => {
+      const obj = i >= 256, chave = (c & 0x7FFF) | (obj ? 0x8000 : 0) | (i === 0x12 || i === 0x13 ? 0x10000 : 0) | (i === 0x1A ? 0x20000 : 0) | (c & 0x8000 ? 0x40000 : 0) | (bat ? 0x80000 : 0);
       let r = cache.get(chave);
       if (r === undefined) {
         const p = [(c & 31) * K, ((c >> 5) & 31) * K, ((c >> 10) & 31) * K];
         let t = receita(TARDE, p), v = receita(NOITE, p);
         if (obj) { t = t.map((x, k) => 0.62 * x + 0.38 * p[k]); v = v.map((x, k) => 0.5 * x + 0.4 * p[k]); }
         if (!obj && ARVORES[c & 0x7FFF]) v = ARVORES[c & 0x7FFF];
+        if (bat) v = v.map((x) => x * 0.62);                      // céu e chão da batalha, sem o brilho das paredes
         if (chave & 0x10000) v = v.map((x) => x * 0.72);          // caminhos claros
         if (chave & 0x20000) { t = [0x8F, 0xA0, 0xC8]; v = [0xF8, 0xE0, 0x60]; }   // vidro de porta e janela
         if (chave & 0x40000) { t = p; v = p.map((x, k) => 0.32 * x + 0.68 * [255, 230, 100][k]); }   // luz: acende antes do jogo
@@ -65,6 +68,23 @@
       }
       return r;
     };
+    // Fundo da batalha (paletas 2 e 3): troca só a cor que o jogo carregou, então o Distúrbio escurece por cima sem briga e
+    // o fundo volta certo depois da bolsa. Pokémon e caixas de vida ficam com as cores normais.
+    const fundo = new Uint16Array(64), crua = new Uint16Array(64);
+    function batalha(a, n) {
+      if (SEM_CEU.has(ram.r8(A.terreno)) || (!a && !n)) return;
+      const tela = !(ram.r8(A.fade) & 0x80) && !((ram.r16(A.fadeY) >> 6) & 31);
+      for (let k = 0; k < 32; k++) {
+        const i = 0x20 + k, c = ram.r16(A.un + i * 2);
+        if (fundo[k] && c === fundo[k]) continue;
+        if (fundo[k] && c !== crua[k]) continue;                  // outra cor: é do Distúrbio ou do Imperador
+        crua[k] = c;
+        const v = cor(c, i, a, n, true) || 1;
+        fundo[k] = v;
+        ram.w16(A.un + i * 2, v);
+        if (tela) ram.w16(A.fa + i * 2, v);
+      }
+    }
     function sombras(forca) {       // sombra oval do jogo, esticada na diagonal à tarde
       if (forca < 0.5) return;
       for (let k = 0; k < 128; k++) {
@@ -83,11 +103,14 @@
         const m = minuto(), h = Math.floor(m / 60), mi = Math.floor(m) % 60;
         ram.w8(A.hora, h); ram.w8(A.hora + 1, mi); ram.w8(A.hora + 2, 0);
         ram.w8(A.local + 2, h); ram.w8(A.local + 3, mi);
-        if (ram.r32(A.cb2) !== A.CAMPO) return devolve();
+        const cb2 = ram.r32(A.cb2), naBatalha = cb2 === A.BAT_INI || cb2 === A.BAT;
+        if (!naBatalha) fundo.fill(0);
+        if (!CAMPO.has(cb2)) devolve();
         const sb = ram.r32(A.sb2);
-        if (sb < 0x02000000 || !(ram.r8(sb + A.opcao) & 0x80) || !TIPOS.has(ram.r8(A.mapa + 0x17))) return devolve();
+        if ((!CAMPO.has(cb2) && !naBatalha) || sb < 0x02000000 || !(ram.r8(sb + A.opcao) & 0x80) || !TIPOS.has(ram.r8(A.mapa + 0x17))) return devolve();
         const [a, n] = fase(m), p = Math.round(a * 64) * 65 + Math.round(n * 64);
-        if (p !== passo) { passo = p; cache.clear(); }
+        if (p !== passo) { passo = p; cache.clear(); fundo.fill(0); }
+        if (naBatalha) return batalha(a, n);
         // sem transição: a tela recebe a cor direto. Tela já branca ou preta, esperando o mapa novo, fica como está
         const tela = !(ram.r8(A.fade) & 0x80) && !((ram.r16(A.fadeY) >> 6) & 31);
         for (let i = 0; i < 512; i++) {
