@@ -16,6 +16,7 @@ D_TXT, D_PAL, D_ESCURO = 0x09FEE900, 0x09FEE9E0, 0x09FEEA00
 D_ANIM2 = 0x09FEEC80                         # animação geral 62: absorção do Dream Eater (dreno do Distúrbio)
 D_SAI = 0x09FEED00                           # tarefa da saída: a luz volta aos poucos quando o Distúrbio acaba
 D_ROSA, D_ROSA_PAL = 0x09FEEE00, 0x09FEEE60   # tarefa que pinta as bolinhas do dreno de rosa + a paleta rosa
+D_COBRE = 0x09FEEE80                         # antes de devolver o fundo normal: tela no escuro (o jogo leva 2 quadros)
 SAI_QUADROS = 44                             # brilho 5/16 -> 16/16, +1/16 a cada 4 quadros
 # área livre (0xFF) igual nas duas ROMs do Quetzal (a do Coop 3 usa até 0x09FFA31C)
 CASE, NOME_HOOK, SCRIPT, TXT = 0x09FFE000, 0x09FFE080, 0x09FFE100, 0x09FFE200
@@ -310,10 +311,8 @@ a.bl('tem'); a.cmpi('r0', 0); a.bc('ne', 'presente')
 a.bl('embatalha'); a.cmpi('r0', 0); a.bc('eq', 'mata')   # a batalha acabou: só desliga
 a.bl('pode'); a.cmpi('r0', 0); a.bc('eq', 'fim')         # animação ou outra tela: espera
 a.bl('marca'); a.cmpi('r0', 0); a.bc('eq', 'mata')
+a.ldr_lit('r3', D_COBRE | 1); a.bl('c3')      # o redesenho do jogo leva 2 quadros: começa com a tela no escuro
 a.ldr_lit('r3', DRAWBG | 1); a.bl('c3')       # devolve o fundo normal, mas escuro: a luz volta aos poucos (D_SAI)
-a.ldr_lit('r0', PLTT_BASE + 0x42); a.mov('r1', 0)            # cores 1-15 da paleta 2 -> dados da tarefa +10..
-a.label('s_cop'); a.ldrh_r('r2', 'r0', 'r1'); a.h(0x1C0B); a.addi('r3', 10); a.strh_r('r2', 'r6', 'r3')
-a.addi('r1', 2); a.cmpi('r1', 30); a.bc('lo', 's_cop')
 a.mov('r0', 0); a.strh_i('r0', 'r6', 8)
 a.ldr_lit('r0', D_SAI | 1); a.str_i('r0', 'r6', 0)
 a.h(0x1C38); a.ldr_lit('r3', D_SAI | 1); a.bl('c3'); a.b('fim')
@@ -402,6 +401,7 @@ a.lsl('r2', 'r2', 5); a.lsl('r3', 'r3', 10); a.alu('orr', 'r1', 'r2'); a.alu('or
 a.label('e_grava')
 a.lsl('r4', 'r6', 1); a.ldr_lit('r7', PLTT_BASE + 0x40); a.add_r('r4', 'r4', 'r7'); a.strh_i('r0', 'r4', 0)
 a.ldr_lit('r7', 0x400); a.add_r('r4', 'r4', 'r7'); a.strh_i('r0', 'r4', 0)
+a.addi('r4', 32); a.strh_i('r0', 'r4', 0)        # paleta 3 exibida junto (tem as mesmas cores), senão o chão dela pisca claro
 a.addi('r6', 1); a.cmpi('r6', 16); a.bc('lo', 'e_laco')
 pool_aqui(a, 'pp1')
 # 3) copia os blocos do terreno (8 KB) para o rascunho
@@ -547,6 +547,8 @@ for _ in range(8):
     a.lsl('r0', 'r0', 4); a.lsl('r1', 'r3', 28); lsr(a, 1, 1, 28); a.alu('orr', 'r0', 'r1'); lsr(a, 3, 3, 4)
 a.h(0x1C03)                                                                                     # r3 = r0
 a.label('t_nf')
+# blocos da paleta 3 (chão do Pokémon do jogador em vários terrenos): as cores usadas são iguais às da paleta 2 no
+# mesmo índice, então o desenho nem olha a paleta
 a.ldr_lit('r2', OUTS)
 a.cmpi('r5', 0); a.bc('ne', 't_dec')
 oito_px(a, False); a.b('t_grava')
@@ -916,8 +918,9 @@ a.pool()
 put(D_GUARDA, a.build())
 
 # saída do Distúrbio: o fundo normal volta com 5/16 do brilho e clareia até o normal em SAI_QUADROS quadros
-# (dados da tarefa: +8 quadro, +10.. cores 1-15 originais da paleta 2). Espera animações; se um Dusknoir com
-# Distúrbio voltar, devolve as cores e sai (a entrada dele cria a tarefa do céu de novo).
+# (dados da tarefa: +8 quadro). Paletas 2 e 3 do terreno (a 3 é o chão do Pokémon do jogador em vários terrenos):
+# lê as cores originais (Unfaded, o jogo não mexe) e grava só as exibidas (Faded). Espera animações; se um Dusknoir
+# com Distúrbio voltar, devolve as cores e sai (a entrada dele cria a tarefa do céu de novo).
 a = Asm(D_SAI)
 a.push(['r4', 'r5', 'r6', 'r7'], lr=True)
 a.h(0x1C07)
@@ -938,21 +941,37 @@ a.ldr_lit('r0', 0x02039EE5); a.ldrb_i('r0', 'r0', 0); a.cmpi('r0', 0); a.bc('ne'
 a.ldrh_i('r5', 'r6', 8); a.addi('r5', 1); a.strh_i('r5', 'r6', 8)
 a.label('pinta')
 lsr(a, 4, 5, 2); a.addi('r4', 5)                  # brilho k = 5 + quadro/4 (16 no último)
-a.mov('r3', 1)
+a.mov('r3', 0)
 a.label('cor')
-a.lsl('r1', 'r3', 1); a.addi('r1', 8); a.ldrh_r('r0', 'r6', 'r1')
+a.ldr_lit('r0', PLTT_BASE + 0x40); a.lsl('r1', 'r3', 1); a.ldrh_r('r0', 'r0', 'r1')
 a.lsl('r1', 'r0', 27); lsr(a, 1, 1, 27); a.alu('mul', 'r1', 'r4'); lsr(a, 1, 1, 4)
 a.lsl('r2', 'r0', 22); lsr(a, 2, 2, 27); a.alu('mul', 'r2', 'r4'); lsr(a, 2, 2, 4); a.lsl('r2', 'r2', 5); a.alu('orr', 'r1', 'r2')
 a.lsl('r2', 'r0', 17); lsr(a, 2, 2, 27); a.alu('mul', 'r2', 'r4'); lsr(a, 2, 2, 4); a.lsl('r2', 'r2', 10); a.alu('orr', 'r1', 'r2')
-a.ldr_lit('r2', PLTT_BASE + 0x40); a.lsl('r0', 'r3', 1); a.add_r('r2', 'r2', 'r0'); a.strh_i('r1', 'r2', 0)
-a.mov('r0', 1); a.lsl('r0', 'r0', 10); a.add_r('r2', 'r2', 'r0'); a.strh_i('r1', 'r2', 0)
-a.addi('r3', 1); a.cmpi('r3', 16); a.bc('lo', 'cor')
+a.ldr_lit('r2', PLTT_BASE + 0x440); a.lsl('r0', 'r3', 1); a.add_r('r2', 'r2', 'r0'); a.strh_i('r1', 'r2', 0)
+a.addi('r3', 1); a.cmpi('r3', 32); a.bc('lo', 'cor')
 a.cmpi('r5', SAI_QUADROS); a.bc('lo', 'fim')
 a.label('mata'); a.h(0x1C38); a.ldr_lit('r3', DESTROYTASK | 1); a.bl('c3')
 a.label('fim'); a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r0']); a.bx('r0')
 a.label('c3'); a.bx('r3')
 a.pool()
 put(D_SAI, a.build())
+
+# cobre a tela antes do DrawMainBattleBackground da saída: ele troca os blocos num quadro e o mapa e as paletas no
+# seguinte (dava um quadro de blocos pretos e um com o fundo claro). Mapa (fileiras 0-13, 2 telas) -> bloco 511 escuro
+# (cor 2 da paleta 11, que ele não mexe) e as cores exibidas das paletas 2 e 3 -> esse mesmo escuro.
+a = Asm(D_COBRE)
+a.ldr_lit('r0', 0x06008000 + 511 * 32); a.ldr_lit('r1', 0x22222222); a.mov('r2', 0)
+a.label('blo'); a.h(0x5000 | 2 << 6 | 0 << 3 | 1); a.addi('r2', 4); a.cmpi('r2', 32); a.bc('lo', 'blo')
+a.ldr_lit('r0', 0x0600D000); a.ldr_lit('r1', VR.PAL_FIXO << 12 | 511); a.mov('r2', 0); a.ldr_lit('r3', 14 * 64)
+a.label('map'); a.strh_r('r1', 'r0', 'r2'); a.addi('r2', 2); a.alu('cmp', 'r2', 'r3'); a.bc('lo', 'map')
+a.ldr_lit('r0', 0x0600D800); a.mov('r2', 0)
+a.label('map2'); a.strh_r('r1', 'r0', 'r2'); a.addi('r2', 2); a.alu('cmp', 'r2', 'r3'); a.bc('lo', 'map2')
+a.ldr_lit('r0', PLTT_BASE + 0x400 + VR.PAL_FIXO * 32 + 4); a.ldrh_i('r1', 'r0', 0)
+a.ldr_lit('r0', PLTT_BASE + 0x440); a.mov('r2', 0)
+a.label('pal'); a.strh_r('r1', 'r0', 'r2'); a.addi('r2', 2); a.cmpi('r2', 64); a.bc('lo', 'pal')
+a.bx('lr')
+a.pool()
+put(D_COBRE, a.build())
 
 # --- textos
 nome = enc('Nuvem Tóxica')
