@@ -1314,7 +1314,6 @@ const Moto = {
   feito(v) {
     if (v == null) { if (this.avisar) toast("Na sala online o capacete fica como está."); this.avisar = false; return; }
     try { localStorage.setItem(this.chave, v ? "1" : "0"); } catch {}
-    if (this.avisar) toast(v ? "🪖 Capacete colocado" : "😎 Capacete tirado");
     this.avisar = false;
   },
 };
