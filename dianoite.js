@@ -49,9 +49,14 @@
     // A transição de tela do jogo parte das cores originais (Unfaded): por isso as cores novas ficam lá também, com a
     // cópia do jogo guardada aqui. Senão a tela pisca a cor de dia ao entrar ou sair de um lugar.
     const orig = new Uint16Array(512), feito = new Uint16Array(512), pintado = new Uint8Array(512);
-    const devolve = () => {
+    const semFade = () => !(ram.r8(A.fade) & 0x80) && !((ram.r16(A.fadeY) >> 6) & 31);
+    // naTela: sem transição para refazer as cores (opção desligada no menu, que abre por cima do mapa), a tela volta aqui
+    const devolve = (naTela) => {
       for (let i = 0; i < 512; i++) {
-        if (pintado[i] && ram.r16(A.un + i * 2) === feito[i]) ram.w16(A.un + i * 2, orig[i]);
+        if (pintado[i] && ram.r16(A.un + i * 2) === feito[i]) {
+          ram.w16(A.un + i * 2, orig[i]);
+          if (naTela) ram.w16(A.fa + i * 2, orig[i]);
+        }
         pintado[i] = 0;
       }
     };
@@ -91,7 +96,7 @@
       // Fade por hardware (fim de animação que troca o fundo): quem escurece é o brilho do GBA, e a tela mostra a paleta
       // diretamente. Sem cor nova aqui, o fundo clareia de dia e só vira noite quando o fade acaba.
       const fadeHw = (ram.r8(A.fade + 2) & 3) === 2;
-      const tela = fadeHw || (!(ram.r8(A.fade) & 0x80) && !((ram.r16(A.fadeY) >> 6) & 31));
+      const tela = fadeHw || semFade();
       for (let k = 0; k < 32; k++) {
         const i = 0x20 + k, c = ram.r16(A.un + i * 2);
         if (fundo[k] && c === fundo[k]) {                         // animação que troca o fundo devolve a cor crua só na tela
@@ -128,12 +133,12 @@
         if (!naBatalha) fundo.fill(0);
         if (!CAMPO.has(cb2)) devolve();
         const sb = ram.r32(A.sb2);
-        if ((!CAMPO.has(cb2) && !naBatalha) || sb < 0x02000000 || !(ram.r8(sb + A.opcao) & 0x80) || !TIPOS.has(ram.r8(A.mapa + 0x17))) return devolve();
+        if ((!CAMPO.has(cb2) && !naBatalha) || sb < 0x02000000 || !(ram.r8(sb + A.opcao) & 0x80) || !TIPOS.has(ram.r8(A.mapa + 0x17))) return devolve(semFade());
         const [a, n] = fase(m), p = Math.round(a * 64) * 65 + Math.round(n * 64);
         if (p !== passo) { passo = p; cache.clear(); fundo.fill(0); }
         if (naBatalha) return batalha(a, n);
         // sem transição: a tela recebe a cor direto. Tela já branca ou preta, esperando o mapa novo, fica como está
-        const tela = !(ram.r8(A.fade) & 0x80) && !((ram.r16(A.fadeY) >> 6) & 31);
+        const tela = semFade();
         for (let i = 0; i < 512; i++) {
           if (i >= 208 && i < 256) continue;                      // paletas de janela e texto dos menus
           const atual = ram.r16(A.un + i * 2);
