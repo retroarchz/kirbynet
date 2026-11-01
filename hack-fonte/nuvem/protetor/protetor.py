@@ -48,7 +48,7 @@ def escr(nome, dados):
     _pgat += (len(dados) + 3) & ~3
 _pgat = PG_ESCR
 escr('bloq', _ini + _falou(ID_BLOQUEOU) + _fim)
-escr('cresce', _ini + _falou(ID_CRESCEU) + _fim)
+_esc['cresce'] = _pgat; _pgat += 0x20              # preenchido no fim: precisa do endereço de 'cresce_agora'
 _esc['derrete'] = _pgat; _pgat += 0x20             # preenchido no fim: precisa do endereço de 'quebra'
 escr('falha', _ini + _falou(229) + _fim)                        # "Mas isso falhou!"
 escr('quebra_ret', bytes.fromhex('392000') + _falou(ID_DERRETEU) + b'\x3c')   # fase 1 + fogo com dano: volta ao golpe
@@ -136,8 +136,7 @@ a.label('acc_bloq')
 a.ldr_lit('r0', _esc['bloq']); a.bl('salta'); a.b('acc_fim')
 a.label('acc_cresce')
 a.ldrb_i('r0', 'r4', 0); a.cmpi('r0', 1); a.bc('ne', 'acc_bloq')  # a coroa não cresce de novo
-a.mov('r0', 2); a.strb_i('r0', 'r4', 0); a.mov('r0', 5); a.strb_i('r0', 'r4', 1)
-a.ldr_lit('r0', _esc['cresce']); a.bl('salta'); a.b('acc_fim')
+a.ldr_lit('r0', _esc['cresce']); a.ldr_lit('r1', INSTR); a.str_i('r0', 'r1', 0); a.b('acc_fim')   # anima primeiro, cresce depois
 a.label('acc_fogo')
 a.ldrb_i('r0', 'r4', 0); a.cmpi('r0', 1); a.bc('ne', 'acc_quebra')
 a.bl('forca'); a.cmpi('r0', 0); a.bc('eq', 'acc_quebra')
@@ -184,6 +183,17 @@ a.label('quebra')
 a.push([], lr=True)
 a.ldr_lit('r0', ALVO); a.ldrb_i('r0', 'r0', 0); a.bl('ativo'); a.cmpi('r0', 0); a.bc('eq', 'qb_m'); a.bl('acaba')
 a.label('qb_m')
+a.ldr_lit('r1', RESULT); a.ldrh_i('r2', 'r1', 0); a.mov('r3', 1); a.alu('orr', 'r2', 'r3'); a.strh_i('r2', 'r1', 0)
+a.ldr_lit('r1', INSTR); a.ldr_i('r0', 'r1', 0); a.addi('r0', 5); a.str_i('r0', 'r1', 0)
+a.pop(['r0']); a.bx('r0')
+a.pool()
+
+# callnative do script 'cresce': depois da animação do golpe de gelo ou água, placa vira coroa; o golpe fica sem efeito
+a.label('cresce_agora')
+a.push([], lr=True)
+a.ldr_lit('r0', ALVO); a.ldrb_i('r0', 'r0', 0); a.bl('ativo'); a.cmpi('r0', 0); a.bc('eq', 'ca_m')
+a.mov('r1', 2); a.strb_i('r1', 'r0', 0); a.mov('r1', 5); a.strb_i('r1', 'r0', 1)
+a.label('ca_m')
 a.ldr_lit('r1', RESULT); a.ldrh_i('r2', 'r1', 0); a.mov('r3', 1); a.alu('orr', 'r2', 'r3'); a.strh_i('r2', 'r1', 0)
 a.ldr_lit('r1', INSTR); a.ldr_i('r0', 'r1', 0); a.addi('r0', 5); a.str_i('r0', 'r1', 0)
 a.pop(['r0']); a.bx('r0')
@@ -443,6 +453,7 @@ _d[0xC0:0xE0] = _pal
 put(PG_DADOS, bytes(_d))
 put(PG_GFX, _gfx)
 
+put(_esc['cresce'], bytes.fromhex('0203090a') + b'\xff' + p32(L['cresce_agora'] | 1) + bytes.fromhex('392000') + _falou(ID_CRESCEU) + _fim)
 put(_esc['derrete'], bytes.fromhex('0203090a') + b'\xff' + p32(L['quebra'] | 1) + bytes.fromhex('392000') + _falou(ID_DERRETEU) + _fim)
 
 # --- ganchos nos comandos do script de batalha
