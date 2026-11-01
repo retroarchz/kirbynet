@@ -8,7 +8,7 @@
 ID_ORDEM, ID_SC_ = 682, 329
 PG2, P_ESPERA, P_ATIVO = 0x0203FF60, 6, 8
 ORD_ERRO = 70                                 # % de chance de errar
-ORD_CODE, ORD_TAREFA, ORD_ANIM, ORD_PAL, ORD_RET, ORD_SW, ORD_DESC = 0x09FFC400, 0x09FFCA00, 0x09FFCA80, 0x09FFCAC0, 0x09FFCB00, 0x09FFCB40, 0x09FFCB60
+ORD_CODE, ORD_TAREFA, ORD_ANIM, ORD_PAL, ORD_RET, ORD_SW, ORD_DESC = 0x09FFC400, 0x09FFCA00, 0x09FFCC60, 0x09FFCAC0, 0x09FFCB00, 0x09FFCB40, 0x09FFCB60
 CMD_FORCE, PARTY_LIT, RANDOM = w32(CMD_TAB + 4 * 0x8F), 0x08033038, 0x080A69D1
 ROAR_SW, ROAR_RET = 0x084B0279, 0x084B02C6
 ID_MOVE_ROAR, ID_MOVE_NOBLE, TAG_RUIDO = 46, 568, 0x2745
@@ -139,7 +139,8 @@ assert o.here() <= ORD_TAREFA, hex(o.here())
 put(ORD_CODE, o.build())
 OL = o.labels
 
-# animação: a do Noble Roar, com as linhas do grito azuis (tarefa logo depois de carregar o gráfico)
+# animação: a do Noble Roar, com as linhas do grito azuis (tarefa logo depois de carregar o gráfico) e o alvo
+# saindo da tela como no Roar (AnimTask_SlideOffScreen, mesmos argumentos do Roar) depois da segunda onda do grito
 _pr = 0x09128840                            # tabela de paletas de animação: {paleta, tag}, 8 bytes, tag 0x2710 = entrada 0
 _pr += 8 * (TAG_RUIDO - 0x2710)
 assert struct.unpack_from('<H', ROM, _pr + 4 - 0x08000000)[0] == TAG_RUIDO
@@ -163,11 +164,19 @@ assert t.here() <= ORD_ANIM, hex(t.here())
 put(ORD_TAREFA, t.build())
 _nr = w32(0x0846AB1C + 4 * ID_MOVE_NOBLE)
 assert ROM[_nr - 0x08000000:_nr - 0x08000000 + 3] == b'\x00\x45\x27'
-put(ORD_ANIM, b'\x00\x45\x27\x03' + p32(ORD_TAREFA | 1) + b'\x05\x00\x13' + p32(_nr + 3))
+SLIDE, _ro = 0x08142279, w32(0x0846AB1C + 4 * ID_MOVE_ROAR)
+_sl = b'\x03' + p32(SLIDE) + bytes.fromhex('0502') + bytes.fromhex('01000200') + b'\x05'
+assert ROM[_ro - 0x08000000 + 0x2D:_ro - 0x08000000 + 0x2D + len(_sl)] == _sl    # copiado do Roar
+_ia = _nr - 0x08000000 + 3
+_im, _if = _nr - 0x08000000 + 0x64, _nr - 0x08000000 + 0x6B
+assert ROM[_im - 1] == 0x05 and ROM[_if - 1] == 0x08                              # fim da segunda onda; fim do script
+_an = b'\x00\x45\x27\x03' + p32(ORD_TAREFA | 1) + b'\x05\x00' + ROM[_ia:_im] + _sl + ROM[_im:_if]
+assert ORD_ANIM + len(_an) <= 0x09FFCD00
+put(ORD_ANIM, _an)
 put(0x0846AB1C + 4 * ID_ORDEM, p32(ORD_ANIM))
 
-# scripts: anima, a vida cai (sem acertar substituto), volta para a Pokébola e segue a troca do Roar
-_ret = bytes.fromhex('090a') + b'\xff' + p32(OL['n_perde'] | 1) + b'\x35' + p32(HITMARKER_) + p32(0x01000100) + bytes.fromhex('0b000c00') + b'\x38' + p32(HITMARKER_) + p32(0x01000100) + ROM[ROAR_ANIMA - 0x08000000 + 2:ROAR_ANIMA - 0x08000000 + 9]
+# scripts: anima, volta para a Pokébola e só então perde a vida, sem barra na tela (datahpupdate sem healthbarupdate)
+_ret = ROM[ROAR_ANIMA - 0x08000000:ROAR_ANIMA - 0x08000000 + 8] + b'\xff' + p32(OL['n_perde'] | 1) + b'\x35' + p32(HITMARKER_) + p32(0x01000100) + bytes.fromhex('0c00') + b'\x38' + p32(HITMARKER_) + p32(0x01000100) + b'\x3c'
 assert ORD_RET + len(_ret) <= ORD_SW
 put(ORD_RET, _ret)
 put(ORD_SW, b'\x41' + p32(ORD_RET) + b'\x28' + p32(ROAR_SW + 5))
