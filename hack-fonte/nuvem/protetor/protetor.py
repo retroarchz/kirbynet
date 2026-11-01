@@ -10,7 +10,7 @@ EF_PG = 14                                   # efeito sem nenhum golpe (o 204 te
 PG_FOGO_T, PG_GELO_T, PG_AGUA_T = 0x0A, 0x0F, 0x0B
 PG_BASE, PG_G = 0x0203FF80, 0x0203FFE0       # globais: +0 já contou a rodada, +1 fogo pendente (alvo+1), +2 viu o tracker
                                              # andar, +4 retorno do fim de turno
-PG_DONE, PG_FOGO, PG_VIU, PG_RET = 0, 1, 2, 4
+PG_DONE, PG_FOGO, PG_VIU, PG_QUEBRA, PG_RET = 0, 1, 2, 3, 4    # +3 quebrar ao fim da animação do golpe (alvo+1)
 INSTR, ATK, ALVO, CURMOVE, DMG, NBAT = 0x0202320C, 0x02023204, 0x02023205, 0x020231E2, 0x020231E8, 0x02023044
 MOVES, BS, RESULT = 0x0853AD34, 0x0202352C, 0x02023272
 MONS_LIT, STATUS3_LIT, SPRIDS_LIT = 0x0806DBC8, 0x08042A54, 0x08037CE8    # literais do jogo: o Coop 3 moveu essas tabelas
@@ -20,17 +20,18 @@ FREETILES = 0x08009495
 PUSHSCR, EXECSCR = 0x0804C231, 0x08058CC5
 CMD_TAB = 0x08538F54
 CMD_ACC, CMD_ADJ, CMD_HAZE, CMD_PERISH = 0x0806D455, 0x0806DFC9, 0x08082021, 0x08084E19
+CMD_WAIT = w32(CMD_TAB + 4 * 0x0A)           # waitanimation
 FIMTURNO = 0x0804D31C
 PG_MOVEEND = 0x084ACFBC
 PG_CODE, PG_DADOS, PG_GFX = 0x09FFA400, 0x09FFAF00, 0x09FFB000
 PG_ESCR = 0x09FEF100
-TAG_PLACA, TAG_COROA, TAG_COROAI, TAG_PG_PAL = 0x7A10, 0x7A11, 0x7A12, 0x7A10
+TAG_PLACA, TAG_COROA, TAG_COROAI, TAG_PLACAI, TAG_PG_PAL = 0x7A10, 0x7A11, 0x7A12, 0x7A13, 0x7A10
 MOSAICO_Q = 32                               # quadros do efeito de transformação (como o do Castform)
 
 _dir = os.path.join(os.path.dirname(__file__), 'protetor')
 _gfx = open(os.path.join(_dir, 'escudos.bin'), 'rb').read()
 _pal = open(os.path.join(_dir, 'escudos.pal'), 'rb').read()
-assert len(_gfx) == 4096
+assert len(_gfx) == 0x1400
 
 # --- scripts de batalha
 _id = lambda n: struct.pack('<H', n)
@@ -48,7 +49,7 @@ def escr(nome, dados):
 _pgat = PG_ESCR
 escr('bloq', _ini + _falou(ID_BLOQUEOU) + _fim)
 escr('cresce', _ini + _falou(ID_CRESCEU) + _fim)
-escr('derrete', _ini + _falou(ID_DERRETEU) + _fim)
+_esc['derrete'] = _pgat; _pgat += 0x20             # preenchido no fim: precisa do endereço de 'quebra'
 escr('falha', _ini + _falou(229) + _fim)                        # "Mas isso falhou!"
 escr('quebra_ret', bytes.fromhex('392000') + _falou(ID_DERRETEU) + b'\x3c')   # fase 1 + fogo com dano: volta ao golpe
 escr('cresce_ret', bytes.fromhex('392000') + _falou(ID_CRESCEU) + b'\x3c')    # Haze: cresce e volta ao golpe
@@ -120,7 +121,7 @@ a.pool()
 # comando 1 (accuracycheck): é aqui que o golpe decide se pega no alvo
 a.label('acc')
 a.push(['r4', 'r5', 'r6', 'r7'], lr=True)
-a.ldr_lit('r0', PG_G); a.mov('r1', 0); a.strb_i('r1', 'r0', PG_FOGO)
+a.ldr_lit('r0', PG_G); a.mov('r1', 0); a.strb_i('r1', 'r0', PG_FOGO); a.strb_i('r1', 'r0', PG_QUEBRA)
 a.ldr_lit('r5', ALVO); a.ldrb_i('r5', 'r5', 0); a.ldr_lit('r6', ATK); a.ldrb_i('r6', 'r6', 0)
 a.alu('cmp', 'r5', 'r6'); a.bc('eq', 'acc_orig')
 mv(a, 0, 5); a.bl('ativo'); a.cmpi('r0', 0); a.bc('eq', 'acc_orig'); mv(a, 4, 0)
@@ -143,29 +144,49 @@ a.bl('forca'); a.cmpi('r0', 0); a.bc('eq', 'acc_quebra')
 a.ldr_lit('r0', PG_G); a.addi('r5', 1); a.strb_i('r5', 'r0', PG_FOGO)   # fase 1 com dano: segue, adjustdamage faz 10%
 a.b('acc_orig')
 a.label('acc_quebra')
-mv(a, 0, 4); a.bl('acaba')
-a.ldr_lit('r0', _esc['derrete']); a.bl('salta'); a.b('acc_fim')
+a.ldr_lit('r0', _esc['derrete']); a.ldr_lit('r1', INSTR); a.str_i('r0', 'r1', 0); a.b('acc_fim')
 a.label('acc_orig')
 a.ldr_lit('r3', CMD_ACC); a.bl('c3')
 a.label('acc_fim')
 a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r0']); a.bx('r0')
 a.pool()
 
-# comando 7 (adjustdamage): fogo na fase 1 = 10% do golpe, depois do "X usou Y!"
+# comando 7 (adjustdamage): fogo na fase 1 = 10% do golpe; o escudo quebra quando a animação do golpe acabar
 a.label('adj')
 a.push(['r4'], lr=True)
 a.ldr_lit('r3', CMD_ADJ); a.bl('c3')
 a.ldr_lit('r4', PG_G); a.ldrb_i('r0', 'r4', PG_FOGO); a.cmpi('r0', 0); a.bc('eq', 'adj_fim')
-a.subi('r0', 1); a.mov('r1', 0); a.strb_i('r1', 'r4', PG_FOGO)
-a.bl('ativo'); a.cmpi('r0', 0); a.bc('eq', 'adj_fim'); a.bl('acaba')
-a.ldr_lit('r4', DMG); a.ldr_i('r0', 'r4', 0); a.cmpi('r0', 0); a.bc('le', 'adj_scr')
+a.mov('r1', 0); a.strb_i('r1', 'r4', PG_FOGO); a.strb_i('r0', 'r4', PG_QUEBRA)
+a.ldr_lit('r4', DMG); a.ldr_i('r0', 'r4', 0); a.cmpi('r0', 0); a.bc('le', 'adj_fim')
 a.mov('r1', 10); swi_div(a); a.cmpi('r0', 0); a.bc('ne', 'adj_ok'); a.mov('r0', 1)
 a.label('adj_ok'); a.str_i('r0', 'r4', 0)
-a.label('adj_scr')
-a.ldr_lit('r4', INSTR); a.ldr_i('r0', 'r4', 0); a.ldr_lit('r3', PUSHSCR); a.bl('c3')
-a.ldr_lit('r0', _esc['quebra_ret']); a.str_i('r0', 'r4', 0)
 a.label('adj_fim')
 a.pop(['r4']); a.pop(['r0']); a.bx('r0')
+a.pool()
+
+# comando 0x0A (waitanimation): acabou a animação do golpe de fogo, agora o escudo quebra e só depois vem a perda de vida
+a.label('espera')
+a.push(['r4', 'r5'], lr=True)
+a.ldr_lit('r4', INSTR); a.ldr_i('r5', 'r4', 0)
+a.ldr_lit('r3', CMD_WAIT); a.bl('c3')
+a.ldr_i('r0', 'r4', 0); a.alu('cmp', 'r0', 'r5'); a.bc('eq', 'es_fim')    # ainda esperando
+a.ldr_lit('r3', PG_G); a.ldrb_i('r0', 'r3', PG_QUEBRA); a.cmpi('r0', 0); a.bc('eq', 'es_fim')
+a.mov('r1', 0); a.strb_i('r1', 'r3', PG_QUEBRA); a.subi('r0', 1)
+a.bl('ativo'); a.cmpi('r0', 0); a.bc('eq', 'es_fim'); a.bl('acaba')
+a.ldr_i('r0', 'r4', 0); a.ldr_lit('r3', PUSHSCR); a.bl('c3')
+a.ldr_lit('r0', _esc['quebra_ret']); a.str_i('r0', 'r4', 0)
+a.label('es_fim')
+a.pop(['r4', 'r5']); a.pop(['r0']); a.bx('r0')
+a.pool()
+
+# callnative do script 'derrete': depois da animação do golpe, escudo quebra e o golpe fica sem efeito
+a.label('quebra')
+a.push([], lr=True)
+a.ldr_lit('r0', ALVO); a.ldrb_i('r0', 'r0', 0); a.bl('ativo'); a.cmpi('r0', 0); a.bc('eq', 'qb_m'); a.bl('acaba')
+a.label('qb_m')
+a.ldr_lit('r1', RESULT); a.ldrh_i('r2', 'r1', 0); a.mov('r3', 1); a.alu('orr', 'r2', 'r3'); a.strh_i('r2', 'r1', 0)
+a.ldr_lit('r1', INSTR); a.ldr_i('r0', 'r1', 0); a.addi('r0', 5); a.str_i('r0', 'r1', 0)
+a.pop(['r0']); a.bx('r0')
 a.pool()
 
 # comando 0x8A (normalisebuffs = Haze): toda placa em campo vira coroa e o Haze continua
@@ -341,7 +362,7 @@ t.label('prox')
 t.addi('r5', 1); t.cmpi('r5', 6); t.bc('hs', 'fora'); t.b('laco')
 t.label('fora')
 t.cmpi('r6', 0); t.bc('ne', 'fim')
-for tag in (TAG_PLACA, TAG_COROA, TAG_COROAI):
+for tag in (TAG_PLACA, TAG_PLACAI, TAG_COROA, TAG_COROAI):
     t.ldr_lit('r0', tag); t.ldr_lit('r3', FREETILES); t.bl('c3')
 mv(t, 0, 7); t.ldr_lit('r3', DESTROYTASK | 1); t.bl('c3')
 t.label('fim')
@@ -401,7 +422,7 @@ put(PG_TAREFA, t.build())
 
 # --- dados: folhas, paleta, modelos de sprite, posição em relação ao Pokémon
 _d = bytearray(0x100)
-_folhas = ((PG_GFX, 0x400, TAG_PLACA), (PG_GFX, 0x400, TAG_PLACA), (PG_GFX + 0x400, 0x800, TAG_COROA), (PG_GFX + 0xC00, 0x400, TAG_COROAI))
+_folhas = ((PG_GFX, 0x400, TAG_PLACA), (PG_GFX + 0x400, 0x400, TAG_PLACAI), (PG_GFX + 0x800, 0x800, TAG_COROA), (PG_GFX + 0x1000, 0x400, TAG_COROAI))
 for _k, (_p, _s, _t) in enumerate(_folhas): struct.pack_into('<IHH', _d, 8 * _k, _p, _s, _t)
 struct.pack_into('<IHH', _d, 0x20, PG_DADOS + 0xC0, TAG_PG_PAL, 0)
 _dummy = ROM[0x4C32E4:0x4C32FC]
@@ -411,15 +432,17 @@ for _k, (_p, _s, _t) in enumerate(_folhas):
     _m = bytearray(_dummy); struct.pack_into('<HHI', _m, 0, _t, TAG_PG_PAL, _quad if _k == 2 else _alto)
     _d[0x28 + 24 * _k:0x28 + 24 * _k + 24] = _m
 struct.pack_into('<HHHH', _d, 0x88, 2 << 14, 3 << 14, 2 << 10, 0)     # 32x64
-_d[0x90:0x94] = bytes((10, 10, 40, 10))                               # plano: a coroa do jogador fica atrás dele
-_d[0x98:0xA0] = struct.pack('<8b', 20, 10, -20, 8, 0, 6, -22, 2)      # x, y de cada índice
+_d[0x90:0x94] = bytes((40, 10, 40, 40))                               # plano: como nos prints, só a placa do oponente fica na frente
+_d[0x98:0xA0] = struct.pack('<8b', 17, -2, -20, 9, -1, -8, -21, 0)    # x, y de cada índice, medidos nos prints (Pokémon em 72,92 e 176,52)
 struct.pack_into('<HHHH', _d, 0xA0, 0, 3 << 14, 2 << 10, 0)           # 64x64
 _d[0xC0:0xE0] = _pal
 put(PG_DADOS, bytes(_d))
 put(PG_GFX, _gfx)
 
+put(_esc['derrete'], bytes.fromhex('0203090a') + b'\xff' + p32(L['quebra'] | 1) + bytes.fromhex('392000') + _falou(ID_DERRETEU) + _fim)
+
 # --- ganchos nos comandos do script de batalha
-for _cmd, _orig, _nome in ((0x01, CMD_ACC, 'acc'), (0x07, CMD_ADJ, 'adj'), (0x8A, CMD_HAZE, 'haze'), (0xB2, CMD_PERISH, 'perish')):
+for _cmd, _orig, _nome in ((0x01, CMD_ACC, 'acc'), (0x07, CMD_ADJ, 'adj'), (0x0A, CMD_WAIT, 'espera'), (0x8A, CMD_HAZE, 'haze'), (0xB2, CMD_PERISH, 'perish')):
     assert w32(CMD_TAB + 4 * _cmd) == _orig
     put(CMD_TAB + 4 * _cmd, p32(L[_nome] | 1))
 assert ROM[0x4D31C:0x4D324] == bytes.fromhex('f0b557464e464546')
