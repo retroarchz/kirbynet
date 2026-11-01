@@ -9,3 +9,7 @@ Sprite do jogador: tabela 0x090EC814, 36 bytes por registro, imagens em +28. Tes
 ## Capacete (tecla 0)
 
 Fora da sala por rollback, a tecla 0 troca os quadros direto na ROM da partida: `Moto` no `game.js` busca `capacete.bin` ou `moto.bin`, o `engine-worker.js` chama `romWrite` do `kncore.js`, em 0xF4E7D4. A escolha fica no navegador e volta ao iniciar o jogo. A ROM não tinha espaço livre sobrando para guardar os dois desenhos, por isso ficam em arquivos.
+
+## L em movimento
+
+O jogo só lia o L parado ou no quadro exato do centro do quadrado, e nunca na velocidade máxima da Mach. `troca.py` guarda o aperto em 0x0203FF5F e pede a troca no próximo centro de quadrado; o desvio fica em 0xE15AC e o código em 0x1FF7F80. Medido: Mach a 2 quadrados por 8 quadros passa para a Acro sem parar, e ao voltar a Mach acelera do começo. Coordenada do jogador para teste: 0x02038D20 (x).
