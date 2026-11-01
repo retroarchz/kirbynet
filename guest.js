@@ -15,7 +15,8 @@ function idb() {
   });
 }
 // a última ROM de cada videogame fica guardada separada (SYS.romSlot)
-async function romStore(v) { try { const db = await idb(); db.transaction("roms", "readwrite").objectStore("roms").put(v, SYS.romSlot); } catch (e) {} }
+// (o sha1 vai junto: calcular de novo a cada abertura travava a tela por causa da ROM de 32 MB)
+async function romStore(v) { try { const db = await idb(); db.transaction("roms", "readwrite").objectStore("roms").put({ ...v, sha1: Guest.romSha1 }, SYS.romSlot); } catch (e) {} }
 async function romLoad() {
   try {
     const db = await idb();
@@ -66,16 +67,19 @@ function showGuestPage(msg) {
   $("g-join").disabled = false;
   $("g-msg").textContent = msg || "";
 }
-function setRom(name, bytes) {
-  Guest.rom = bytes; Guest.romName = name; Guest.romSha1 = sha1Hex(bytes);
+function setRom(name, bytes, sha1) {
+  Guest.rom = bytes; Guest.romName = name; Guest.romSha1 = sha1 || sha1Hex(bytes);
   $("g-rom").textContent = `${name}  ·  ${(bytes.length / 1048576).toFixed(1)} MB`;
-  mostraCoopAuto();
+  try { localStorage.setItem(ULTIMO_JOGO(), Guest.romSha1); } catch (e) {}
+  mostraCoopAuto(Guest.romSha1);
 }
+// o último jogo deste videogame: a tela já abre certa, antes de a ROM terminar de carregar
+const ULTIMO_JOGO = () => "kirbynet.ultimoJogo." + SYS.romSlot;
 // Pokémon Quetzal pelo site: não existe sala, quem joga no mesmo Wi-Fi se encontra sozinho
-function mostraCoopAuto() {
+function mostraCoopAuto(sha1) {
   if (!SITE) return;
-  const auto = autoCoopServe(Guest.romSha1);
-  $("g-create").classList.toggle("hidden", auto);
+  const auto = autoCoopServe(sha1);
+  $("g-create").classList.toggle("hidden", auto || !sha1);   // jogo ainda desconhecido: nada de botão que pode sumir
   if (auto) $("g-rooms-box").classList.add("hidden");
   $("g-sub").textContent = auto
     ? "Escolha um jogo da lista. O save fica guardado neste navegador. É só tocar em Jogar: quem estiver no mesmo Wi-Fi aparece no jogo sozinho."
@@ -146,11 +150,10 @@ async function guestInit() {
   if (SITE) {
     // textos e botões do site já antes de aparecer a tela (senão piscava a tela de "sala do PC")
     $("g-join").classList.add("hidden");
-    $("g-create").classList.remove("hidden");
+    let ultimo = ""; try { ultimo = localStorage.getItem(ULTIMO_JOGO()) || ""; } catch (e) {}
+    mostraCoopAuto(ultimo);
     document.querySelectorAll(".pc-only").forEach(el => el.classList.add("hidden"));
     $("code-label").textContent = "Quem está na mesma internet já vê esta sala no site.";
-    $("g-sub").textContent = "Escolha um jogo da lista. O save fica guardado neste navegador. "
-      + "Para jogar junto: um aperta “Criar sala” e os outros tocam na sala que aparece aqui.";
     $("g-rom").textContent = "Carregando jogos…";
   }
   showGuestPage();
@@ -162,7 +165,7 @@ async function guestInit() {
     nameT = setTimeout(() => { try { localStorage.setItem("kirbynet.name", $("g-name").value.trim()); } catch (e) {} if (who() !== Cloud.who) Cloud.meet(who()); }, 1200);
   });
   const saved = await romLoad();
-  if (saved && saved.bytes) setRom(saved.name, saved.bytes);
+  if (saved && saved.bytes) { setRom(saved.name, saved.bytes, saved.sha1); if (!saved.sha1) romStore({ name: saved.name, bytes: saved.bytes }); }
   showUndo();
   $("g-controls").onclick = openControls;
   $("g-file").onchange = async (e) => {
