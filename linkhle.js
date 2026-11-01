@@ -329,8 +329,9 @@ const LinkHLE = (() => {
   //   1 = comando (8 números de 16 bits), 2 = cabo aberto/fechado + se é o mestre, 3 = "começar" (vagas de quem entra)
   //   coop de teste: 4 = pedido do host (tipo, vagas), 5/6 = aceito/recusado, 7 = entrei na dupla (vagas), 8 = saí da dupla
   // Pokémon Quetzal, tecla Alt: alterna o valor de trapaça do save (embaralhado com o ID de treinador) entre 1 e 0.
+  // Sem trapaça, os personagens de fim de jogo também somem: eles entregariam a visita à Fronteira de Batalha.
   // É ele que a troca compara. Só vale para quem começou com cheats: save+0x2CE fica marcado, mesmo com o valor em 0.
-  const MODO = { save: 0x030055C0, players: 0x020229F0, size: 0x24, cheat: 0x1F };
+  const MODO = { save: 0x030055C0, mapa: 0x030055BC, players: 0x020229F0, size: 0x24, cheat: 0x1F };
   function trocaModo(ram) {
     if (!ram) return null;
     const sb = ram.r32(MODO.save);
@@ -341,6 +342,9 @@ const LinkHLE = (() => {
     if (v > 1) return null;
     const novo = v ^ 1, c = (chave ^ novo) >>> 0;
     ram.w16(sb + 0x2C8, c & 0xFFFF); ram.w16(sb + 0x2CA, c >>> 16);
+    // junto, os personagens de fim de jogo (marca 0x4E8, ligada = escondidos): só somem ou voltam ao carregar o próximo mapa
+    const s1 = ram.r32(MODO.mapa);
+    if (s1 >= 0x02000000 && s1 < 0x02040000 - 0x1000) ram.w8(s1 + 0x9D, novo ? ram.r8(s1 + 0x9D) & ~1 : ram.r8(s1 + 0x9D) | 1);
     return novo;
   }
   function encode(from, m) {
