@@ -221,7 +221,7 @@ async function guestSolo() {
   try {
     startRun({ n: 1, rom: Guest.rom, romSha1: Guest.romSha1, saves: [loadMySave()], names: [name], net: null, slot: 0, delay: 0,
                auto: SITE, onSave: guestSaveWriter() });
-    AutoCoop.liga(Play.run, name);
+    AutoCoop.liga(Play.run, name, Guest.romName.replace(SYS.romRe, ""));
   } catch (err) { showGuestPage("Não deu pra iniciar: " + (err.message || err)); }
 }
 

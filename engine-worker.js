@@ -424,7 +424,7 @@ function tick() {
     // carga do motor: quanto do tempo de 1 quadro (16,7 ms) ele gasta rodando os GBAs (100% = no limite)
     const load = run.busyN ? Math.round(run.busy / run.busyN / (1000 / FPS) * 100) : null;
     postMessage({ t: "status", fps: run.fpsN / ((now - run.fpsT) / 1000), frame: run.frames, waiting, waitMs,
-                  delay: run.net ? run.delay : null, load, marg: run.marg,
+                  delay: run.net ? run.delay : null, load, marg: run.marg, coop: run.hle ? run.hle.resumo : null,
                   rb: run.rb ? { count: run.rb.count, resim: run.rb.resim, limit: predLimit() } : null });
     run.fpsT = now; run.fpsN = 0; run.busy = 0; run.busyN = 0; run.marg = {};
     if (run.rb) {

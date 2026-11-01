@@ -233,36 +233,19 @@ async function scanRooms() {
 // ---------------------------------------------------------------- coop automático
 // Pokémon Quetzal pelo site: tocou em Jogar, o jogo abre na hora como sempre. Em paralelo, quem está no mesmo Wi-Fi com a
 // mesma ROM se acha: o primeiro vira a sala (sem tela), os outros entram, e o cabo liga sozinho (autoPasso no linkhle.js).
+// "Mesmo Wi-Fi" = mesmo endereço público, como a lista de salas sempre foi. Não exigir conexão direta: entre aparelhos ela
+// pode passar por servidor e continuar sendo da mesma casa (um filtro assim recusou gente que devia entrar).
 // Nada aqui pode parar o jogo: sem internet, sem servidor ou se a sala cair, cada um segue jogando e tenta de novo depois.
-const FORA_DO_WIFI = "fora-do-wifi", SALA_FECHOU = "A sala fechou.", AUTO_SEM_RESPOSTA = 6000, AUTO_TEMPO_WIFI = 0.06;
+const SALA_FECHOU = "A sala fechou.", AUTO_SEM_RESPOSTA = 6000;
 function autoCoopServe(sha1) {
   return typeof SITE !== "undefined" && SITE && typeof Peer !== "undefined" && SYS.id === "gba" && typeof LinkHLE !== "undefined" && LinkHLE.supports(sha1);
 }
-// A conexão é de quem está perto? O tipo do endereço não prova nada: no Firefox, com IPv6, dois aparelhos da mesma casa aparecem
-// como "srflx" ou "prflx". O que separa é o tempo: direto (sem servidor no meio) e com resposta em até 60 ms é a mesma rede.
-// O limite é folgado de propósito: num PC ocupado chegou a 27 ms, e recusar quem está em casa é pior que aceitar um vizinho raro.
-// Vale o menor tempo visto: o Wi-Fi tem picos. Tempo 0 com resposta recebida é real (menos de 1 ms, medido no Firefox).
-async function mesmaRede(conn) {
-  const pc = conn.peerConnection;
-  for (let i = 0; pc && i < 24; i++) {
-    // o Firefox pode mostrar "in-progress" no par que já está funcionando: o que vale é ter resposta
-    const st = await pc.getStats(), par = [...st.values()].find(v => v.type === "candidate-pair" && (v.nominated || v.selected) && (v.state === "succeeded" || v.responsesReceived > 0));
-    if (par) {
-      const eu = st.get(par.localCandidateId)?.candidateType, ele = st.get(par.remoteCandidateId)?.candidateType;
-      if (eu === "relay" || ele === "relay") return false;
-      if (eu === "host" && ele === "host") return true;
-      if (par.currentRoundTripTime != null && (par.responsesReceived ?? 1) > 0 && par.currentRoundTripTime <= AUTO_TEMPO_WIFI) return true;
-    }
-    await new Promise(ok => setTimeout(ok, 250));
-  }
-  return false;
-}
 const AutoCoop = {
-  run: null, nome: "", gen: 0, net: null, timer: 0, vigia: 0,
-  liga(run, nome) {
+  run: null, nome: "", gen: 0, net: null, timer: 0, vigia: 0, motivo: "",
+  liga(run, nome, jogo) {
     if (!run || !run.auto) return;
     this.desliga();
-    this.run = run; this.nome = nome;
+    this.run = run; this.nome = nome; this.jogo = jogo; this.motivo = "";
     // aba fechada à força nem sempre derruba a conexão: o ping 4x por segundo sem resposta conta como queda
     this.vigia = setInterval(() => {
       const n = this.net;
@@ -284,9 +267,9 @@ const AutoCoop = {
     const run = this.run, pre = await netPrefix();
     if (gen !== this.gen || !run) return;
     if (!pre) return this.depois(15000, gen);
-    const code = "A" + pre + run.romSha1.slice(0, 4).toUpperCase();
+    const code = "AUTO" + pre;   // uma sala por internet, não por ROM: quem está em outra versão do jogo fica sabendo
     try {
-      await SiteRoom.create(run.romSha1, () => {}, null, "", code);
+      await SiteRoom.create(run.romSha1, () => {}, null, this.jogo, code);
       if (gen !== this.gen) return SiteRoom.close();
       this.entra(gen, SiteRoom.localSocket());
     } catch (e) {
@@ -304,7 +287,7 @@ const AutoCoop = {
       onLobby: () => { if (gen === this.gen && SiteRoom.on && SiteRoom.auto && !SiteRoom.running) SiteRoom.handle({ t: "start", delay: 1, rtc: false }); },
       onStart: (info) => {
         if (gen !== this.gen) return;
-        run.link = net;
+        run.link = net; this.motivo = "";
         net.onCabo = (u8) => { const b = u8.slice(); run.worker.postMessage({ t: "cabo", bytes: b.buffer }, [b.buffer]); };
         run.worker.postMessage({ t: "caboMe", me: net.slot });
         run.names = info.names; this.antes = info.names.slice();
@@ -313,6 +296,21 @@ const AutoCoop = {
       },
       onError: (msg) => this.caiu(gen, net, msg),
     });
+  },
+  // linha de baixo da tela: o que está acontecendo, em palavras. Sem isso, coop que não liga parece defeito sem motivo
+  texto(c) {
+    const net = this.net, run = this.run;
+    if (this.motivo) return "🔗 " + this.motivo;
+    if (!net || !run || !run.link) return "🔗 procurando no seu Wi-Fi…";
+    const nomes = (run.names || []).filter((n, i) => n != null && i !== net.slot);
+    if (!nomes.length) return "🔗 sozinho no Wi-Fi";
+    if (!c) return "🔗 " + nomes.join(", ") + " no Wi-Fi";
+    if (c.desligou) return "🔗 você desconectou: abra o COOP no menu para voltar";
+    if (c.fase) return "🔗 conectando…";
+    const fora = (run.names || []).map((n, i) => ({ n, i })).filter(x => x.n != null && x.i !== net.slot && !(c.outros.find(o => o[0] === x.i) && c.outros.find(o => o[0] === x.i)[1] === (c.ligados ? 2 : 1)));
+    if (c.ligados && c.ligados >= nomes.length + 1) return "🔗 ligado: " + nomes.join(", ");
+    const ocupado = c.n ? fora.map(x => x.n).join(", ") : "você";
+    return (c.ligados ? "🔗 ligado com " + (c.ligados - 1) + "; " : "🔗 ") + (ocupado ? "esperando ficar livre: " + ocupado : "ligando…");
   },
   // alguém entrou ou saiu da sala
   mudou(j) {
@@ -332,6 +330,9 @@ const AutoCoop = {
     // recusado (outra casa na mesma internet, sala cheia, site antigo): nada a fazer agora, só olha de novo de vez em quando.
     // Nem chegou a abrir (sem sala ou sem servidor): tenta sem pressa, pode virar o host
     const recusado = net.gotError && msg !== SALA_FECHOU;
+    const motivo = recusado ? msg : "";
+    if (motivo && motivo !== this.motivo) toast(motivo);   // a tela conta por que não ligou, uma vez só
+    this.motivo = motivo;
     this.depois(recusado ? 10000 : !net.opened ? 4000 + Math.random() * 3000 : 1500 + Math.random() * 1500, gen);
   },
 };
@@ -395,7 +396,7 @@ const SiteRoom = {
   },
   // um jogador que chegou pelo código
   remote(pc) {
-    const c = { closed: false, local: false, pc };
+    const c = { closed: false, local: false };
     c.send = (kind, payload) => {
       if (c.closed) return;
       try { chunkSend(pc, packMsg(kind, payload)); } catch (e) {}
@@ -455,15 +456,10 @@ const SiteRoom = {
       c.send("G", romPacket(this.running && !this.free ? { error: "A partida já começou." }
         : { name: this.romName, sha1: this.sha1, have }, this.rom).subarray(1));
     } else if (kind === "H") {
-      // coop automático: mesmo endereço público não prova que é o mesmo Wi-Fi. Só entra quem chega direto pela rede local
-      if (this.auto && !c.local && !c.perto) {
-        const copia = u8.slice();
-        mesmaRede(c.pc).then(ok => { if (ok) { c.perto = true; this.msg(c, copia); } else fail(FORA_DO_WIFI); });
-        return;
-      }
       let info; try { info = JSON.parse(dec(data)); } catch (e) { return; }
       if (this.running && !this.free) fail("A partida já começou.");
-      else if (info.rom !== this.sha1) fail("A sua ROM é diferente da do host. Todos precisam da MESMA ROM.");
+      else if (info.rom !== this.sha1) fail(this.auto ? `${(this.players[0] || {}).name || "Alguém"} está no seu Wi-Fi jogando ${this.romName}: escolham o mesmo jogo para se encontrar.`
+        : "A sua ROM é diferente da do host. Todos precisam da MESMA ROM.");
       // motor diferente (alguém com o site antigo guardado no navegador) dessincronizaria no meio do jogo
       else if ((info.eng || "1") !== SYS.engineV) fail("O site foi atualizado: recarregue a página (puxe a tela para baixo ou Ctrl+F5) e entre de novo.");
       else if (this.players.filter(Boolean).length >= SYS.roomMax) fail(`A sala está cheia (${SYS.roomMax} jogadores).`);

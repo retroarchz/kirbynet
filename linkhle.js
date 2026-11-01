@@ -384,6 +384,8 @@ const LinkHLE = (() => {
       // a sala acabou: o jogo recebe o "desconectar" de todos que estavam ligados comigo
       soltaTodos() { for (const s of [...(ids || [])]) if (s !== me) this.left(s); peers.clear(); avisados.clear(); },
       get fase() { return fase; },
+      // para a linha de baixo da tela: quantos ligados no cabo, meu nível, e quem da sala está em que nível
+      get resumo() { const t = now(); return { ligados: ids ? ids.length : 0, n: nivel(), fase, desligou, me, outros: [...avisados].map(([s, v]) => [s, t - v.t < AUTO_VALE ? v.n : -1]) }; },
       get desligou() { return desligou; },
       // teclas do jogador: durante a conexão (1 s) o jogo não recebe nada, senão o B cancelaria
       teclas(k) {
