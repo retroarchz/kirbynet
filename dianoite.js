@@ -10,7 +10,8 @@
   const A = { hora: 0x0203FF58, local: 0x030054F8, un: 0x020391FC, fa: 0x020395FC, cb2: 0x03002664, fade: 0x02039AC3, fadeY: 0x02039AC0,
               sb2: 0x030055C0, opcao: 0x2B9, mapa: 0x02038CB0, oam: 0x03002698, terreno: 0x02022FC0, BAT_INI: 0x0803D24D, BAT: 0x0803F431 };
   const K = 8.226, TIPOS = new Set([1, 2, 3, 6]);
-  const CAMPO = new Set([0x080C2965, 0x080C2959]);                // mapa normal e mapa durante a entrada da batalha
+  const ENTRADA = 0x080C2959;                                     // mapa durante a entrada da batalha
+  const CAMPO = new Set([0x080C2965, ENTRADA]);
   const SEM_CEU = new Set([3, 7, 8]);                             // terrenos debaixo d'água, caverna e prédio
   const q = (v) => Math.round(Math.max(0, Math.min(255, v)) / K);
   const receita = (J, p) => {
@@ -138,15 +139,19 @@
         if (p !== passo) { passo = p; cache.clear(); fundo.fill(0); }
         if (naBatalha) return batalha(a, n);
         // sem transição: a tela recebe a cor direto. Tela já branca ou preta, esperando o mapa novo, fica como está
-        const tela = semFade();
+        // Na entrada da batalha o jogo pisca a tela misturando a Unfaded com cinza. A Unfaded já tem a cor da hora: basta não
+        // repintar a tela por cima, senão o piscar some.
+        const entrada = cb2 === ENTRADA, tela = !entrada && semFade();
         for (let i = 0; i < 512; i++) {
           if (i >= 208 && i < 256) continue;                      // paletas de janela e texto dos menus
           const atual = ram.r16(A.un + i * 2);
           if (!pintado[i] || atual !== feito[i]) { orig[i] = atual; pintado[i] = 1; }   // o jogo trocou a cor
           const c = orig[i];
           if (c & 0x8000) {                                       // luz do próprio jogo, que só acende às 20:00
-            feito[i] = atual;
-            if (tela && n > 0 && m >= 360 && m < 1200) ram.w16(A.fa + i * 2, cor(c, i, a, n));
+            const acesa = n > 0 && m >= 360 && m < 1200;
+            feito[i] = entrada && acesa ? cor(c, i, a, n) | 0x8000 : atual;  // o piscar parte da Unfaded: a luz acesa fica lá
+            if (feito[i] !== atual) ram.w16(A.un + i * 2, feito[i]);
+            if (tela && acesa) ram.w16(A.fa + i * 2, cor(c, i, a, n));
             continue;
           }
           const v = cor(c, i, a, n);
