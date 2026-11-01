@@ -33,7 +33,7 @@ def enc(s):
     for c in s:
         if 'A' <= c <= 'Z': o.append(0xBB + ord(c) - 65)
         elif 'a' <= c <= 'z': o.append(0xD5 + ord(c) - 97)
-        else: o.append({' ': 0x00, '.': 0xAD, ',': 0xB8, '\n': 0xFE, 'ó': 0x23, 'ú': 0x27, 'é': 0x1B, 'á': 0x17}[c])
+        else: o.append({' ': 0x00, '.': 0xAD, ',': 0xB8, '\n': 0xFE, 'ó': 0x23, 'ú': 0x27, 'é': 0x1B, 'á': 0x17, 'ç': 0x19, '!': 0xAB}[c])
     return bytes(o) + b'\xff'
 
 patches = []   # (endereço, bytes novos)
@@ -734,6 +734,8 @@ D_TABTXT, D_MSG = 0x09FEB200, 0x09FEEB00     # tabela de textos da batalha (+1) 
 DISABLE_LIT, POS_LIT = 0x08052C74, 0x0808529C        # literais com gDisableStructs e gBattlerPositions (o Coop 3 mudou)
 SIDE_STATUS, SIDE_TIMERS = 0x02023280, 0x02023288    # Safeguard = 0x20; timer +6 e dono +7 (0x20 bytes por lado)
 OLD_TABTXT, N_TXT, ID_MSG, ID_DRENADA = 0x09253FF0, 733, 745, 45
+D_MSG2, ID_DISSIPOU, ID_SALVAGUARDA = 0x09FEEB30, 746, 80   # "O Distúrbio dissipou a ameaça!" no lugar da Salvaguarda
+D_DISSIPA, D_DISSIPA_S = 0x09FEEEE0, 0x09FEEF20              # escolhe a fala + as 3 cópias do script da fala
 MAGIC_GUARD = 98
 
 # texto: "Uma presença sombria cobre / o campo de batalha!"
@@ -743,7 +745,8 @@ for ch in 'Uma presença sombria cobre\no campo de batalha!':
     elif 'a' <= ch <= 'z': _msg.append(0xD5 + ord(ch) - 97)
     else: _msg.append({' ': 0x00, '\n': 0xFE, '!': 0xAB, 'ç': 0x19}[ch])
 put(D_MSG, bytes(_msg) + b'\xff')
-_tab = [w32(OLD_TABTXT + 4 * i) for i in range(N_TXT)] + [D_MSG]
+put(D_MSG2, enc('O Distúrbio dissipou a ameaça!'))
+_tab = [w32(OLD_TABTXT + 4 * i) for i in range(N_TXT)] + [D_MSG, D_MSG2]
 put(D_TABTXT, b''.join(p32(x) for x in _tab))
 _v = p32(OLD_TABTXT); _i = ROM.find(_v); _n = 0
 while _i != -1:
@@ -873,6 +876,33 @@ a.label('c3'); a.bx('r3')
 a.pool()
 put(D_TRAMP, a.build())
 put(0x08053E52, struct.pack('<HHHI', 0x4801, 0x4700, 0x46C0, D_TRAMP | 1))
+
+# status barrado pelo Distúrbio: fala própria. A proteção dele é a Salvaguarda com timer 200 (o golpe de verdade fica
+# em 5 ou menos); a Salvaguarda do golpe continua com a fala normal. callnative: +5 = fala normal, +13 = fala nova
+a = Asm(D_DISSIPA)
+a.ldr_lit('r0', 0x02023205); a.ldrb_i('r0', 'r0', 0)                    # gBattlerTarget
+a.ldr_lit('r1', POS_LIT); a.ldr_i('r1', 'r1', 0); a.ldrb_r('r0', 'r1', 'r0')
+a.mov('r1', 1); a.alu('and_', 'r0', 'r1'); a.lsl('r0', 'r0', 5)          # lado * 0x20
+a.ldr_lit('r1', SIDE_TIMERS); a.add_r('r0', 'r0', 'r1'); a.ldrb_i('r0', 'r0', 6)
+a.mov('r2', 5); a.cmpi('r0', 190); a.bc('lo', 'ok'); a.mov('r2', 13)
+a.label('ok'); a.ldr_lit('r1', 0x0202320C); a.ldr_i('r0', 'r1', 0); a.add_r('r0', 'r0', 'r2'); a.str_i('r0', 'r1', 0)
+a.bx('lr')
+a.pool()
+put(D_DISSIPA, a.build())
+
+# os 3 lugares que mostram a fala 80 (pause, printstring, waitmessage + o que vem depois): viram um goto para a cópia
+_at = D_DISSIPA_S
+for _site, _fim in ((0x084AF6C2, bytes.fromhex('2896f64a08')), (0x084B0145, b'\x3e'), (0x084B3A37, bytes.fromhex('28533a4b08'))):
+    _o = _site - 0x08000000
+    assert ROM[_o:_o + 9] + ROM[_o + 9:_o + 9 + len(_fim)] == bytes.fromhex('392000105000124000') + _fim
+    _fala = _at + 3 + 5 + 3 + 5 + 3
+    _s = bytes.fromhex('392000') + b'\xff' + p32(D_DISSIPA | 1)
+    _s += bytes([0x10]) + struct.pack('<H', ID_SALVAGUARDA) + b'\x28' + p32(_fala)
+    _s += bytes([0x10]) + struct.pack('<H', ID_DISSIPOU)
+    assert len(_s) == 19
+    _s += bytes.fromhex('124000') + _fim
+    put(_at, _s); put(_site, b'\x28' + p32(_at)); _at += (len(_s) + 3) & ~3
+assert _at <= 0x09FEF000
 
 # entrada: começa a contagem das 3 fases (callnative, gBattlerAttacker = Dusknoir)
 a = Asm(D_FASE)

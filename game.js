@@ -1135,6 +1135,9 @@ const QZ_NUVEM = {
     [0x1D5BCC, "ba20", "bb20"],
     [0x1D5C00, "f03f2509", "00b2fe09"],
     [0x1D6CA8, "f03f2509", "00b2fe09"],
+    [0x4AF6C2, "3920001050", "2820effe09"],   // fala do Distúrbio no lugar da Salvaguarda
+    [0x4B0145, "3920001050", "283ceffe09"],   // fala do Distúrbio no lugar da Salvaguarda
+    [0x4B3A37, "3920001050", "2854effe09"],   // fala do Distúrbio no lugar da Salvaguarda
   ],
   novo: [   // [endereço, bytes] em área livre (0xFF)
     [0x1FFE000, "0c480068554669005144c9000b18187c800700280bdb08480570187c0221084318740648064900f004f806488746064887460847c03305080432020200e1ff09058d0508ae83050804860508"],
@@ -1193,6 +1196,11 @@ const QZ_NUVEM = {
     [0x1FEEE00, "10b5041c0d4900220d480b68834204d004310132102af8d307e011018031803108482022084b00f007f8201c074b00f003f810bc01bc00471847c046f00c0003a327000060eefe096d190f08a9430f08"],
     [0x1FEEE60, "54463f357f41df493f569f62ff6e5f77ff7f3f35df499f623f77aa0275330000"],
     [0x1FEEE80, "0e480f49002281500432202afbd30d480d4900220d4b815202329a42fbd30c480022815202329a42fbd30a4801880a48002281520232402afbd37047e0bf00062222222200d00006ffb100008003000000d80006609703023c960302"],
+    [0x1FEEB30, "c900bedde7e827e6d6dde300d8dde7e7dde4e3e900d500d5e1d9d519d5abff"],
+    [0x1FEEEE0, "0948007809490968085c0121084040010749401880790522be2800d30d2205490868801808607047053202029c520808883202020c320202"],
+    [0x1FEEF20, "392000ffe1eefe091050002833effe0910ea021240002896f64a08"],
+    [0x1FEEF3C, "392000ffe1eefe09105000284feffe0910ea021240003e"],
+    [0x1FEEF54, "392000ffe1eefe091050002867effe0910ea0212400028533a4b08"],
   ],
   // tabelas copiadas da própria ROM: [de, para, entradas copiadas, total, valor das que faltam, valores finais]
   tabelas: [
@@ -1200,7 +1208,7 @@ const QZ_NUVEM = {
     [0x5371B0, 0x1FFEA00, 319, 321, 0, [0x09FFE220, 0x09FEE920]],   // descrição curta
     [0x5376AC, 0x1FFF000, 319, 321, 0, [0x09FFE260, 0x09FEE960]],   // descrição longa
     [0x46B9E8, 0x1FFF600, 60, 63, 0, [0x09FFE2C0, 0x09FEE8C0, 0x09FEEC80]],   // animações gerais: 60 "Haze roxo", 61 Distúrbio, 62 dreno
-    [0x1253FF0, 0x1FEB200, 733, 734, 0, [0x09FEEB00]],   // textos da batalha + "Uma presença sombria..."
+    [0x1253FF0, 0x1FEB200, 733, 735, 0, [0x09FEEB00, 0x09FEEB30]],   // textos da batalha + "Uma presença sombria..." e "O Distúrbio dissipou a ameaça!"
   ],
 };
 function quetzalNuvem(rom) {
