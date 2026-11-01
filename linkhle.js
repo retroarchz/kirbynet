@@ -64,7 +64,7 @@ const LinkHLE = (() => {
   const AUTO = { cb1: 0x03002660, cb2: 0x03002664, field: 0x080C2965, over: 0x080C28E1, coop: 0x080C5761,
                  tasks: 0x03005640, lock: 0x03000FDC, ctx: 0x03000EE8, ctxLivre: 2, fade: 0x02039AC3, avatar: 0x02039070,
                  linkType: 0x020229C6, tipo: 2, abre: 0x0825FD45, passo: 0x0825FD8D, mestre: 0x0825FEB1, escravo: 0x0825FFA1 };
-  const AUTO_B = 2, AUTO_AVISO = 30, AUTO_VALE = 1500, AUTO_PEDIDO = 4000, AUTO_LIMITE = 8000, AUTO_PAUSA = 10000, AUTO_REVE = 1500, AUTO_CALMA = 1000;
+  const AUTO_B = 2, AUTO_AVISO = 30, AUTO_VALE = 1500, AUTO_PEDIDO = 4000, AUTO_LIMITE = 8000, AUTO_FORA = 30000, AUTO_REVE = 1500, AUTO_CALMA = 1000;
 
   const DEAD_MS = 15000;   // ligado comigo e sem dar notícia há tanto tempo: caiu (o jogo recebe o "desconectar")
 
@@ -95,7 +95,8 @@ const LinkHLE = (() => {
     // auto: fase 0 = jogando, 1 = abrindo o cabo, 2 = conectando, 3 = desistindo (B da própria tarefa do jogo)
     let auto = false, fase = 0, lista = null, tarefa = 0, faseT = 0, pedido = null, pausa = 0, avisos = 0;
     // desligou: o jogador usou DESCONECTAR, então fica sozinho até abrir o COOP de novo. saindo/expulso: a saída não foi dele
-    let desligou = false, saindo = false, expulso = false, grupo = "", grupoT = 0;
+    let desligou = false, saindo = false, expulso = false, meuBye = false, grupo = "", grupoT = 0;
+    const evita = new Map();      // vaga -> até quando fica de fora: quem fez a ligação falhar não derruba os outros
     const avisados = new Map();   // vaga -> { n: nível (0 ocupado, 1 livre e sozinho, 2 parado no coop), t }
 
     const r8 = (o) => ram.r8(L + o), w8 = (o, v) => ram.w8(L + o, v);
@@ -194,7 +195,7 @@ const LinkHLE = (() => {
       return open && ids && cb1 === AUTO.coop ? 2 : 0;
     }
     const entrePassos = () => ram.r8(AUTO.avatar + 3) !== 1;
-    const comNivel = (n, t) => [...avisados].filter(([, v]) => v.n === n && t - v.t < AUTO_VALE).map(([s]) => s);
+    const comNivel = (n, t) => [...avisados].filter(([s, v]) => v.n === n && t - v.t < AUTO_VALE && !(evita.get(s) > t)).map(([s]) => s);
     // cabo solto: cada um recebe o "desconectar" dos outros, o jogo volta ao normal sozinho, sem mudar nada no mapa
     function byeDe(from) {
       dead.add(from);
@@ -256,7 +257,14 @@ const LinkHLE = (() => {
         }
       } else if (fase === 2) {
         if (ram.r32(AUTO.cb1) === AUTO.coop) { fase = 0; lista = null; avisados.clear(); }
-        else if (t - faseT > AUTO_LIMITE && ram.r32(AUTO.cb2) === AUTO.field) { fase = 3; pausa = t + AUTO_PAUSA; }
+        else if (t - faseT > AUTO_LIMITE && ram.r32(AUTO.cb2) === AUTO.field) {
+          // não ligou: quem comanda deixa de fora quem não abriu o cabo (ou o último a chegar) e tenta sem ele daqui a pouco
+          if (lista[0] === me) {
+            const abertos = linkPeers(), faltou = lista.filter(s => s !== me && !abertos.includes(s));
+            for (const s of faltou.length ? faltou : lista.slice(-1)) evita.set(s, t + AUTO_FORA);
+          }
+          fase = 3; pausa = t + AUTO_REVE;
+        }
       } else if (fase === 4) { fase = 0; lista = null; }
     }
     function release(list, t) {
@@ -320,10 +328,12 @@ const LinkHLE = (() => {
         if (nowOpen !== open) {
           open = nowOpen;
           role = open ? (me === (fase ? lista[0] : 0) ? "m" : "s") : null;
-          if (open) { if (!fase) desligou = false; saindo = expulso = false; }   // abriu pelo menu: volta a valer o automático
+          if (open) { if (!fase) desligou = false; saindo = expulso = meuBye = false; }   // abriu pelo menu: volta a valer o automático
           else {
-            if (auto && ids && !saindo && !expulso) desligou = true;
-            saindo = false; expulso = false;
+            // só conta como escolha do jogador se o jogo dele mandou o "desconectar" por conta própria: uma queda não
+            // pode deixar ninguém sozinho para sempre
+            if (auto && ids && meuBye && !saindo && !expulso) desligou = true;
+            saindo = false; expulso = false; meuBye = false;
             // cabo solto: espera todos dizerem como estão, senão cada um religaria por conta própria com quem viu primeiro
             avisados.clear(); pausa = Math.max(pausa, now() + AUTO_REVE);
             reset(); dead.clear();
@@ -351,6 +361,7 @@ const LinkHLE = (() => {
             for (let j = 0; j < CMD; j++) c[j] = r16(SQ + (j * CAP + idx) * 2);
             echo.push(c);
             send({ k: "c", w: c });
+            if (c[0] === 0xCAFE) meuBye = true;   // o meu jogo mandou o "desconectar"
           }
           if (cnt) { w8(SQ_POS, (pos + cnt) % CAP); w8(SQ_CNT, 0); }
         }
