@@ -12,7 +12,8 @@ PG_BASE, PG_G = 0x0203FF80, 0x0203FFE0       # globais: +0 já contou a rodada, 
                                              # andar, +4 retorno do fim de turno
 PG_DONE, PG_FOGO, PG_VIU, PG_QUEBRA, PG_RET, PG_MAX = 0, 1, 2, 3, 4, 8    # +3 quebrar ao fim da animação do golpe (alvo+1); +8 quem vai ao máximo (+1)
 ID_FORTE = 752
-STAGE_DEF, STAGE_DEFE, STAGE_GATILHO, STAGE_MAX = 0x1A, 0x1D, 9, 12   # 6 = normal: gatilho +3, máximo +6
+STAGE_DEF, STAGE_DEFE, STAGE_MAX = 0x1A, 0x1D, 12                  # 6 = normal, 12 = +6
+PG_CONTA, GOLPES_MEDO = 9, 3                  # G+9.. golpes parados por batalhador; 3 = medo do perigo
 INSTR, ATK, ALVO, CURMOVE, DMG, NBAT = 0x0202320C, 0x02023204, 0x02023205, 0x020231E2, 0x020231E8, 0x02023044
 MOVES, BS, RESULT = 0x0853AD34, 0x0202352C, 0x02023272
 MONS_LIT, STATUS3_LIT, SPRIDS_LIT = 0x0806DBC8, 0x08042A54, 0x08037CE8    # literais do jogo: o Coop 3 moveu essas tabelas
@@ -49,13 +50,7 @@ def escr(nome, dados):
     put(_pgat, dados)
     _pgat += (len(dados) + 3) & ~3
 _pgat = PG_ESCR
-_sobe = _pgat
-_x = bytes.fromhex('2e0a3502020a') + b'\x89\x01\x00' + p32(_sobe + 24) + bytes.fromhex('2901a133020202') + p32(_sobe + 25)
-_x += b'\x3c' + b'\x47\x41' + p32(0x084AD4BC) + b'\x3c'
-assert len(_x) == 32
-put(_pgat, _x); _pgat += 32
-_cresce_def = b'\x41' + p32(_sobe)
-escr('bloq', _ini + _falou(ID_BLOQUEOU) + _cresce_def + _fim)
+_esc['bloq'] = _pgat; _pgat += 0x20                # preenchido no fim: precisa do endereço de 'conta'
 _esc['cresce'] = _pgat; _pgat += 0x20              # preenchido no fim: precisa do endereço de 'cresce_agora'
 _esc['derrete'] = _pgat; _pgat += 0x38             # preenchido no fim: precisa do endereço de 'quebra'
 escr('falha', _ini + _falou(229) + _fim)                        # "Mas isso falhou!"
@@ -85,7 +80,7 @@ a.cmpi('r3', 0); a.bc('eq', 'd_fim')
 a.bl('t_cria'); a.b('d_fim')
 a.label('d_limpa')
 a.ldr_lit('r1', PG_BASE); a.mov('r0', 0); a.mov('r2', 0)
-a.label('d_l2'); a.strb_r('r0', 'r1', 'r2'); a.addi('r2', 1); a.cmpi('r2', 0x68); a.bc('lo', 'd_l2')
+a.label('d_l2'); a.strb_r('r0', 'r1', 'r2'); a.addi('r2', 1); a.cmpi('r2', 0x70); a.bc('lo', 'd_l2')
 a.label('d_fim')
 a.pop(['r4', 'r5']); a.pop(['r0']); a.bx('r0')
 a.label('c3'); a.bx('r3')
@@ -198,11 +193,16 @@ a.ldr_lit('r1', INSTR); a.ldr_i('r0', 'r1', 0); a.addi('r0', 5); a.str_i('r0', '
 a.pop(['r0']); a.bx('r0')
 a.pool()
 
-# escudo acabou: com Defesa em +3 ou mais, Defesa e Def. Especial vão ao máximo (r0 = batalhador)
+# callnative: mais um golpe parado pelo escudo (a Defesa não muda agora, tudo vem de uma vez no fim)
+a.label('conta')
+a.ldr_lit('r0', ALVO); a.ldrb_i('r0', 'r0', 0); a.ldr_lit('r1', PG_G + PG_CONTA); a.ldrb_r('r2', 'r1', 'r0'); a.addi('r2', 1); a.strb_r('r2', 'r1', 'r0')
+a.ldr_lit('r1', INSTR); a.ldr_i('r0', 'r1', 0); a.addi('r0', 5); a.str_i('r0', 'r1', 0)
+a.bx('lr')
+# escudo acabou: com 3 golpes parados, Defesa e Def. Especial vão ao máximo (r0 = batalhador)
 a.label('forte')
 a.push(['r4', 'r5'], lr=True)
 mv(a, 4, 0); a.bl('mon'); mv(a, 5, 0)
-a.ldrb_i('r1', 'r5', STAGE_DEF); a.cmpi('r1', STAGE_GATILHO); a.bc('lo', 'fo_fim')
+a.ldr_lit('r2', PG_G + PG_CONTA); a.ldrb_r('r1', 'r2', 'r4'); a.cmpi('r1', GOLPES_MEDO); a.bc('lo', 'fo_fim')
 a.ldr_lit('r2', PG_G); a.ldrb_i('r3', 'r2', PG_MAX); a.cmpi('r3', 0); a.bc('ne', 'fo_ja')
 a.addi('r4', 1); a.strb_i('r4', 'r2', PG_MAX); a.b('fo_fim')
 a.label('fo_ja')                             # dois escudos acabando juntos: o segundo sobe sem repetir a fala
@@ -231,6 +231,7 @@ a.label('cresce_agora')
 a.push([], lr=True)
 a.ldr_lit('r0', ALVO); a.ldrb_i('r0', 'r0', 0); a.bl('ativo'); a.cmpi('r0', 0); a.bc('eq', 'ca_m')
 a.mov('r1', 2); a.strb_i('r1', 'r0', 0); a.mov('r1', 5); a.strb_i('r1', 'r0', 1)
+a.ldr_lit('r0', ALVO); a.ldrb_i('r0', 'r0', 0); a.ldr_lit('r1', PG_G + PG_CONTA); a.ldrb_r('r2', 'r1', 'r0'); a.addi('r2', 1); a.strb_r('r2', 'r1', 'r0')
 a.label('ca_m')
 a.ldr_lit('r1', RESULT); a.ldrh_i('r2', 'r1', 0); a.mov('r3', 1); a.alu('orr', 'r2', 'r3'); a.strh_i('r2', 'r1', 0)
 a.ldr_lit('r1', INSTR); a.ldr_i('r0', 'r1', 0); a.addi('r0', 5); a.str_i('r0', 'r1', 0)
@@ -297,6 +298,7 @@ a.ldr_lit('r5', ALVO); a.ldrb_i('r5', 'r5', 0); a.ldr_lit('r6', ATK); a.ldrb_i('
 mv(a, 0, 5); a.bl('ent'); mv(a, 4, 0)
 a.mov('r0', 1); a.strb_i('r0', 'r4', 0); a.mov('r0', 3); a.strb_i('r0', 'r4', 1); a.strb_i('r6', 'r4', 2)
 a.mov('r0', 0); a.strb_i('r0', 'r4', 15)
+a.ldr_lit('r1', PG_G + PG_CONTA); a.strb_r('r0', 'r1', 'r5')
 mv(a, 0, 5); a.bl('mon'); a.ldr_i('r0', 'r0', 0x48); a.str_i('r0', 'r4', 4)
 mv(a, 0, 6); a.bl('ent'); mv(a, 7, 0); a.mov('r0', 2); a.strb_i('r0', 'r7', 12)
 mv(a, 0, 6); a.bl('mon'); a.ldr_i('r0', 'r0', 0x48); a.str_i('r0', 'r7', 8)
@@ -494,9 +496,10 @@ put(PG_GFX, _gfx)
 
 _forte = b'\xff' + p32(L['pergunta'] | 1) + bytes.fromhex('2e0b35020200') + bytes.fromhex('48002400') + b'\xff' + p32(L['aplica_max'] | 1) + _falou(ID_FORTE)
 assert len(_forte) == 5 + 21
+put(_esc['bloq'], _ini + b'\xff' + p32(L['conta'] | 1) + _falou(ID_BLOQUEOU) + _fim)
 put(_esc['quebra_ret'], bytes.fromhex('392000') + _falou(ID_DERRETEU) + _forte + b'\x3c')
 put(_esc['fim'], bytes.fromhex('392000') + _falou(ID_DESFEZ) + _forte + b'\x3e')
-put(_esc['cresce'], bytes.fromhex('0203090a') + b'\xff' + p32(L['cresce_agora'] | 1) + bytes.fromhex('392000') + _falou(ID_CRESCEU) + _cresce_def + _fim)
+put(_esc['cresce'], bytes.fromhex('0203090a') + b'\xff' + p32(L['cresce_agora'] | 1) + bytes.fromhex('392000') + _falou(ID_CRESCEU) + _fim)
 put(_esc['derrete'], bytes.fromhex('0203090a') + b'\xff' + p32(L['quebra'] | 1) + bytes.fromhex('392000') + _falou(ID_DERRETEU) + _forte + _fim)
 
 # --- ganchos nos comandos do script de batalha
