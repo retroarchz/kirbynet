@@ -6,6 +6,7 @@ Golpe 681 (lugar do Buzzy Buzz, que nenhum Pokémon aprendia), efeito 14. Só o 
 - Bloqueia golpes e efeitos, inclusive Perish Song. Status do próprio parceiro passa.
 - Haze, gelo ou água: placa vira coroa, 5 rodadas a partir dali. Só uma vez; a coroa não cresce de novo.
 - Fogo quebra: na placa o protegido leva 10% do golpe; na coroa, nada.
+- Cada golpe parado pelo escudo dá +1 de Defesa (fogo não). Se o escudo acabar com Defesa em +3 ou mais, Defesa e Def. Especial vão a +6.
 - Quem usou só repete na rodada 3, ou antes se o escudo acabar. Em quem já tem escudo: "Mas isso falhou!".
 - Sair de campo ou desmaiar acaba com o escudo.
 

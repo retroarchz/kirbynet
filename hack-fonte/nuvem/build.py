@@ -752,6 +752,7 @@ _pgt = [b'\xfd\x10' + enc(' foi envolto pelo\nProtetor Glacial!'), enc('O Protet
         enc('O Protetor Glacial derreteu!'), enc('O Protetor Glacial se desfez!')]
 _pgp = []; _at = D_PG_TXT
 for _b in _pgt: _pgp.append(_at); put(_at, _b); _at += 0x30
+_pgp.append(0x09FEFF08); put(0x09FEFF08, enc('O medo do perigo deixou\n')[:-1] + b'\xfd\x10' + enc(' mais forte!'))
 _tab = [w32(OLD_TABTXT + 4 * i) for i in range(N_TXT)] + [D_MSG, D_MSG2] + _pgp
 put(D_TABTXT, b''.join(p32(x) for x in _tab))
 _v = p32(OLD_TABTXT); _i = ROM.find(_v); _n = 0
@@ -761,7 +762,7 @@ while _i != -1:
     _i = ROM.find(_v, _i + 1)
 assert _n == 24, _n
 assert ROM[0x1D5BCC:0x1D5BD0] == bytes.fromhex('ba208000')
-put(0x081D5BCC, bytes.fromhex('bc20'))         # limite do número do texto: 744 -> 752
+put(0x081D5BCC, bytes.fromhex('bd20'))         # limite do número do texto: 744 -> 756
 
 # animação geral 62: a tarefa do dreno do Leech Seed (quem recebe/quem perde vêm do argumento) + a do Dream Eater
 # o script do Dream Eater copiado sem trocar o fundo (o "call SetPsychicBackground" e o "call UnsetPsychicBg" chamam
