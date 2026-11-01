@@ -18,6 +18,9 @@ D_SAI = 0x09FEED00                           # tarefa da saída: a luz volta aos
 D_ROSA, D_ROSA_PAL = 0x09FEEE00, 0x09FEEE60   # tarefa que pinta as bolinhas do dreno de rosa + a paleta rosa
 D_COBRE = 0x09FEEE80                         # antes de devolver o fundo normal: tela no escuro (o jogo leva 2 quadros)
 SAI_QUADROS = 44                             # brilho 5/16 -> 16/16, +1/16 a cada 4 quadros
+# Tempo do Imperador (protetor/imperador.py): código, script, animação, textos e dados; fundo de gelo na tela = bit 0 de IMP + 15
+IMP, IMP_CODE, IMP_ESCR, IMP_ESCR_T, IMP_ANIM, IMP_TXT, IMP_DADOS = 0x0203FFF0, 0x09FF1000, 0x09FF2400, 0x80, 0x09FF2500, 0x09FF2540, 0x09FF2600
+ID_IMP, ID_IMP_SC = 753, 754
 # área livre (0xFF) igual nas duas ROMs do Quetzal (a do Coop 3 usa até 0x09FFA31C)
 CASE, NOME_HOOK, SCRIPT, TXT = 0x09FFE000, 0x09FFE080, 0x09FFE100, 0x09FFE200
 JTAB, DESC_C, DESC_L = 0x09FFE400, 0x09FFEA00, 0x09FFF000
@@ -164,7 +167,7 @@ a.label('c3'); a.bx('r3')
 a.pool()
 put(TASK, a.build())
 assert w32(0x080F40AC) == OLD_GERAL
-g = [w32(OLD_GERAL + 4 * i) for i in range(N_GERAL)] + [ANIM, D_ANIM, D_ANIM2]
+g = [w32(OLD_GERAL + 4 * i) for i in range(N_GERAL)] + [ANIM, D_ANIM, D_ANIM2, IMP_ANIM]
 put(GERAL, b''.join(p32(x) for x in g))
 put(0x080F40AC, p32(GERAL))
 
@@ -348,7 +351,8 @@ a.label('marca')                             # 1 se o céu escuro está no mapa 
 a.ldr_lit('r0', 0x0600D000); a.ldrh_i('r0', 'r0', 0); a.lsl('r0', 'r0', 22); lsr(a, 0, 0, 22)
 a.ldr_lit('r1', NUV0); a.alu('cmp', 'r0', 'r1'); a.bc('ne', 'nao')
 a.mov('r0', 1); a.bx('lr')
-a.label('tem')                               # 1 se algum batalhador tem Distúrbio e vida
+a.label('tem')                               # 1 se algum batalhador tem Distúrbio e vida (o gelo do imperador ganha do céu escuro)
+a.ldr_lit('r0', IMP + 15); a.ldrb_i('r0', 'r0', 0); a.lsl('r0', 'r0', 31); a.bc('ne', 'nao')
 a.ldr_lit('r0', 0x0806DBC8); a.ldr_i('r0', 'r0', 0)
 a.ldr_lit('r1', 0x02023044); a.ldrb_i('r1', 'r1', 0)
 a.ldr_lit('r2', NOVA2)
@@ -753,6 +757,8 @@ _pgt = [b'\xfd\x10' + enc(' foi envolto pelo\nProtetor Glacial!'), enc('O Protet
 _pgp = []; _at = D_PG_TXT
 for _b in _pgt: _pgp.append(_at); put(_at, _b); _at += 0x30
 _pgp.append(0x09FEFF08); put(0x09FEFF08, enc('O medo do perigo deixou\n')[:-1] + b'\xfd\x10' + enc(' mais forte!'))
+_pgp.append(IMP_TXT); put(IMP_TXT, enc('O Tempo do Imperador de\n')[:-1] + b'\xfd\x10' + enc(' começou!'))
+_pgp.append(IMP_TXT + 0x40); put(IMP_TXT + 0x40, b'\xfd\x10' + enc(' agora domina\no Sheer Cold!'))
 _tab = [w32(OLD_TABTXT + 4 * i) for i in range(N_TXT)] + [D_MSG, D_MSG2] + _pgp
 put(D_TABTXT, b''.join(p32(x) for x in _tab))
 _v = p32(OLD_TABTXT); _i = ROM.find(_v); _n = 0

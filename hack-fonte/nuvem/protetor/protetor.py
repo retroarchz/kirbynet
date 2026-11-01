@@ -28,6 +28,7 @@ FIMTURNO = 0x0804D31C
 PG_MOVEEND = 0x084ACFBC
 PG_CODE, PG_DADOS, PG_GFX = 0x09FFA400, 0x09FFAF00, 0x09FFB000
 PG_ESCR = 0x09FEF100
+IMP_STUB_MIRA, IMP_STUB_TURNO, IMP_STUB_FUNDO = IMP_CODE, IMP_CODE + 8, IMP_CODE + 16
 TAG_PLACA, TAG_COROA, TAG_COROAI, TAG_PLACAI, TAG_PG_PAL = 0x7A10, 0x7A11, 0x7A12, 0x7A13, 0x7A10
 MOSAICO_Q = 32                               # quadros do efeito de transformação (como o do Castform)
 
@@ -80,8 +81,9 @@ a.cmpi('r3', 0); a.bc('eq', 'd_fim')
 a.bl('t_cria'); a.b('d_fim')
 a.label('d_limpa')
 a.ldr_lit('r1', PG_BASE); a.mov('r0', 0); a.mov('r2', 0)
-a.label('d_l2'); a.strb_r('r0', 'r1', 'r2'); a.addi('r2', 1); a.cmpi('r2', 0x70); a.bc('lo', 'd_l2')
+a.label('d_l2'); a.strb_r('r0', 'r1', 'r2'); a.addi('r2', 1); a.cmpi('r2', 0x80); a.bc('lo', 'd_l2')
 a.label('d_fim')
+a.ldr_lit('r3', IMP_STUB_FUNDO | 1); a.bl('c3')
 a.pop(['r4', 'r5']); a.pop(['r0']); a.bx('r0')
 a.label('c3'); a.bx('r3')
 
@@ -505,9 +507,9 @@ put(_esc['derrete'], bytes.fromhex('0203090a') + b'\xff' + p32(L['quebra'] | 1) 
 # --- ganchos nos comandos do script de batalha
 for _cmd, _orig, _nome in ((0x01, CMD_ACC, 'acc'), (0x07, CMD_ADJ, 'adj'), (0x0A, CMD_WAIT, 'espera'), (0x8A, CMD_HAZE, 'haze'), (0xB2, CMD_PERISH, 'perish')):
     assert w32(CMD_TAB + 4 * _cmd) == _orig
-    put(CMD_TAB + 4 * _cmd, p32(L[_nome] | 1))
+    put(CMD_TAB + 4 * _cmd, p32(IMP_STUB_MIRA | 1 if _nome == 'acc' else L[_nome] | 1))
 assert ROM[0x4D31C:0x4D324] == bytes.fromhex('f0b557464e464546')
-put(FIMTURNO, struct.pack('<HHI', 0x4B00, 0x4718, L['fim_entra'] | 1))
+put(FIMTURNO, struct.pack('<HHI', 0x4B00, 0x4718, IMP_STUB_TURNO | 1))
 
 # --- o golpe em si
 _usa = bytes.fromhex('000203') + b'\xff' + p32(L['pode_usar'] | 1) + bytes.fromhex('090a') + b'\xff' + p32(L['usa'] | 1)
@@ -541,3 +543,5 @@ put(LS_TAB + 4 * CUBCHOO, p32(PG_LS))
 DESC_TAB, PG_DESC = 0x092DB0A4, 0x09FEFFA0
 put(PG_DESC, enc('Escudo de gelo que\nbloqueia golpes por 3\nrodadas. Fogo derrete.'))
 put(DESC_TAB + 4 * (ID_PG - 1), p32(PG_DESC))
+
+exec(open(os.path.join(_dir, 'imperador.py'), encoding='utf8').read())
