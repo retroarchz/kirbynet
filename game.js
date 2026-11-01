@@ -1146,7 +1146,7 @@ const QZ_NUVEM = {
     [0x538F70, "c9df0608", "f9a5ff09"],   // Distúrbio e Protetor Glacial
     [0x53917C, "21200808", "bda6ff09"],   // Distúrbio e Protetor Glacial
     [0x53921C, "194e0808", "1da7ff09"],   // Distúrbio e Protetor Glacial
-    [0x53ED0C, "06003c0d6414640000000001000000000000008000000000", "0e00000f0005000090000002000003120000000000000000"],   // Distúrbio e Protetor Glacial
+    [0x53ED0C, "06003c0d6414640000000001000000000000008000000000", "0e00000f0005000090000702000003120000000000000000"],   // Distúrbio e Protetor Glacial
     [0x5B4F18, "34f45508", "40fffe09"],   // Distúrbio e Protetor Glacial
     [0x12DBB44, "11712c09", "a0fffe09"],   // Distúrbio e Protetor Glacial
     [0x538F7C, "2de80608", "35a6ff09"],   // Distúrbio e Protetor Glacial

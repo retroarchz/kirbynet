@@ -2,7 +2,7 @@
 
 Golpe 681 (lugar do Buzzy Buzz, que nenhum Pokémon aprendia), efeito 14. Só o Cubchoo aprende, no nível 15.
 
-- Protege quem usou ou um aliado por 3 rodadas (placa). Quem está protegido pode atacar normalmente.
+- Protege quem usou ou um aliado por 3 rodadas (placa). Quem está protegido pode atacar normalmente. Prioridade +7: sai antes de qualquer golpe.
 - Bloqueia golpes e efeitos, inclusive Perish Song. Status do próprio parceiro passa.
 - Haze, gelo ou água: placa vira coroa, 5 rodadas a partir dali. Só uma vez; a coroa não cresce de novo.
 - Fogo quebra: na placa o protegido leva 10% do golpe; na coroa, nada.

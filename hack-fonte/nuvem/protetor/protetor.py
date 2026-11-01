@@ -459,7 +459,7 @@ EF_TAB = 0x084A9994
 put(EF_TAB + 4 * EF_PG, p32(_esc['golpe']))
 assert _pgat <= 0x09FEFF00
 _mv = bytearray(ROM[0x53AD34 + 24 * 367:0x53AD34 + 24 * 367 + 24])    # Acupressure: alvo "eu ou aliado"
-struct.pack_into('<H', _mv, 0, EF_PG); _mv[2] = 0; _mv[3] = PG_GELO_T; _mv[4] = 0; _mv[5] = 5
+struct.pack_into('<H', _mv, 0, EF_PG); _mv[2] = 0; _mv[3] = PG_GELO_T; _mv[4] = 0; _mv[5] = 5; _mv[10] = 7   # prioridade +7: antes de qualquer golpe
 put(0x0853AD34 + 24 * ID_PG, bytes(_mv))
 _nm = enc('Protetor Glacial'); assert len(_nm) <= 17     # com o 0xFF do fim
 put(0x085188EB - 17 + 17 * ID_PG, _nm + b'\xff' * (17 - len(_nm)))
