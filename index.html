@@ -8,8 +8,8 @@
 <link rel="icon" href="icon-192.png">
 <meta name="theme-color" content="#161629">
 <!-- versão dos arquivos: muda a cada publicação, para o celular não misturar arquivo velho com novo -->
-<script>const ASSET_V = "20261101172606";</script>
-<link rel="stylesheet" href="style.css?v=20261101172606">
+<script>const ASSET_V = "20261101174254";</script>
+<link rel="stylesheet" href="style.css?v=20261101174254">
 </head>
 <body>
 <div id="conn" class="conn hidden">Sem conexão com o kirbynet. A janela do Python está aberta?</div>
@@ -134,7 +134,6 @@
     <button id="btn-all" class="ghost" title="F2">Ver todas</button>
     <button id="btn-ff" class="ghost hidden" title="Segure Espaço (PC) ou RT (controle)">⏩ Acelerar</button>
     <button id="btn-ffx" class="ghost hidden" title="Quanto o ⏩ acelera">Velocidade 8x</button>
-    <button id="btn-relogio" class="ghost hidden" title="Dia e noite do Pokémon Quetzal: hora do aparelho ou um dia por hora de jogo">🕐 Hora real</button>
     <button id="btn-sound" class="ghost">🔊 Som</button>
     <button id="btn-touch" class="ghost">📱 Botões de toque</button>
     <button id="btn-controls2" class="ghost">🎮 Controles</button>
@@ -203,22 +202,23 @@
       (pode ter várias linhas) e aperte <b>Aplicar</b>. Fica salvo neste aparelho, só para este jogo<span id="cheats-game"></span>.</p>
     <p class="sub">O código tem que ser da mesma versão da ROM (USA, Europa, Japão). Se o jogo travar ou ficar estranho,
       desligue o código e aplique. O que o jogo gravar no save com o código ligado continua lá depois.</p>
+    <div id="relogio-linha" class="row hidden"><span>Dia e noite</span><div class="grow"></div><button id="btn-relogio" class="ghost" title="Hora do aparelho ou um dia por hora de jogo">🕐 Hora real</button></div>
     <div id="cheats-presets" class="cheat hidden"></div>
     <div id="cheats-list"></div>
     <div class="row"><button id="cheats-add" class="ghost">+ Novo código</button><div class="grow"></div>
       <span id="cheats-msg" class="sub"></span><button id="cheats-apply">Aplicar</button></div>
   </div>
 </div>
-<script src="system.js?v=20261101172606"></script>
-<script src="ghost-core.js?v=20261101172606"></script>   <!-- SNES, Mundo livre: onde está o boneco de cada um -->
-<script src="linkhle.js?v=20261101172606"></script>   <!-- GBA: cabo link pela internet (coop do Pokémon Quetzal) -->
+<script src="system.js?v=20261101174254"></script>
+<script src="ghost-core.js?v=20261101174254"></script>   <!-- SNES, Mundo livre: onde está o boneco de cada um -->
+<script src="linkhle.js?v=20261101174254"></script>   <!-- GBA: cabo link pela internet (coop do Pokémon Quetzal) -->
 <script>document.getElementById("sys").value = SYS.id;</script>
-<script src="peerjs.min.js?v=20261101172606"></script>
-<script src="sitenet.js?v=20261101172606"></script>
-<script src="cloud.js?v=20261101172606"></script>
-<script src="app.js?v=20261101172606"></script>
-<script src="game.js?v=20261101172606"></script>
-<script src="guest.js?v=20261101172606"></script>
+<script src="peerjs.min.js?v=20261101174254"></script>
+<script src="sitenet.js?v=20261101174254"></script>
+<script src="cloud.js?v=20261101174254"></script>
+<script src="app.js?v=20261101174254"></script>
+<script src="game.js?v=20261101174254"></script>
+<script src="guest.js?v=20261101174254"></script>
 <script>touchInit(); updateSoundButton(); if (!GUEST) connect();</script>
 </body>
 </html>

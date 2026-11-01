@@ -733,7 +733,7 @@ function startRun(opts) {
                        cabo: run.cabo || null, especial: Cheats.usable(run) ? CheatPresets.especial() : 0,
                        delay: run.delay || 0, cheats: cheats.length ? cheats : null }, [roms.buffer]);
   $("btn-cheats").classList.toggle("hidden", !Cheats.usable(run));
-  $("btn-relogio").classList.toggle("hidden", !run.moto);
+  $("relogio-linha").classList.toggle("hidden", !run.moto);
   Relogio.rotulo();
   if (run.cabo && run.net) run.net.onCabo = (u8) => { const b = u8.slice(); run.worker.postMessage({ t: "cabo", bytes: b.buffer }, [b.buffer]); };
   if (run.free && !run.cabo) ghostInit(run);

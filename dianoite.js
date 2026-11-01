@@ -33,6 +33,15 @@
   function create(ram, modo, min) {
     const st = { modo: modo === "jogo" ? "jogo" : "real", base: +min || 720, f0: 0, frames: 0 };
     const cache = new Map(); let passo = -1;
+    // A transição de tela do jogo parte das cores originais (Unfaded): por isso as cores novas ficam lá também, com a
+    // cópia do jogo guardada aqui. Senão a tela pisca a cor de dia ao entrar ou sair de um lugar.
+    const orig = new Uint16Array(512), feito = new Uint16Array(512), pintado = new Uint8Array(512);
+    const devolve = () => {
+      for (let i = 0; i < 512; i++) {
+        if (pintado[i] && ram.r16(A.un + i * 2) === feito[i]) ram.w16(A.un + i * 2, orig[i]);
+        pintado[i] = 0;
+      }
+    };
     const minuto = () => {
       if (st.modo === "jogo") return (st.base + (st.frames - st.f0) / 150) % 1440;
       const d = new Date(); return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
@@ -70,18 +79,22 @@
         const m = minuto(), h = Math.floor(m / 60), mi = Math.floor(m) % 60;
         ram.w8(A.hora, h); ram.w8(A.hora + 1, mi); ram.w8(A.hora + 2, 0);
         ram.w8(A.local + 2, h); ram.w8(A.local + 3, mi);
-        if (ram.r32(A.cb2) !== A.CAMPO || (ram.r8(A.fade) & 0x80)) return;
+        if (ram.r32(A.cb2) !== A.CAMPO) return devolve();
         const sb = ram.r32(A.sb2);
-        if (sb < 0x02000000 || !(ram.r8(sb + A.opcao) & 0x80)) return;
-        if (!TIPOS.has(ram.r8(A.mapa + 0x17))) return;
+        if (sb < 0x02000000 || !(ram.r8(sb + A.opcao) & 0x80) || !TIPOS.has(ram.r8(A.mapa + 0x17))) return devolve();
         const [a, n] = fase(m), p = Math.round(a * 64) * 65 + Math.round(n * 64);
         if (p !== passo) { passo = p; cache.clear(); }
+        const tela = !(ram.r8(A.fade) & 0x80);                    // sem transição: a tela recebe a cor direto
         for (let i = 0; i < 512; i++) {
           if (i >= 208 && i < 256) continue;                      // paletas de janela e texto dos menus
-          const c = ram.r16(A.un + i * 2);
-          if (c & 0x8000) continue;                               // luz do próprio jogo
+          const atual = ram.r16(A.un + i * 2);
+          if (!pintado[i] || atual !== feito[i]) { orig[i] = atual; pintado[i] = 1; }   // o jogo trocou a cor
+          const c = orig[i];
+          if (c & 0x8000) { feito[i] = atual; continue; }         // luz do próprio jogo
           const v = cor(c, i, a, n);
-          if (ram.r16(A.fa + i * 2) !== v) ram.w16(A.fa + i * 2, v);
+          if (atual !== v) ram.w16(A.un + i * 2, v);
+          feito[i] = v;
+          if (tela && ram.r16(A.fa + i * 2) !== v) ram.w16(A.fa + i * 2, v);
         }
         sombras(a);
       },
