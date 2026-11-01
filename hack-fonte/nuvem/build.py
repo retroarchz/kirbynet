@@ -36,7 +36,7 @@ def enc(s):
     for c in s:
         if 'A' <= c <= 'Z': o.append(0xBB + ord(c) - 65)
         elif 'a' <= c <= 'z': o.append(0xD5 + ord(c) - 97)
-        else: o.append({' ': 0x00, '.': 0xAD, ',': 0xB8, '\n': 0xFE, 'ó': 0x23, 'ú': 0x27, 'é': 0x1B, 'á': 0x17, 'ç': 0x19, '!': 0xAB, '3': 0xA4}[c])
+        else: o.append({' ': 0x00, '.': 0xAD, ',': 0xB8, '\n': 0xFE, 'ó': 0x23, 'ú': 0x27, 'é': 0x1B, 'á': 0x17, 'ç': 0x19, '!': 0xAB, '3': 0xA4, ';': 0x36}[c])
     return bytes(o) + b'\xff'
 
 patches = []   # (endereço, bytes novos)

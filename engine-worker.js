@@ -484,6 +484,12 @@ onmessage = async (ev) => {
       if (v != null) { if (run.hle) run.hle.modo(v); postMessage({ t: "modo", v }); }
     }
   }
+  else if (m.t === "moto") {   // Pokémon Quetzal, tecla 0: troca os quadros da moto na ROM da partida; nunca na sala por rollback
+    if (run && run.quetzal && !SNES) {
+      if (run.rb || !run.s.romWrite) postMessage({ t: "moto", v: null });
+      else { run.s.romWrite(0xF4E7D4, new Uint8Array(m.bytes)); postMessage({ t: "moto", v: m.v }); }
+    }
+  }
   // Mundo livre (SNES): inimigos/golpes/abates dos outros e "manda de novo os desenhos" (alguém entrou)
   else if (m.t === "kill") { if (run && run.free && m.k) CoopSync.addKill(run.cs[0], m.k); }
   else if (m.t === "rooms") {}

@@ -727,7 +727,7 @@ function startRun(opts) {
   // prontos que mudam a ROM (ex.: Meta Knight): só na cópia desta partida, sozinho ou "Mesmo PC"
   if (Cheats.usable(run)) CheatPresets.applyRom(roms);
   quetzalTipos(roms);   // ajustes fixos do Quetzal: valem sempre (também online, todos iguais)
-  quetzalNuvem(roms);
+  run.moto = quetzalNuvem(roms);   // deu certo: a tecla 0 pode trocar o desenho da moto
   worker.postMessage({ t: "start", module: Play.mod, n: run.n, rom: roms, saves: opts.saves,
                        net: !!run.net && !run.free, free: !!run.free, me: run.slot | 0, slot: run.free ? 0 : run.slot,
                        cabo: run.cabo || null, especial: Cheats.usable(run) ? CheatPresets.especial() : 0,
@@ -1150,6 +1150,7 @@ const QZ_NUVEM = {
     [0x53921C, "194e0808", "5da8ff09"],   // Distúrbio e Protetor Glacial
     [0x53ED0C, "06003c0d6414640000000001000000000000008000000000", "0e00000f0005000090000702000003120000000000000000"],   // Distúrbio e Protetor Glacial
     [0x5B4F18, "34f45508", "40fffe09"],   // Distúrbio e Protetor Glacial
+    [0x12DC884, "ee782d09", "007fff09"],   // descrição longa do Protetor Glacial (tela de detalhes), texto em 0x1FF7F00
     [0x12DBB44, "11712c09", "a0fffe09"],   // Distúrbio e Protetor Glacial
     [0x538F7C, "2de80608", "95a6ff09"],   // Distúrbio e Protetor Glacial
     [0x93446, "03b038bc9846a146aa46", "014b1847c046c113ff09"],   // Tempo do Imperador
@@ -1166,7 +1167,8 @@ const QZ_NUVEM = {
     [0x53ED24, "04003c0a6414640000000000000000010000088000000000", "1c0000000005000000000002000009061000100003000000"],   // Ordem e escudo Nv. 2
     [0x12DBB48, "42712c09", "60cbff09"],   // Ordem e escudo Nv. 2
   ],
-  novo: [   // [endereço, bytes] em área livre (0xFF)
+  novo: [
+    [0x1FF7F00, "cae6e3e8d9dbd900d500e7dd00e3e900e9e100d5e0ddd5d8e300d8d900e8e9d8e300e4e3e600a400e6e3d8d5d8d5e7ad00c1d9e0e300d90017dbe9d500e6d9dae3e619d5e13600dae3dbe300d900e0e9e8d5d8e3e600e5e9d9d6e6d5e1adff"],   // texto longo do Protetor Glacial   // [endereço, bytes] em área livre (0xFF)
     [0x1FFE000, "0c480068554669005144c9000b18187c800700280bdb08480570187c0221084318740648064900f004f806488746064887460847c03305080432020200e1ff09058d0508ae83050804860508"],
     [0x1FFE080, "00b50004010c0b1c0648814204d00130814204d004480047044802bc0847044802bc08473f01000031560a0800e2ff0900e9fe09"],
     [0x1FFE100, "ff9198080876013639400045013c003502020a760f622e05320202002c0532020204320202015be1ff097601375be1ff097600615be1ff091d00000000015be1ff092e1e350202022e1f350202002e1c350202022e1d35020200162f05320202012d0532020244300202011ce1ff0931073502020432020201760f62ffb19808083930003f"],
@@ -1287,6 +1289,34 @@ const QZ_NUVEM = {
     [0x46B9E8, 0x1FFF600, 60, 64, 0, [0x09FFE2C0, 0x09FEE8C0, 0x09FEEC80, 0x09FF2500]],   // animações gerais: 60 "Haze roxo", 61 Distúrbio, 62 dreno, 63 Imperador
     [0x1253FF0, 0x1FEB200, 733, 745, 0, [0x09FEEB00, 0x09FEEB30, 0x09FEF000, 0x09FEF030, 0x09FEF060, 0x09FEF090, 0x09FEF0C0, 0x09FEFF08, 0x09FF2540, 0x09FF2580, 0x09FFCC00, 0x09FFCC30]],   // textos da batalha + Distúrbio (2) + Protetor Glacial (6) + Imperador (2)
   ],
+};
+// Tecla 0 no Quetzal: moto do personagem 657 com ou sem capacete. Os dois desenhos ficam em arquivos e só vêm ao usar;
+// a escolha fica neste navegador e nunca vale na sala por rollback (lá todos rodam a mesma ROM).
+const Moto = {
+  chave: "kn-moto-capacete", dados: {}, avisar: false,
+  ligado() { try { return localStorage.getItem(this.chave) === "1"; } catch { return false; } },
+  async ler(nome) {
+    if (!this.dados[nome]) {
+      const r = await fetch(`hack-fonte/nuvem/moto/${nome}.bin?v=${ASSET_V}`);
+      if (!r.ok) throw new Error("sem arquivo");
+      const b = new Uint8Array(await r.arrayBuffer());
+      if (b.length !== 0x4800) throw new Error("tamanho errado");
+      this.dados[nome] = b;
+    }
+    return this.dados[nome].slice();
+  },
+  async aplica(run, v) {
+    if (!run || !run.moto) return;
+    try { const b = await this.ler(v ? "capacete" : "moto"); run.worker.postMessage({ t: "moto", v, bytes: b.buffer }, [b.buffer]); }
+    catch { if (this.avisar) toast("Não deu para trocar agora, tente de novo."); this.avisar = false; }
+  },
+  troca() { const run = Play.run; if (run && run.moto) { this.avisar = true; this.aplica(run, !this.ligado()); } },
+  feito(v) {
+    if (v == null) { if (this.avisar) toast("Na sala online o capacete fica como está."); this.avisar = false; return; }
+    try { localStorage.setItem(this.chave, v ? "1" : "0"); } catch {}
+    if (this.avisar) toast(v ? "🪖 Capacete colocado" : "😎 Capacete tirado");
+    this.avisar = false;
+  },
 };
 function quetzalNuvem(rom) {
   if (String.fromCharCode(...rom.subarray(0xA0, 0xAB)) !== "PKM QUETZAL") return 0;
@@ -1432,6 +1462,8 @@ function onWorker(run, m) {
   }
   else if (m.t === "cheats") cheatsResult(run, m.res);
   else if (m.t === "modo") toast(m.v ? "↩ Voltou" : "✓ Pronto");
+  else if (m.t === "moto") Moto.feito(m.v);
+  else if (m.t === "started") { if (Moto.ligado()) Moto.aplica(run, true); }   // volta com o capacete escolhido
   else if (m.t === "snap") persistSaves(run, m.saves, false);   // o jogo gravou algo novo
   else if (m.t === "saves") finishRun(run, m.saves);
 }

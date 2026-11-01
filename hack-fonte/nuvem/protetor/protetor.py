@@ -581,5 +581,9 @@ put(LS_TAB + 4 * CUBCHOO, p32(PG_LS))
 DESC_TAB, PG_DESC = 0x092DB0A4, 0x09FEFFA0
 put(PG_DESC, enc('Escudo de gelo por 3\nrodadas. Fogo derrete,\nlutador quebra.'))
 put(DESC_TAB + 4 * (ID_PG - 1), p32(PG_DESC))
+# a tela de detalhes usa outra tabela, logo depois da primeira, e o jogo quebra as linhas sozinho (cerca de 40 letras na 1ª, 30 nas outras por causa do desenho)
+DESC_LONGA, PG_DESC2 = 0x092DBDE4, 0x09FF7F00
+put(PG_DESC2, enc('Protege a si ou um aliado de tudo por 3 rodadas. Gelo e água reforçam; fogo e lutador quebram.'))
+put(DESC_LONGA + 4 * (ID_PG - 1), p32(PG_DESC2))
 
 exec(open(os.path.join(_dir, 'imperador.py'), encoding='utf8').read())

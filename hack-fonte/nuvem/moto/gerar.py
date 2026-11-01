@@ -1,6 +1,6 @@
 # Bike do personagem 657: troca os Pokémon da Mach Bike (658, 9 quadros) e da Acro Bike
 # (659, 27 quadros) pela moto da Cynthia (217 e 218), com a cabeça do 657 (quadros a pé) por cima.
-# uso: python gerar.py ROM.gba  -> moto.bin (0x4800 bytes para 0xF4E7D4), previa.png
+# uso: python gerar.py ROM.gba  -> moto.bin (0x4800 bytes para 0xF4E7D4), capacete.bin (mesmo tamanho), previa.png
 import os, struct, sys
 from PIL import Image
 
@@ -88,17 +88,27 @@ def montar(g):
             if c and 0 <= X < 32 and 0 <= Y < 32: o[Y][X] = c
     return o
 
+# capacete (tecla 0): sem a cabeça; o loiro vira visor azul e o balanço do cabelo some na borda do capacete
+CAP = dict(MAPA)
+CAP.update({5: 9, 6: 8, 7: 7, 8: 6, 4: 6, 1: 8, 2: 8, 3: 7})
+def capacete(g):
+    d, dx, dy = achar(g)
+    topo = 5 + dy
+    return [[(2 if y < topo + 2 and c in (5, 6, 7, 8) else CAP[c]) if c else 0 for c in linha] for y, linha in enumerate(g)]
+
 saida = [montar(g) for g in QUADROS]
+cap = [capacete(g) for g in QUADROS]
 ordem = sorted(range(36), key=lambda n: quadro(658, n) if n < 9 else quadro(659, n - 9))
 assert quadro(659, 0) == BLOCO and quadro(658, 8) + 0x200 == FIM
 dados = b''.join(gravar(saida[n]) for n in ordem)
 assert len(dados) == 0x4800
 open(os.path.join(AQUI, 'moto.bin'), 'wb').write(dados)
+open(os.path.join(AQUI, 'capacete.bin'), 'wb').write(b''.join(gravar(cap[n]) for n in ordem))
 
 S = 3
-im = Image.new('RGB', (12 * (32 * S + 3), 3 * (32 * S + 3)), (120, 190, 150))
+im = Image.new('RGB', (12 * (32 * S + 3), 6 * (32 * S + 3)), (120, 190, 150))
 px = im.load()
-for n, g in enumerate(saida):
+for n, g in enumerate(saida + cap):
     ox, oy = (n % 12) * (32 * S + 3), (n // 12) * (32 * S + 3)
     for y in range(32):
         for x in range(32):

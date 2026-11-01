@@ -62,6 +62,8 @@ let altSo = false;
 addEventListener("keydown", (e) => {
   if (capture) { e.preventDefault(); return finishCapture("kb", e.code); }
   if (e.key === "Alt") { if (Play.run && !typing()) { e.preventDefault(); if (!e.repeat) altSo = true; } return; }
+  // 0 sem atalho próprio: capacete da moto no Pokémon Quetzal
+  if ((e.code === "Digit0" || e.code === "Numpad0") && Play.run && !typing() && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && !boundKeys().has(e.code)) Moto.troca();
   altSo = false;
   if (e.code === "F2" && Play.run) { e.preventDefault(); toggleRunView(); return; }
   if (e.code === "F3" && Play.run) { e.preventDefault(); Fit.cycle(); return; }

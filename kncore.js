@@ -112,6 +112,12 @@
         // Fotografia da partida, para voltar alguns quadros e refazer com os botões certos (rollback):
         // a memória inteira do motor, menos as ROMs (a daqui e a cópia de cada GBA), que nunca mudam.
         // É exata por definição (tudo o que o motor sabe está nessa memória) e fica fora do motor.
+        // troca um pedaço da ROM com a partida rodando (em todas as cópias); a fotografia do rollback não guarda a ROM
+        romWrite(off, bytes) {
+          const mem = new Uint8Array(x.memory.buffer);
+          mem.set(bytes, romPtr + off);
+          for (let i = 0; i < n; i++) { const p = x.kn_rom_ptr ? x.kn_rom_ptr(ptr, i) >>> 0 : 0; if (p && p !== romPtr) mem.set(bytes, p + off); }
+        },
         canSnapshot: !!x.kn_rom_ptr,
         snapshot(reuse) {
           const size = x.memory.buffer.byteLength, skip = [[romPtr, romPtr + rom.length]];
