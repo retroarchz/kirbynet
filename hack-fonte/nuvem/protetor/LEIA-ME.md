@@ -12,7 +12,7 @@ Golpe 681 (lugar do Buzzy Buzz, que nenhum Pokémon aprendia), efeito 14. Só o 
 ## Arquivos
 
 - `protetor.py`: código, roda dentro do `build.py`.
-- `gerar.py`: gera `escudos.bin` e `escudos.pal` a partir dos prints que estão em Downloads.
+- `gerar.py`: desenha as imagens em pixel art, nas medidas dos prints, e gera `escudos.bin` e `escudos.pal`.
 
 Depois de rodar o `build.py`, os trechos de `nuvem.json` precisam ir para `QZ_NUVEM` no `game.js`, por endereço.
 Os textos entram pela linha `tabelas` do `game.js`, não pelos trechos.
