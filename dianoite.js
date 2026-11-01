@@ -26,10 +26,10 @@
     const sobe = (a, b) => Math.max(0, Math.min(1, (m - a) / (b - a)));
     if (m < 330) return [0, 1];                                  // madrugada
     if (m < 420) return [0, 1 - sobe(330, 420)];                 // 05:30 a 07:00, amanhecer
-    if (m < 900) return [0, 0];                                  // dia
-    if (m < 1020) return [sobe(900, 1020), 0];                   // 15:00 a 17:00, a tarde chega
-    if (m < 1110) return [1, 0];                                 // 17:00 a 18:30, tarde
-    if (m < 1200) { const n = sobe(1110, 1200); return [1 - n, n]; }   // 18:30 a 20:00, anoitece
+    if (m < 840) return [0, 0];                                  // dia
+    if (m < 930) return [sobe(840, 930), 0];                     // 14:00 a 15:30, a tarde chega
+    if (m < 990) return [1, 0];                                  // 15:30 a 16:30, tarde
+    if (m < 1080) { const n = sobe(990, 1080); return [1 - n, n]; }    // 16:30 a 18:00, anoitece
     return [0, 1];
   }
   function create(ram, modo, min) {
@@ -49,7 +49,7 @@
       const d = new Date(); return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
     };
     const cor = (c, i, a, n) => {
-      const obj = i >= 256, chave = (c & 0x7FFF) | (obj ? 0x8000 : 0) | (i === 0x12 || i === 0x13 ? 0x10000 : 0) | (i === 0x1A ? 0x20000 : 0);
+      const obj = i >= 256, chave = (c & 0x7FFF) | (obj ? 0x8000 : 0) | (i === 0x12 || i === 0x13 ? 0x10000 : 0) | (i === 0x1A ? 0x20000 : 0) | (c & 0x8000 ? 0x40000 : 0);
       let r = cache.get(chave);
       if (r === undefined) {
         const p = [(c & 31) * K, ((c >> 5) & 31) * K, ((c >> 10) & 31) * K];
@@ -58,6 +58,7 @@
         if (!obj && ARVORES[c & 0x7FFF]) v = ARVORES[c & 0x7FFF];
         if (chave & 0x10000) v = v.map((x) => x * 0.72);          // caminhos claros
         if (chave & 0x20000) { t = [0x8F, 0xA0, 0xC8]; v = [0xF8, 0xE0, 0x60]; }   // vidro de porta e janela
+        if (chave & 0x40000) { t = p; v = p.map((x, k) => 0.32 * x + 0.68 * [255, 230, 100][k]); }   // luz: acende antes do jogo
         const b = 1 - a - n, o = [0, 1, 2].map((k) => b * p[k] + a * t[k] + n * v[k]);
         r = q(o[0]) | (q(o[1]) << 5) | (q(o[2]) << 10);
         cache.set(chave, r);
@@ -94,7 +95,11 @@
           const atual = ram.r16(A.un + i * 2);
           if (!pintado[i] || atual !== feito[i]) { orig[i] = atual; pintado[i] = 1; }   // o jogo trocou a cor
           const c = orig[i];
-          if (c & 0x8000) { feito[i] = atual; continue; }         // luz do próprio jogo
+          if (c & 0x8000) {                                       // luz do próprio jogo, que só acende às 20:00
+            feito[i] = atual;
+            if (tela && n > 0 && m >= 360 && m < 1200) ram.w16(A.fa + i * 2, cor(c, i, a, n));
+            continue;
+          }
           const v = cor(c, i, a, n);
           if (atual !== v) ram.w16(A.un + i * 2, v);
           feito[i] = v;
