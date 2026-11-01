@@ -33,7 +33,7 @@ def enc(s):
     for c in s:
         if 'A' <= c <= 'Z': o.append(0xBB + ord(c) - 65)
         elif 'a' <= c <= 'z': o.append(0xD5 + ord(c) - 97)
-        else: o.append({' ': 0x00, '.': 0xAD, ',': 0xB8, '\n': 0xFE, 'ó': 0x23, 'ú': 0x27, 'é': 0x1B, 'á': 0x17, 'ç': 0x19, '!': 0xAB}[c])
+        else: o.append({' ': 0x00, '.': 0xAD, ',': 0xB8, '\n': 0xFE, 'ó': 0x23, 'ú': 0x27, 'é': 0x1B, 'á': 0x17, 'ç': 0x19, '!': 0xAB, '3': 0xA4}[c])
     return bytes(o) + b'\xff'
 
 patches = []   # (endereço, bytes novos)
@@ -687,6 +687,7 @@ D_HOOK = 0x09FEEA40
 A_TEM = a.labels['tem']
 c = Asm(D_HOOK)
 c.label('depois')                            # a função original volta para cá; o retorno de verdade está na pilha
+c.ldr_lit('r3', 0x09FFA400 | 1); c.bl('c3')  # Protetor Glacial: limpa na montagem, recria os sprites depois de menu
 c.bl(A_TEM); c.cmpi('r0', 0); c.bc('eq', 'sai')
 c.bl(a.labels['embatalha']); c.cmpi('r0', 0); c.bc('eq', 'sai')
 c.ldr_lit('r0', 0x03002664); c.ldr_i('r0', 'r0', 0)     # montando a batalha: dados da batalha anterior ainda
@@ -734,6 +735,7 @@ D_TABTXT, D_MSG = 0x09FEB200, 0x09FEEB00     # tabela de textos da batalha (+1) 
 DISABLE_LIT, POS_LIT = 0x08052C74, 0x0808529C        # literais com gDisableStructs e gBattlerPositions (o Coop 3 mudou)
 SIDE_STATUS, SIDE_TIMERS = 0x02023280, 0x02023288    # Safeguard = 0x20; timer +6 e dono +7 (0x20 bytes por lado)
 OLD_TABTXT, N_TXT, ID_MSG, ID_DRENADA = 0x09253FF0, 733, 745, 45
+D_PG_TXT = 0x09FEF000                        # textos do Protetor Glacial
 D_MSG2, ID_DISSIPOU, ID_SALVAGUARDA = 0x09FEEB30, 746, 80   # "O Distúrbio dissipou a ameaça!" no lugar da Salvaguarda
 D_DISSIPA, D_DISSIPA_S = 0x09FEEEE0, 0x09FEEF20              # escolhe a fala + as 3 cópias do script da fala
 MAGIC_GUARD = 98
@@ -746,7 +748,11 @@ for ch in 'Uma presença sombria cobre\no campo de batalha!':
     else: _msg.append({' ': 0x00, '\n': 0xFE, '!': 0xAB, 'ç': 0x19}[ch])
 put(D_MSG, bytes(_msg) + b'\xff')
 put(D_MSG2, enc('O Distúrbio dissipou a ameaça!'))
-_tab = [w32(OLD_TABTXT + 4 * i) for i in range(N_TXT)] + [D_MSG, D_MSG2]
+_pgt = [b'\xfd\x10' + enc(' foi envolto pelo\nProtetor Glacial!'), enc('O Protetor Glacial cresceu!'), enc('O Protetor Glacial\nbloqueou o golpe!'),
+        enc('O Protetor Glacial derreteu!'), enc('O Protetor Glacial se desfez!')]
+_pgp = []; _at = D_PG_TXT
+for _b in _pgt: _pgp.append(_at); put(_at, _b); _at += 0x30
+_tab = [w32(OLD_TABTXT + 4 * i) for i in range(N_TXT)] + [D_MSG, D_MSG2] + _pgp
 put(D_TABTXT, b''.join(p32(x) for x in _tab))
 _v = p32(OLD_TABTXT); _i = ROM.find(_v); _n = 0
 while _i != -1:
@@ -755,7 +761,7 @@ while _i != -1:
     _i = ROM.find(_v, _i + 1)
 assert _n == 24, _n
 assert ROM[0x1D5BCC:0x1D5BD0] == bytes.fromhex('ba208000')
-put(0x081D5BCC, bytes.fromhex('bb20'))         # limite do número do texto: 744 -> 748
+put(0x081D5BCC, bytes.fromhex('bc20'))         # limite do número do texto: 744 -> 752
 
 # animação geral 62: a tarefa do dreno do Leech Seed (quem recebe/quem perde vêm do argumento) + a do Dream Eater
 # o script do Dream Eater copiado sem trocar o fundo (o "call SetPsychicBackground" e o "call UnsetPsychicBg" chamam
@@ -1019,6 +1025,8 @@ put(JTAB, b''.join(p32(x) for x in jt))
 put(0x08052600, p32(NOVA2 - 2))
 put(0x08052604, p32(JTAB))
 
+exec(open(os.path.join(os.path.dirname(__file__), 'protetor', 'protetor.py'), encoding='utf8').read())
+
 # --- descrições (curta e longa): copia as 319 e põe a 319
 for old, new, txt, txt2, refs in ((OLD_DESC_C, DESC_C, TXT + 0x20, D_TXT + 0x20, (0x08247C4C, 0x08284704, 0x08284748)),
                                   (OLD_DESC_L, DESC_L, TXT + 0x60, D_TXT + 0x60, (0x08297700,))):
@@ -1039,7 +1047,7 @@ for at, data in sorted(patches):
     o = at - 0x08000000
     orig = ROM[o:o + len(data)]
     livre = all(b == 0xFF for b in orig)
-    assert livre or at < 0x09000000, hex(at)
+    assert livre or at < 0x09000000 or at == DESC_TAB + 4 * (ID_PG - 1), hex(at)
     out.append([o, None if livre else orig.hex(), data.hex()])
     rom[o:o + len(data)] = data
 json.dump(out, open(os.path.join(os.path.dirname(__file__), 'nuvem.json'), 'w'))
