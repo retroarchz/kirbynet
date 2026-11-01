@@ -234,16 +234,25 @@ async function scanRooms() {
 // Pokémon Quetzal pelo site: tocou em Jogar, o jogo abre na hora como sempre. Em paralelo, quem está no mesmo Wi-Fi com a
 // mesma ROM se acha: o primeiro vira a sala (sem tela), os outros entram, e o cabo liga sozinho (autoPasso no linkhle.js).
 // Nada aqui pode parar o jogo: sem internet, sem servidor ou se a sala cair, cada um segue jogando e tenta de novo depois.
-const FORA_DO_WIFI = "fora-do-wifi", SALA_FECHOU = "A sala fechou.", AUTO_SEM_RESPOSTA = 6000;
+const FORA_DO_WIFI = "fora-do-wifi", SALA_FECHOU = "A sala fechou.", AUTO_SEM_RESPOSTA = 6000, AUTO_TEMPO_WIFI = 0.06;
 function autoCoopServe(sha1) {
   return typeof SITE !== "undefined" && SITE && typeof Peer !== "undefined" && SYS.id === "gba" && typeof LinkHLE !== "undefined" && LinkHLE.supports(sha1);
 }
-// a conexão aberta foi direto pela rede local? (endereço "host" dos dois lados, sem passar pela internet)
+// A conexão é de quem está perto? O tipo do endereço não prova nada: no Firefox, com IPv6, dois aparelhos da mesma casa aparecem
+// como "srflx" ou "prflx". O que separa é o tempo: direto (sem servidor no meio) e com resposta em até 60 ms é a mesma rede.
+// O limite é folgado de propósito: num PC ocupado chegou a 27 ms, e recusar quem está em casa é pior que aceitar um vizinho raro.
+// Vale o menor tempo visto: o Wi-Fi tem picos. Tempo 0 com resposta recebida é real (menos de 1 ms, medido no Firefox).
 async function mesmaRede(conn) {
   const pc = conn.peerConnection;
   for (let i = 0; pc && i < 24; i++) {
-    const st = await pc.getStats(), par = [...st.values()].find(v => v.type === "candidate-pair" && v.state === "succeeded" && (v.nominated || v.selected));
-    if (par) return st.get(par.localCandidateId)?.candidateType === "host" && st.get(par.remoteCandidateId)?.candidateType === "host";
+    // o Firefox pode mostrar "in-progress" no par que já está funcionando: o que vale é ter resposta
+    const st = await pc.getStats(), par = [...st.values()].find(v => v.type === "candidate-pair" && (v.nominated || v.selected) && (v.state === "succeeded" || v.responsesReceived > 0));
+    if (par) {
+      const eu = st.get(par.localCandidateId)?.candidateType, ele = st.get(par.remoteCandidateId)?.candidateType;
+      if (eu === "relay" || ele === "relay") return false;
+      if (eu === "host" && ele === "host") return true;
+      if (par.currentRoundTripTime != null && (par.responsesReceived ?? 1) > 0 && par.currentRoundTripTime <= AUTO_TEMPO_WIFI) return true;
+    }
     await new Promise(ok => setTimeout(ok, 250));
   }
   return false;
@@ -283,7 +292,9 @@ const AutoCoop = {
     } catch (e) {
       if (gen !== this.gen) return;
       SiteRoom.close();
-      if (e && e.type === "unavailable-id") this.entra(gen, siteSocket(code));   // já tem alguém: entra na sala dele
+      // já tem alguém: entra na sala dele. Abrindo junto com outro, às vezes o servidor só derruba a conexão em vez de
+      // avisar que o código tem dono: também vale tentar entrar (se não houver sala, volta para cá em instantes)
+      if (e && ["unavailable-id", "network", "socket-closed", "socket-error"].includes(e.type)) this.entra(gen, siteSocket(code));
       else this.depois(15000, gen);
     }
   },
@@ -318,9 +329,10 @@ const AutoCoop = {
     this.net = null;
     if (run) { run.link = null; run.worker.postMessage({ t: "caboFim" }); }
     if (SiteRoom.on && SiteRoom.auto) SiteRoom.close();
-    // recusado (outra casa na mesma internet, sala cheia, site antigo): nada a fazer agora, só olha de novo de vez em quando
+    // recusado (outra casa na mesma internet, sala cheia, site antigo): nada a fazer agora, só olha de novo de vez em quando.
+    // Nem chegou a abrir (sem sala ou sem servidor): tenta sem pressa, pode virar o host
     const recusado = net.gotError && msg !== SALA_FECHOU;
-    this.depois(recusado ? 60000 : 1500 + Math.random() * 1500, gen);
+    this.depois(recusado ? 10000 : !net.opened ? 4000 + Math.random() * 3000 : 1500 + Math.random() * 1500, gen);
   },
 };
 
