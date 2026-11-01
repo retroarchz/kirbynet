@@ -1,26 +1,32 @@
 [
   {
     "name": "Kirby & The Amazing Mirror (USA).gba",
-    "file": "Kirby & The Amazing Mirror (USA).gba"
+    "file": "Kirby & The Amazing Mirror (USA).gba",
+    "sha1": "274b102b6d940f46861a92b4e65f89a51815c12c"
   },
   {
     "name": "Kirby - Nightmare in Dream Land (USA).gba",
-    "file": "Kirby - Nightmare in Dream Land (USA).gba"
+    "file": "Kirby - Nightmare in Dream Land (USA).gba",
+    "sha1": "37a476567d133c146fee6b5e2eb0b07a215da6b0"
   },
   {
     "name": "Minish Cap Multiplayer USA.gba",
-    "file": "Minish Cap Multiplayer USA.gba"
+    "file": "Minish Cap Multiplayer USA.gba",
+    "sha1": "8a3b9dc8706abdf0b0a66ac9c9be80480555fa85"
   },
   {
     "name": "PokemonQuetzalPtBrAlpha9v1.gba",
-    "file": "PokemonQuetzalPtBrAlpha9v1.gba"
+    "file": "PokemonQuetzalPtBrAlpha9v1.gba",
+    "sha1": "c4091f572d52436c86ceaa0c5718cfb22dc2d59d"
   },
   {
     "name": "Pokémon Quetzal — Coop 3 (TESTE)",
-    "file": "PokemonQuetzalCoop3Teste.gba"
+    "file": "PokemonQuetzalCoop3Teste.gba",
+    "sha1": "cee4fb273fd301762c2dc29d65d83db08f1d68ca"
   },
   {
     "name": "rom_de_teste_4p.gba",
-    "file": "rom_de_teste_4p.gba"
+    "file": "rom_de_teste_4p.gba",
+    "sha1": "4b0f797da227e3ed044dbdb9f6aaa468e00e0ffa"
   }
 ]

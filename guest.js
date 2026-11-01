@@ -72,10 +72,17 @@ function setRom(name, bytes) {
 }
 
 // Catálogo publicado junto com o site, usando caminhos relativos ao GitHub Pages.
-let libraryRequest = 0;
+let libraryRequest = 0, Library = [];
 async function loadLibraryRom() {
   const request = ++libraryRequest;
   const name = $("g-library").value;
+  // o jogo guardado neste navegador é o mesmo do catálogo: não baixa de novo (sha1 em roms/index.json)
+  const game = Library.find(g => g.file === name);
+  if (game && game.sha1 && Guest.rom && Guest.romName === name && Guest.romSha1 === game.sha1) {
+    $("g-solo").disabled = false;
+    $("g-create").disabled = false;
+    return;
+  }
   Guest.rom = null;
   $("g-solo").disabled = true;
   $("g-create").disabled = true;
@@ -83,7 +90,7 @@ async function loadLibraryRom() {
   $("g-rom").textContent = "Carregando " + name + "…";
   try {
     const url = new URL(SYS.roms + encodeURIComponent(name), location.href);
-    url.searchParams.set("v", ASSET_V);
+    url.searchParams.set("v", game && game.sha1 ? game.sha1.slice(0, 12) : ASSET_V);
     const response = await fetch(url);
     if (!response.ok) throw new Error("Falha ao baixar o jogo (" + response.status + ").");
     const bytes = new Uint8Array(await response.arrayBuffer());
@@ -106,7 +113,7 @@ async function initLibrary() {
   try {
     const response = await fetch(new URL(SYS.roms + "index.json", location.href), { cache: "no-store" });
     if (!response.ok) throw new Error("Catálogo indisponível.");
-    const games = await response.json();
+    const games = Library = await response.json();
     select.replaceChildren(...games.map(game => new Option(game.name.replace(SYS.romRe, ""), game.file)));
     if (!games.length) select.add(new Option("Nenhum jogo disponível", ""));
     if (games.some(game => game.file === Guest.romName)) select.value = Guest.romName;
