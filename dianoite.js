@@ -91,7 +91,10 @@
       const tela = !(ram.r8(A.fade) & 0x80) && !((ram.r16(A.fadeY) >> 6) & 31);
       for (let k = 0; k < 32; k++) {
         const i = 0x20 + k, c = ram.r16(A.un + i * 2);
-        if (fundo[k] && c === fundo[k]) continue;
+        if (fundo[k] && c === fundo[k]) {                         // animação que troca o fundo devolve a cor crua só na tela
+          if (tela && ram.r16(A.fa + i * 2) === crua[k]) ram.w16(A.fa + i * 2, c);
+          continue;
+        }
         if (fundo[k] && c !== crua[k]) continue;                  // outra cor: é do Distúrbio ou do Imperador
         crua[k] = c;
         const v = cor(c, i, a, n, true) || 1;
