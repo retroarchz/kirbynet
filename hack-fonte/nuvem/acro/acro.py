@@ -25,6 +25,14 @@ SIDE_SITE, SIDE_BACK, SIDE_OK, SIDE_ORIG = 0x0818CAFC, 0x0818CB34, 0x0818CB04, 0
 # altura da água (1) sem estar surfando (só no meio do pulo de 2 casas) não muda nada; pousando numa plataforma da
 # lista com altura 0 ele fica com a altura de antes (a do chão).
 ELEV_SITE, ELEV_BACK, ELEV_FIM = 0x080DAE8C, 0x080DAE94, 0x080DAEAE
+# Pedras do mar: cada pedra fica no canto entre 4 quadrados (bloco 2x2). O desenho do jogador (callback do sprite dele,
+# 0x080CAD60) desliza 1 px por quadro até ficar no centro da pedra (desloca sprite->x/y, que o jogo só soma nos
+# movimentos); fora delas volta. Estado em DESL: deslocamento aplicado (s8 x, s8 y) e a última posição do sprite (se
+# o jogo reposicionar o sprite, ex. troca de mapa, a diferença passa de 12 px e o deslocamento zera).
+CB_SITE, CB_MOVE, CB_ARG = 0x080CAD60, 0x080D7168, 0x080CAD85
+DESL = 0x0203FF50
+OFFS = [(0x150, 8, 8), (0x152, 8, 8), (0x154, 8, 8), (0x151, -8, 8), (0x153, -8, 8),
+        (0x158, 8, -8), (0x15C, 8, -8), (0x159, -8, -8)]   # quadrado do bloco -> onde fica o centro da pedra (px)
 HOP1 = 0x080CC43C            # pulinho de 1 casa com a roda levantada (o do jogo quando está livre)
 HOP2 = 0x080CC460            # pulo de 2 casas com a roda levantada (barranco)
 JUMP2 = 0x080CC364           # pulo de barranco normal (2 casas)
@@ -44,6 +52,11 @@ class A(Asm):
     def asr(self, d, m, imm): self.h(0x1000 | imm << 6 | r(m) << 3 | r(d))
     def mvn(self, d, m): self.h(0x4000 | 15 << 6 | r(m) << 3 | r(d))
     def ldr_r(self, d, n, m): self.h(0x5800 | r(m) << 6 | r(n) << 3 | r(d))
+    def ldrsh_r(self, d, n, m): self.h(0x5E00 | r(m) << 6 | r(n) << 3 | r(d))
+    def ldrsb_r(self, d, n, m): self.h(0x5600 | r(m) << 6 | r(n) << 3 | r(d))
+    def str_sp(self, d, imm): assert imm % 4 == 0 and imm < 1024; self.h(0x9000 | r(d) << 8 | imm >> 2)
+    def ldr_sp(self, d, imm): assert imm % 4 == 0 and imm < 1024; self.h(0x9800 | r(d) << 8 | imm >> 2)
+    def subsp(self, imm): self.h(0xB080 | imm >> 2)
     def build(self):
         # literais podem ser nomes de rótulos (endereços de dados definidos depois)
         self.items = [('word', self.labels[x]) if k == 'word' and isinstance(x, str) else (k, x) for k, x in self.items]
@@ -137,6 +150,54 @@ def code():
     a.mov('r0', 1); a.pop(['r4', 'r5', 'r6']); a.bx('lr')
     a.pool()
 
+    # ---------- desloc(r0 = valor do mapa) -> r0 = deslocamento (byte 0 = x s8, byte 1 = y s8) ou 0 ----------
+    a.label('desloc')
+    a.push(['r4'], lr=True)
+    a.movh('r4', 'r0'); a.bl('plat'); a.cmpi('r0', 0); a.bc('eq', 'dnao')
+    a.lsl('r0', 'r4', 22); a.lsr('r0', 'r0', 22)
+    a.ldr_lit('r1', 'offs')
+    a.label('dloop')
+    a.ldrh_i('r2', 'r1', 0); a.cmpi('r2', 0); a.bc('eq', 'dnao')
+    a.alu('cmp', 'r2', 'r0'); a.bc('eq', 'dsim'); a.addi('r1', 4); a.b('dloop')
+    a.label('dsim'); a.ldrh_i('r0', 'r1', 2); a.pop(['r4']); a.pop(['r1']); a.bx('r1')
+    a.label('dnao'); a.mov('r0', 0); a.pop(['r4']); a.pop(['r1']); a.bx('r1')
+
+    # ---------- callback do sprite do jogador (r0 = sprite) ----------
+    a.label('cb')
+    a.push(['r4', 'r5', 'r6', 'r7'], lr=True)
+    a.movh('r4', 'r0')
+    a.mov('r1', 0x2E); a.ldrsh_r('r2', 'r4', 'r1')
+    a.mov('r1', 0x24); a.alu('mul', 'r2', 'r1'); a.ldr_lit('r1', OBJS); a.add_r('r5', 'r2', 'r1')   # r5 = objeto
+    a.movh('r0', 'r5'); a.movh('r1', 'r4'); a.ldr_lit('r2', CB_ARG); a.ldr_lit('r3', CB_MOVE | 1); a.bl('callr3c')
+    a.ldrh_i('r0', 'r5', 0x10); a.ldrh_i('r1', 'r5', 0x12); a.bl('tile')
+    # rápido (roda todo quadro): só procura na lista se o quadrado for 0x150..0x15C; sem alvo e sem deslocamento: nada
+    a.lsl('r1', 'r0', 22); a.lsr('r1', 'r1', 22); a.mov('r2', 0xA8); a.lsl('r2', 'r2', 1); a.sub_r('r1', 'r1', 'r2')
+    a.mov('r6', 0); a.cmpi('r1', 0xC); a.bc('hi', 'csem')
+    a.bl('desloc'); a.movh('r6', 'r0')                                     # alvo
+    a.label('csem')
+    a.ldr_lit('r7', DESL)
+    a.ldrh_i('r0', 'r7', 0); a.alu('orr', 'r0', 'r6'); a.cmpi('r0', 0); a.bc('eq', 'cfim')
+    # o jogo reposicionou o sprite? (diferença > 12 px de um quadro para o outro): zera o deslocamento
+    a.ldrh_i('r0', 'r4', 0x20); a.ldrh_i('r1', 'r7', 2); a.sub_r('r0', 'r0', 'r1'); a.lsl('r0', 'r0', 16); a.asr('r0', 'r0', 16)
+    a.addi('r0', 12); a.cmpi('r0', 24); a.bc('hi', 'czera')
+    a.ldrh_i('r0', 'r4', 0x22); a.ldrh_i('r1', 'r7', 4); a.sub_r('r0', 'r0', 'r1'); a.lsl('r0', 'r0', 16); a.asr('r0', 'r0', 16)
+    a.addi('r0', 12); a.cmpi('r0', 24); a.bc('ls', 'cpasso')
+    a.label('czera'); a.mov('r0', 0); a.strh_i('r0', 'r7', 0)
+    a.label('cpasso')
+    for eixo, (sb, so) in enumerate([(0, 0x20), (1, 0x22)]):   # x e y: 1 px por quadro na direção do alvo
+        a.mov('r1', sb); a.ldrsb_r('r0', 'r7', 'r1')                          # aplicado
+        a.lsl('r1', 'r6', 24 - 8 * eixo); a.asr('r1', 'r1', 24)                # alvo (s8)
+        a.alu('cmp', 'r0', 'r1'); a.bc('eq', 'cfim%d' % eixo); a.bc('lt', 'cmais%d' % eixo)
+        a.subi('r0', 1); a.ldrh_i('r2', 'r4', so); a.subi('r2', 1); a.b('cguarda%d' % eixo)
+        a.label('cmais%d' % eixo); a.addi('r0', 1); a.ldrh_i('r2', 'r4', so); a.addi('r2', 1)
+        a.label('cguarda%d' % eixo); a.strh_i('r2', 'r4', so); a.strb_i('r0', 'r7', sb)
+        a.label('cfim%d' % eixo)
+    a.ldrh_i('r0', 'r4', 0x20); a.strh_i('r0', 'r7', 2); a.ldrh_i('r0', 'r4', 0x22); a.strh_i('r0', 'r7', 4)
+    a.label('cfim')
+    a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r0']); a.bx('r0')
+    a.label('callr3c'); a.bx('r3')
+    a.pool()
+
     # ---------- pula(r0 = direção, r1 = 0 pulinho / 1 de lado) -> 0 nada, 1 pulou, 2 = pulo de lado do jogo ----------
     # r4 = direção, r5 = jogador, r6 = dx, r7 = dy, r8 = modo, r9 = está numa plataforma, r10 = x0, r11 = y0
     a.label('pula')
@@ -155,13 +216,32 @@ def code():
     a.ldrh_i('r1', 'r5', 0x12); a.movh('r11', 'r1')
     if DEBUG: a.ldr_lit('r2', 0x0203FFF4); a.strh_i('r0', 'r2', 0); a.strh_i('r1', 'r2', 2)
     a.bl('tile'); a.bl('plat'); a.movh('r9', 'r0')            # já está numa pedra/cerca?
+    a.movh('r0', 'r10'); a.movh('r1', 'r11'); a.bl('tile'); a.bl('desloc')
+    a.cmpi('r0', 0); a.bfar('ne', 'pedra')                     # numa pedra do mar: lógica da pedra inteira
     # 1 casa
     a.movh('r0', 'r10'); a.add_r('r0', 'r0', 'r6'); a.movh('r1', 'r11'); a.add_r('r1', 'r1', 'r7')
-    a.bl('tile')
-    if DEBUG: a.ldr_lit('r2', 0x0203FFF8); a.strh_i('r0', 'r2', 0)
-    a.bl('plat')
-    if DEBUG: a.ldr_lit('r2', 0x0203FFFA); a.strb_i('r0', 'r2', 0)
+    a.bl('tile'); a.push(['r0'])
+    a.bl('plat'); a.pop(['r1'])
     a.cmpi('r0', 0); a.bc('eq', 'dois')
+    # pedra do mar: os 4 quadrados são a mesma pedra; ir para outro quadrado dela não é pular para outra pedra
+    a.movh('r0', 'r1'); a.bl('desloc'); a.cmpi('r0', 0); a.bc('eq', 'umok')
+    a.push(['r0'])
+    a.movh('r0', 'r10'); a.movh('r1', 'r11'); a.bl('tile'); a.bl('desloc'); a.movh('r2', 'r0'); a.pop(['r3'])
+    a.cmpi('r2', 0); a.bc('eq', 'umok')
+    # r2 = deslocamento do quadrado atual, r3 = do quadrado da frente; canto = x + (dx > 0), y + (dy > 0)
+    a.movh('r0', 'r10'); a.lsl('r1', 'r2', 24); a.asr('r1', 'r1', 24); a.cmpi('r1', 0); a.bc('le', 'c1'); a.addi('r0', 1)
+    a.label('c1')
+    a.movh('r1', 'r10'); a.add_r('r1', 'r1', 'r6'); a.lsl('r5', 'r3', 24); a.asr('r5', 'r5', 24); a.cmpi('r5', 0); a.bc('le', 'c2'); a.addi('r1', 1)
+    a.label('c2')
+    a.alu('cmp', 'r0', 'r1'); a.bc('ne', 'umok_r5')
+    a.movh('r0', 'r11'); a.lsl('r1', 'r2', 16); a.asr('r1', 'r1', 24); a.cmpi('r1', 0); a.bc('le', 'c3'); a.addi('r0', 1)
+    a.label('c3')
+    a.movh('r1', 'r11'); a.add_r('r1', 'r1', 'r7'); a.lsl('r5', 'r3', 16); a.asr('r5', 'r5', 24); a.cmpi('r5', 0); a.bc('le', 'c4'); a.addi('r1', 1)
+    a.label('c4')
+    a.alu('cmp', 'r0', 'r1'); a.bc('ne', 'umok_r5')
+    a.bl('jogador'); a.b('dois')                                            # mesma pedra: tenta 2 casas
+    a.label('umok_r5'); a.bl('jogador')
+    a.label('umok')
     a.movh('r0', 'r10'); a.add_r('r0', 'r0', 'r6'); a.movh('r1', 'r11'); a.add_r('r1', 'r1', 'r7')
     a.bl('livre'); a.cmpi('r0', 0); a.bc('eq', 'dois')
     a.movh('r0', 'r8'); a.cmpi('r0', 0); a.bc('eq', 'um_hop')
@@ -195,11 +275,113 @@ def code():
     a.pop(['r2', 'r3']); a.movh('r8', 'r2'); a.movh('r9', 'r3')
     a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r1']); a.bx('r1')
     a.label('callr3b'); a.bx('r3')
+    # ---------- em cima de uma pedra do mar (r0 = deslocamento do quadrado atual) ----------
+    # A pedra ocupa um bloco 2x2 e o desenho está no centro dela. Procura, nas duas fileiras (ou colunas) da pedra, a
+    # partir da borda da frente, pedra/cerca ou chão a 1 e depois a 2 casas; se for preciso, troca o quadrado do
+    # jogador dentro da pedra (o desenho não se mexe: o deslocamento compensa) e pula dali.
+    # pilha: 0 bx, 4 by, 8 frente, 12/16 início 1, 20/24 início 2, 28/32 escolhido, 36 valor/d
+    a.label('pedra')
+    a.subsp(40)
+    a.lsl('r1', 'r0', 24); a.asr('r1', 'r1', 24); a.movh('r2', 'r10'); a.cmpi('r1', 0); a.bc('ge', 'pb1'); a.subi('r2', 1)
+    a.label('pb1'); a.str_sp('r2', 0)
+    a.lsl('r1', 'r0', 16); a.asr('r1', 'r1', 24); a.movh('r2', 'r11'); a.cmpi('r1', 0); a.bc('ge', 'pb2'); a.subi('r2', 1)
+    a.label('pb2'); a.str_sp('r2', 4)
+    a.cmpi('r6', 0); a.bc('eq', 'pvert')
+    # horizontal: coluna da frente; fileira do jogador primeiro, depois a outra
+    a.ldr_sp('r0', 0); a.cmpi('r6', 0); a.bc('le', 'ph1'); a.addi('r0', 1)
+    a.label('ph1'); a.str_sp('r0', 12); a.str_sp('r0', 20)
+    a.movh('r0', 'r11'); a.str_sp('r0', 16)
+    a.ldr_sp('r1', 4); a.alu('cmp', 'r0', 'r1'); a.bc('ne', 'ph2'); a.addi('r1', 1)
+    a.label('ph2'); a.str_sp('r1', 24)
+    a.b('pbusca')
+    a.label('pvert')
+    a.ldr_sp('r0', 4); a.cmpi('r7', 0); a.bc('le', 'pv1'); a.addi('r0', 1)
+    a.label('pv1'); a.str_sp('r0', 16); a.str_sp('r0', 24)
+    a.movh('r0', 'r10'); a.str_sp('r0', 12)
+    a.ldr_sp('r1', 0); a.alu('cmp', 'r0', 'r1'); a.bc('ne', 'pv2'); a.addi('r1', 1)
+    a.label('pv2'); a.str_sp('r1', 20)
+    a.label('pbusca')
+    a.ldr_sp('r0', 12); a.ldr_sp('r1', 16)
+    a.add_r('r0', 'r0', 'r6'); a.add_r('r1', 'r1', 'r7'); 
+    a.bl('tile'); a.str_sp('r0', 36); a.bl('plat'); a.cmpi('r0', 0); a.bc('ne', 'pc1_12')
+    a.ldr_sp('r0', 36); a.bl('chao'); a.cmpi('r0', 0); a.bc('eq', 'pn1_12')
+    a.label('pc1_12')
+    a.ldr_sp('r0', 12); a.ldr_sp('r1', 16)
+    a.add_r('r0', 'r0', 'r6'); a.add_r('r1', 'r1', 'r7'); 
+    a.bl('livre'); a.cmpi('r0', 0); a.bc('eq', 'pn1_12')
+    a.ldr_sp('r0', 12); a.str_sp('r0', 28); a.ldr_sp('r0', 16); a.str_sp('r0', 32); a.mov('r0', 1); a.str_sp('r0', 36)
+    a.b('pachou')
+    a.label('pn1_12')
+    a.ldr_sp('r0', 20); a.ldr_sp('r1', 24)
+    a.add_r('r0', 'r0', 'r6'); a.add_r('r1', 'r1', 'r7'); 
+    a.bl('tile'); a.str_sp('r0', 36); a.bl('plat'); a.cmpi('r0', 0); a.bc('ne', 'pc1_20')
+    a.ldr_sp('r0', 36); a.bl('chao'); a.cmpi('r0', 0); a.bc('eq', 'pn1_20')
+    a.label('pc1_20')
+    a.ldr_sp('r0', 20); a.ldr_sp('r1', 24)
+    a.add_r('r0', 'r0', 'r6'); a.add_r('r1', 'r1', 'r7'); 
+    a.bl('livre'); a.cmpi('r0', 0); a.bc('eq', 'pn1_20')
+    a.ldr_sp('r0', 20); a.str_sp('r0', 28); a.ldr_sp('r0', 24); a.str_sp('r0', 32); a.mov('r0', 1); a.str_sp('r0', 36)
+    a.b('pachou')
+    a.label('pn1_20')
+    a.ldr_sp('r0', 12); a.ldr_sp('r1', 16)
+    a.add_r('r0', 'r0', 'r6'); a.add_r('r1', 'r1', 'r7'); a.add_r('r0', 'r0', 'r6'); a.add_r('r1', 'r1', 'r7'); 
+    a.bl('tile'); a.str_sp('r0', 36); a.bl('plat'); a.cmpi('r0', 0); a.bc('ne', 'pc2_12')
+    a.ldr_sp('r0', 36); a.bl('chao'); a.cmpi('r0', 0); a.bc('eq', 'pn2_12')
+    a.label('pc2_12')
+    a.ldr_sp('r0', 12); a.ldr_sp('r1', 16)
+    a.add_r('r0', 'r0', 'r6'); a.add_r('r1', 'r1', 'r7'); a.add_r('r0', 'r0', 'r6'); a.add_r('r1', 'r1', 'r7'); 
+    a.bl('livre'); a.cmpi('r0', 0); a.bc('eq', 'pn2_12')
+    a.ldr_sp('r0', 12); a.str_sp('r0', 28); a.ldr_sp('r0', 16); a.str_sp('r0', 32); a.mov('r0', 2); a.str_sp('r0', 36)
+    a.b('pachou')
+    a.label('pn2_12')
+    a.ldr_sp('r0', 20); a.ldr_sp('r1', 24)
+    a.add_r('r0', 'r0', 'r6'); a.add_r('r1', 'r1', 'r7'); a.add_r('r0', 'r0', 'r6'); a.add_r('r1', 'r1', 'r7'); 
+    a.bl('tile'); a.str_sp('r0', 36); a.bl('plat'); a.cmpi('r0', 0); a.bc('ne', 'pc2_20')
+    a.ldr_sp('r0', 36); a.bl('chao'); a.cmpi('r0', 0); a.bc('eq', 'pn2_20')
+    a.label('pc2_20')
+    a.ldr_sp('r0', 20); a.ldr_sp('r1', 24)
+    a.add_r('r0', 'r0', 'r6'); a.add_r('r1', 'r1', 'r7'); a.add_r('r0', 'r0', 'r6'); a.add_r('r1', 'r1', 'r7'); 
+    a.bl('livre'); a.cmpi('r0', 0); a.bc('eq', 'pn2_20')
+    a.ldr_sp('r0', 20); a.str_sp('r0', 28); a.ldr_sp('r0', 24); a.str_sp('r0', 32); a.mov('r0', 2); a.str_sp('r0', 36)
+    a.b('pachou')
+    a.label('pn2_20')
+    a.addsp(40); a.b('nada')
+    a.label('pachou')
+    # troca o quadrado do jogador dentro da pedra (se precisar) sem mexer no desenho
+    a.ldr_sp('r0', 28); a.movh('r2', 'r10'); a.sub_r('r2', 'r2', 'r0'); a.lsl('r2', 'r2', 4)        # (x0 - sx) * 16
+    a.ldr_lit('r3', DESL); a.mov('r1', 0); a.ldrsb_r('r1', 'r3', 'r1'); a.add_r('r1', 'r1', 'r2'); a.strb_i('r1', 'r3', 0)
+    a.ldr_sp('r0', 32); a.movh('r2', 'r11'); a.sub_r('r2', 'r2', 'r0'); a.lsl('r2', 'r2', 4)
+    a.mov('r1', 1); a.ldrsb_r('r1', 'r3', 'r1'); a.add_r('r1', 'r1', 'r2'); a.strb_i('r1', 'r3', 1)
+    a.ldr_sp('r0', 28); a.ldr_sp('r1', 32)
+    a.strh_i('r0', 'r5', 0x10); a.strh_i('r1', 'r5', 0x12); a.strh_i('r0', 'r5', 0x14); a.strh_i('r1', 'r5', 0x16)
+    a.ldr_sp('r0', 36); a.addsp(40)
+    a.cmpi('r0', 1); a.bc('ne', 'pdois')
+    a.movh('r0', 'r8'); a.cmpi('r0', 0); a.bc('eq', 'pum_hop')
+    a.mov('r0', 2); a.b('fim')
+    a.label('pum_hop'); a.movh('r0', 'r4'); a.ldr_lit('r3', HOP1 | 1); a.bl('callr3b'); a.mov('r0', 1); a.b('fim')
+    a.label('pdois')
+    a.movh('r0', 'r8'); a.cmpi('r0', 0); a.bc('eq', 'pdois_hop')
+    a.movh('r0', 'r4'); a.ldr_lit('r3', JUMP2 | 1); a.bl('callr3b'); a.mov('r0', 1); a.b('fim')
+    a.label('pdois_hop'); a.movh('r0', 'r4'); a.ldr_lit('r3', HOP2 | 1); a.bl('callr3b'); a.mov('r0', 1); a.b('fim')
+
+    # ---------- chao(r0 = valor) -> 1 se é chão comum (sem bloqueio, altura de chão) ----------
+    a.label('chao')
+    a.mov('r1', 0); a.mvn('r1', 'r1'); a.alu('cmp', 'r0', 'r1'); a.bc('eq', 'chnao')
+    a.lsr('r1', 'r0', 10); a.mov('r2', 3); a.alu('tst', 'r1', 'r2'); a.bc('ne', 'chnao')
+    a.lsr('r1', 'r0', 12); a.cmpi('r1', 2); a.bc('lo', 'chnao'); a.cmpi('r1', 15); a.bc('eq', 'chnao')
+    a.mov('r0', 1); a.bx('lr')
+    a.label('chnao'); a.mov('r0', 0); a.bx('lr')
+    a.label('jogador')   # r5 = objeto do jogador (não mexe em r4, r6..r11)
+    a.ldr_lit('r5', AVATAR); a.ldrb_i('r5', 'r5', 5); a.lsl('r5', 'r5', 25); a.lsr('r5', 'r5', 25)
+    a.mov('r0', 0x24); a.alu('mul', 'r5', 'r0'); a.ldr_lit('r0', OBJS); a.add_r('r5', 'r5', 'r0'); a.bx('lr')
     a.pool()
     # dados
     a.label('dxy')
     for dx, dy in [(0, 1), (0, -1), (-1, 0), (1, 0)]: a.h((dx & 0xFF) | (dy & 0xFF) << 8)
     if a.here() % 4: a.h(0x46C0)
+    a.label('offs')
+    for i, dx, dy in OFFS: a.h(i); a.h((dx & 0xFF) | (dy & 0xFF) << 8)
+    a.h(0); a.h(0)
     a.label('tab')
     for ts, ids in PLAT:
         for i in ids: a.word(ts); a.word(i)
@@ -207,9 +389,9 @@ def code():
     return a
 
 
-def site(at, to):
+def site(at, to, reg='r0'):
     s = A(at)
-    s.ldr_lit('r0', to | 1); s.bx('r0'); s.pool()
+    s.ldr_lit(reg, to | 1); s.bx(reg); s.pool()
     b = s.build(); assert len(b) == 8, len(b)
     return b
 
@@ -220,7 +402,9 @@ if __name__ == '__main__':
     print('tamanho', hex(len(data)), 'hop', hex(a.labels['hop']), 'side', hex(a.labels['side']), file=sys.stderr)
     s1, s2, s3 = site(HOP_SITE, a.labels['hop']), site(SIDE_SITE, a.labels['side']), site(ELEV_SITE, a.labels['elev'])
     o1, o2, o3 = R[HOP_SITE - 0x08000000:][:8], R[SIDE_SITE - 0x08000000:][:8], R[ELEV_SITE - 0x08000000:][:8]
+    s4, o4 = site(CB_SITE, a.labels['cb'], 'r3'), R[CB_SITE - 0x08000000:][:8]
     print('    [0x%X, "%s", "%s"],   // Acro Bike: pulinho com a roda levantada sobe em pedra/cerca; fonte: hack-fonte/nuvem/acro/acro.py' % (HOP_SITE - 0x08000000, o1.hex(), s1.hex()))
     print('    [0x%X, "%s", "%s"],   // Acro Bike: pulo de lado sobe em pedra/cerca' % (SIDE_SITE - 0x08000000, o2.hex(), s2.hex()))
     print('    [0x%X, "%s", "%s"],   // Acro Bike: em cima da pedra/cerca fica a altura do chão (mar continua bloqueado)' % (ELEV_SITE - 0x08000000, o3.hex(), s3.hex()))
+    print('    [0x%X, "%s", "%s"],   // Acro Bike: em cima da pedra do mar o desenho fica no centro dela' % (CB_SITE - 0x08000000, o4.hex(), s4.hex()))
     print('    [0x%X, "%s"],   // Acro Bike sobe em pedras e cercas' % (CODE - 0x08000000, data.hex()))
