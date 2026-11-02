@@ -1,6 +1,6 @@
 const { abre } = require('./base.js'), fs = require('fs'), v8 = require('v8');
 const NAV = [[400],[6,'START'],[200],[6,'A'],[200],[6,'A'],[300],[6,'A'],[100],[6,'D'],[40],[6,'A'],[300],[6,'A'],[400],[6,'A'],[600]];
-const T = 0x030011D0;
+const T = 0x030019F0;
 const tipos = (m) => { const o = []; for (let i = 0; i < 0x80; i++) { const t = T + i * 0x14, f = m.r32(t + 8); if (f < 0x08000000) continue; const fl = m.r16(t + 0x12), off = m.r16(t + 6); const s = fl & 0x10 ? 0x02000000 + off * 4 : 0x03000000 + off; const tpl = m.r32(s + 0xB0);
   if (m.r8(s) === 1 && tpl >= 0x08000000 && tpl < 0x0A000000) o.push(m.r8(s + 0x82).toString(16) + '@' + m.r16(s + 0x60) + ':' + ((m.r32(s + 0x40) | 0) >> 8) + ',' + ((m.r32(s + 0x44) | 0) >> 8)); } return o.join(' '); };
 (async () => {

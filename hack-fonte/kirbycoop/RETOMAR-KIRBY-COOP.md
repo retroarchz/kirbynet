@@ -40,7 +40,7 @@ atraso >= 4 + variação dava erro de cabo. Por isso a reescrita.
    fazendo de tudo, rede 3 quadros): 0 pausas, 0 erros, Kirby do outro fora do lugar mediana 2,7 / 90% 5,6 /
    máx 8,3 px.
 4. **Inimigos** (identidade = Object.objTemplate +0xB0, ponteiro do molde na ROM, igual em todos; vida =
-   Object.unk80 +0x80 s16; tipo +0x82; bandeiras +8; lista de tarefas gTasks 0x030011D0, 0x80 x 0x14, struct =
+   Object.unk80 +0x80 s16; tipo +0x82; bandeiras +8; lista de tarefas gTasks **0x030019F0** (0x80 x 0x14; o 0x030011D0 antigo estava ERRADO e só via as 24 primeiras tarefas), gNumTasks 0x03002E7C, gTaskPtrs 0x03002560, struct =
    flags(+0x12)&0x10 ? 0x02000000+off*4 : 0x03000000+off, off em +6; objeto tem byte 0 = 1):
    - quem acerta o golpe é quem manda: quando a vida de um inimigo cai por golpe próprio, avisa
      `{molde, vida nova, quem bateu, engolido}`. Só avisar se estava > 0 e nunca reavisar o que mudou por aviso
@@ -59,6 +59,23 @@ atraso >= 4 + variação dava erro de cabo. Por isso a reescrita.
      (bandeiras |= 0x1000).
    - Memória livre usada (0x0203F000-0x0203FFFF ficou zerada no multiplayer). O hack do Meta Knight usa
      0x08F40000-0x08F41xxx e 0x0203FF00/0x0203FFB8 (só em jogo sozinho).
+
+5. **Boca cheia e cuspir a estrela (FEITO 02/11, 2ª conversa)**: boca cheia = `base.flags` (+8) & 0x80 (o +0xE8 NÃO
+   é a boca); o espelho já mostrava. O cuspe cria a estrela em `sub_080725E0(kirby)` (chamada por sub_08054F90 no chão,
+   anim 38, e sub_0805A838 na água, anim 73; tarefa main 0x080728B1, objeto kind 2, parent +0x70 = Kirby).
+   Problema achado: o Kirby do amigo recebia as teclas SEM os 5 quadros de espera do jogo e o espelho reaplicava o
+   retrato velho a cada quadro -> o aparelho que recebe cuspia 5 estrelas. Solução (vale para qualquer coisa que
+   nasce numa troca de estado, ex. golpes de habilidade):
+   - o dono manda junto com o retrato as teclas que o jogo DELE aplica no próximo quadro = teclas apertadas no quadro
+     (q + 1 - 5). Medido: LAG 4 = 2 estrelas, **5 = 1**, 6 = 0;
+   - quem recebe aplica o espelho SÓ quando chega retrato novo, um por quadro, em ordem, fila de no máximo 2 (descarta
+     os velhos acima disso). Aí o próprio jogo refaz o passo do dono e cria a estrela sozinho;
+   - rede de segurança: se um retrato foi pulado e nele o amigo passou de boca cheia para anim 38/73 e não existe
+     estrela dele viva, pede `sub_080725E0(Kirby do amigo)` pela nova caixa **CHAMADAS** do cabo.py (0x0203F8D0: +0
+     quantas, +4 até 4 pares [função|1, r0]; roda 1x por quadro antes das tarefas; restaurar +0xDD do retrato anterior).
+   Resultado: 24/24 testes com 1 estrela em cada aparelho (atraso 2-10 + variação até 8). 1 minuto de tudo: atraso 3
+   fixo = 2,8/5,9/9,8 px (igual antes), atraso 3 + variação 2 = 4,7/10/19 (antes 5,3/11,3/20). 0 erros de cabo.
+   Teste: `CUSPE=1 SUGA=1 ... node inimigo.js` (variáveis ATRASO, VAR, SEMENTE, LAG, MAXFILA, ANTIGO=1 = jeito velho).
 
 ## Arquivos
 
@@ -86,10 +103,9 @@ na fase, ou fazer o menu também pelo site.
 
 ## Pendente (nesta ordem sugerida)
 
-1. **Boca cheia e cuspir a estrela** (o usuário perguntou por último): NÃO testado. O espelho deve mostrar a
-   boca cheia, mas o ponteiro da boca (+0xE8) é local e fica vazio no Kirby do amigo; cuspir pode não criar a
-   estrela ou criar errado. Provável solução: aviso "cuspiu" e criar a estrela no aparelho que recebe.
-   Testar também copiar habilidade (engolir inimigo com poder) e soltar a habilidade.
+1. ~~Boca cheia e cuspir a estrela~~ FEITO (item 5 acima). Próximo: copiar habilidade (engolir inimigo com poder),
+   golpes da habilidade e soltar a habilidade (estrela de habilidade, OBJ_ABILITY_STAR) — a regra das teclas com 5
+   quadros deve cobrir os golpes; conferir.
 2. Kirbys do computador seguirem o P1 (hoje cada aparelho calcula os seus).
 3. Chefes (vida pelo aviso já deve funcionar; conferir barra de vida e fases).
 4. Portas/troca de sala/espelhos e Kirbys em salas diferentes.
