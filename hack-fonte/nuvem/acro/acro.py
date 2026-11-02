@@ -26,11 +26,16 @@ SIDE_SITE, SIDE_BACK, SIDE_OK, SIDE_ORIG = 0x0818CAFC, 0x0818CB34, 0x0818CB04, 0
 # lista com altura 0 ele fica com a altura de antes (a do chão).
 ELEV_SITE, ELEV_BACK, ELEV_FIM = 0x080DAE8C, 0x080DAE94, 0x080DAEAE
 # Pedras do mar: cada pedra fica no canto entre 4 quadrados (bloco 2x2). O desenho do jogador (callback do sprite dele,
-# 0x080CAD60) desliza 1 px por quadro até ficar no centro da pedra (desloca sprite->x/y, que o jogo só soma nos
-# movimentos); fora delas volta. Estado em DESL: deslocamento aplicado (s8 x, s8 y) e a última posição do sprite (se
-# o jogo reposicionar o sprite, ex. troca de mapa, a diferença passa de 12 px e o deslocamento zera).
+# 0x080CAD60) desliza 1 px por quadro até ficar no centro da pedra. Só pelo x2/y2 do sprite (imagem): a CÂMERA segue o
+# x/y do sprite (o objeto da câmera copia), e mexer no x/y deixava a câmera fora do passo de 16 px e o mapa redesenhava
+# errado nas bordas. Quando o jogador troca de quadrado dentro da pedra, o x/y do sprite precisa andar 16 px: anda 1 px
+# por quadro (como um passo) e a imagem compensa.
+# Estado em DESL (16 bytes): +0 V (s8 x, y: deslocamento da imagem em relação ao quadrado), +2 P (s8 x, y: quanto o x/y
+# do sprite ainda deve andar), +4/+6 último x/y do sprite, +8/+10 último x2/y2 escrito, +12/+14 x2/y2 do jogo (base).
+# Se o x/y do sprite pular mais de 6 px de um quadro para o outro (jogo recriou/reposicionou: troca de mapa, montar ou
+# descer da bike), V e P zeram.
 CB_SITE, CB_MOVE, CB_ARG = 0x080CAD60, 0x080D7168, 0x080CAD85
-DESL = 0x0203FF50
+DESL = 0x0203FF40
 OFFS = [(0x150, 8, 8), (0x152, 8, 8), (0x154, 8, 8), (0x151, -8, 8), (0x153, -8, 8),
         (0x158, 8, -8), (0x15C, 8, -8), (0x159, -8, -8)]   # quadrado do bloco -> onde fica o centro da pedra (px)
 HOP1 = 0x080CC43C            # pulinho de 1 casa com a roda levantada (o do jogo quando está livre)
@@ -176,23 +181,47 @@ def code():
     a.bl('desloc'); a.movh('r6', 'r0')                                     # alvo
     a.label('csem')
     a.ldr_lit('r7', DESL)
-    a.ldrh_i('r0', 'r7', 0); a.alu('orr', 'r0', 'r6'); a.cmpi('r0', 0); a.bc('eq', 'cfim')
-    # o jogo reposicionou o sprite? (diferença > 12 px de um quadro para o outro): zera o deslocamento
-    a.ldrh_i('r0', 'r4', 0x20); a.ldrh_i('r1', 'r7', 2); a.sub_r('r0', 'r0', 'r1'); a.lsl('r0', 'r0', 16); a.asr('r0', 'r0', 16)
-    a.addi('r0', 12); a.cmpi('r0', 24); a.bc('hi', 'czera')
-    a.ldrh_i('r0', 'r4', 0x22); a.ldrh_i('r1', 'r7', 4); a.sub_r('r0', 'r0', 'r1'); a.lsl('r0', 'r0', 16); a.asr('r0', 'r0', 16)
-    a.addi('r0', 12); a.cmpi('r0', 24); a.bc('ls', 'cpasso')
-    a.label('czera'); a.mov('r0', 0); a.strh_i('r0', 'r7', 0)
-    a.label('cpasso')
-    for eixo, (sb, so) in enumerate([(0, 0x20), (1, 0x22)]):   # x e y: 1 px por quadro na direção do alvo
-        a.mov('r1', sb); a.ldrsb_r('r0', 'r7', 'r1')                          # aplicado
-        a.lsl('r1', 'r6', 24 - 8 * eixo); a.asr('r1', 'r1', 24)                # alvo (s8)
-        a.alu('cmp', 'r0', 'r1'); a.bc('eq', 'cfim%d' % eixo); a.bc('lt', 'cmais%d' % eixo)
-        a.subi('r0', 1); a.ldrh_i('r2', 'r4', so); a.subi('r2', 1); a.b('cguarda%d' % eixo)
-        a.label('cmais%d' % eixo); a.addi('r0', 1); a.ldrh_i('r2', 'r4', so); a.addi('r2', 1)
-        a.label('cguarda%d' % eixo); a.strh_i('r2', 'r4', so); a.strb_i('r0', 'r7', sb)
-        a.label('cfim%d' % eixo)
-    a.ldrh_i('r0', 'r4', 0x20); a.strh_i('r0', 'r7', 2); a.ldrh_i('r0', 'r4', 0x22); a.strh_i('r0', 'r7', 4)
+    a.ldr_i('r0', 'r7', 0); a.mov('r1', 0); a.alu('cmp', 'r6', 'r1'); a.bc('ne', 'clento')
+    a.cmpi('r0', 0); a.bc('eq', 'cfim')                                       # nada a fazer (rápido)
+    a.label('clento')
+    # jogo reposicionou o sprite? (pulo > 6 px em x ou y desde o último quadro) ou estado vazio: zera e pega a base nova
+    a.cmpi('r0', 0); a.bc('eq', 'czera')
+    for so, lo in ((0x20, 4), (0x22, 6)):
+        a.ldrh_i('r0', 'r4', so); a.ldrh_i('r1', 'r7', lo); a.sub_r('r0', 'r0', 'r1'); a.lsl('r0', 'r0', 16); a.asr('r0', 'r0', 16)
+        a.addi('r0', 6); a.cmpi('r0', 12); a.bc('hi', 'czera')
+    a.b('cbase')
+    a.label('czera')
+    a.mov('r0', 0); a.str_i('r0', 'r7', 0)
+    a.ldrh_i('r0', 'r4', 0x24); a.strh_i('r0', 'r7', 12); a.strh_i('r0', 'r7', 8)
+    a.ldrh_i('r0', 'r4', 0x26); a.strh_i('r0', 'r7', 14); a.strh_i('r0', 'r7', 10)
+    a.label('cbase')
+    # x2/y2 que o jogo pôs (o pulo mexe no y2): se mudou desde a nossa escrita, é a base nova
+    for so, lw, lb in ((0x24, 8, 12), (0x26, 10, 14)):
+        a.ldrh_i('r0', 'r4', so); a.ldrh_i('r1', 'r7', lw); a.alu('cmp', 'r0', 'r1'); a.bc('eq', 'cb%d' % so)
+        a.strh_i('r0', 'r7', lb)
+        a.label('cb%d' % so)
+    for eixo, (so, so2, lw, lb) in enumerate(((0x20, 0x24, 8, 12), (0x22, 0x26, 10, 14))):
+        n = str(eixo)
+        # P: o x/y do sprite anda 1 px para o lugar certo
+        a.mov('r1', 2 + eixo); a.ldrsb_r('r0', 'r7', 'r1')
+        a.cmpi('r0', 0); a.bc('eq', 'pp' + n)
+        a.ldrh_i('r2', 'r4', so); a.bc('lt', 'pneg' + n)
+        a.subi('r0', 1); a.addi('r2', 1); a.b('pg' + n)
+        a.label('pneg' + n); a.addi('r0', 1); a.subi('r2', 1)
+        a.label('pg' + n); a.strh_i('r2', 'r4', so); a.mov('r1', 2 + eixo); a.strb_r('r0', 'r7', 'r1')
+        a.label('pp' + n)
+        # V: a imagem anda 1 px na direção do centro da pedra (ou de 0)
+        a.mov('r1', eixo); a.ldrsb_r('r0', 'r7', 'r1')
+        a.lsl('r1', 'r6', 24 - 8 * eixo); a.asr('r1', 'r1', 24)
+        a.alu('cmp', 'r0', 'r1'); a.bc('eq', 'vv' + n); a.bc('lt', 'vmais' + n)
+        a.subi('r0', 1); a.b('vg' + n)
+        a.label('vmais' + n); a.addi('r0', 1)
+        a.label('vg' + n); a.mov('r1', eixo); a.strb_r('r0', 'r7', 'r1')
+        a.label('vv' + n)
+        # x2 = base + V + P
+        a.mov('r1', eixo); a.ldrsb_r('r0', 'r7', 'r1'); a.mov('r1', 2 + eixo); a.ldrsb_r('r1', 'r7', 'r1'); a.add_r('r0', 'r0', 'r1')
+        a.ldrh_i('r1', 'r7', lb); a.add_r('r0', 'r0', 'r1'); a.strh_i('r0', 'r4', so2); a.strh_i('r0', 'r7', lw)
+    a.ldrh_i('r0', 'r4', 0x20); a.strh_i('r0', 'r7', 4); a.ldrh_i('r0', 'r4', 0x22); a.strh_i('r0', 'r7', 6)
     a.label('cfim')
     a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r0']); a.bx('r0')
     a.label('callr3c'); a.bx('r3')
@@ -348,10 +377,11 @@ def code():
     a.addsp(40); a.b('nada')
     a.label('pachou')
     # troca o quadrado do jogador dentro da pedra (se precisar) sem mexer no desenho
-    a.ldr_sp('r0', 28); a.movh('r2', 'r10'); a.sub_r('r2', 'r2', 'r0'); a.lsl('r2', 'r2', 4)        # (x0 - sx) * 16
-    a.ldr_lit('r3', DESL); a.mov('r1', 0); a.ldrsb_r('r1', 'r3', 'r1'); a.add_r('r1', 'r1', 'r2'); a.strb_i('r1', 'r3', 0)
-    a.ldr_sp('r0', 32); a.movh('r2', 'r11'); a.sub_r('r2', 'r2', 'r0'); a.lsl('r2', 'r2', 4)
-    a.mov('r1', 1); a.ldrsb_r('r1', 'r3', 'r1'); a.add_r('r1', 'r1', 'r2'); a.strb_i('r1', 'r3', 1)
+    a.ldr_lit('r3', DESL)
+    for eixo, (sl, reg) in enumerate(((28, 'r10'), (32, 'r11'))):
+        a.ldr_sp('r0', sl); a.movh('r2', reg); a.sub_r('r2', 'r2', 'r0'); a.lsl('r2', 'r2', 4)       # (x0 - sx) * 16
+        a.mov('r1', eixo); a.ldrsb_r('r0', 'r3', 'r1'); a.add_r('r0', 'r0', 'r2'); a.strb_r('r0', 'r3', 'r1')   # V
+        a.mov('r1', 2 + eixo); a.ldrsb_r('r0', 'r3', 'r1'); a.sub_r('r0', 'r0', 'r2'); a.strb_r('r0', 'r3', 'r1')   # P
     a.ldr_sp('r0', 28); a.ldr_sp('r1', 32)
     a.strh_i('r0', 'r5', 0x10); a.strh_i('r1', 'r5', 0x12); a.strh_i('r0', 'r5', 0x14); a.strh_i('r1', 'r5', 0x16)
     a.ldr_sp('r0', 36); a.addsp(40)
