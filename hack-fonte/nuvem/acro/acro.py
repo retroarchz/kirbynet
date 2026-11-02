@@ -20,6 +20,11 @@ MAPHDR = 0x02038CB0          # gMapHeader.mapLayout -> +16 tileset primário, +2
 
 HOP_SITE, HOP_BACK, HOP_ORIG = 0x0818CAB0, 0x0818CABE, 0x0818CA00   # "pula no lugar" (r4 = direção)
 SIDE_SITE, SIDE_BACK, SIDE_OK, SIDE_ORIG = 0x0818CAFC, 0x0818CB34, 0x0818CB04, 0x0818C860   # (r5 = direção)
+# ObjectEventUpdateElevation (0x080DAE60, r4 = objeto, r5 = altura do quadrado novo): em 0x080DAE8C desvia. Pedra/cerca
+# têm altura 0 (= "qualquer altura" para o jogo): sem isso, de cima da pedra a bike andava no mar. Para o jogador:
+# altura da água (1) sem estar surfando (só no meio do pulo de 2 casas) não muda nada; pousando numa plataforma da
+# lista com altura 0 ele fica com a altura de antes (a do chão).
+ELEV_SITE, ELEV_BACK, ELEV_FIM = 0x080DAE8C, 0x080DAE94, 0x080DAEAE
 HOP1 = 0x080CC43C            # pulinho de 1 casa com a roda levantada (o do jogo quando está livre)
 HOP2 = 0x080CC460            # pulo de 2 casas com a roda levantada (barranco)
 JUMP2 = 0x080CC364           # pulo de barranco normal (2 casas)
@@ -71,6 +76,23 @@ def code():
     a.label('sideok')
     a.ldr_lit('r0', SIDE_OK | 1); a.bx('r0')                 # pulo de lado do jogo (1 casa)
     a.label('callr3'); a.bx('r3')
+    a.pool()
+    # ---------- desvio da altura (r4 = objeto, r5 = altura nova) ----------
+    a.label('elev')
+    a.ldr_lit('r2', AVATAR); a.ldrb_i('r0', 'r2', 5); a.lsl('r0', 'r0', 25); a.lsr('r0', 'r0', 25)
+    a.mov('r1', 0x24); a.alu('mul', 'r0', 'r1'); a.ldr_lit('r1', OBJS); a.add_r('r0', 'r0', 'r1')
+    a.alu('cmp', 'r0', 'r4'); a.bc('ne', 'eorig')                       # só o jogador
+    a.cmpi('r5', 1); a.bc('ne', 'ezero')
+    a.ldrb_i('r1', 'r2', 0); a.mov('r0', 0x18); a.alu('tst', 'r1', 'r0'); a.bc('ne', 'eorig')   # surfando/mergulho: normal
+    a.ldr_lit('r0', ELEV_FIM | 1); a.bx('r0')                          # no ar sobre a água: não muda
+    a.label('ezero')
+    a.cmpi('r5', 0); a.bc('ne', 'eorig')
+    a.ldrh_i('r0', 'r4', 0x10); a.ldrh_i('r1', 'r4', 0x12); a.bl('tile'); a.bl('plat')
+    a.cmpi('r0', 0); a.bc('eq', 'eorig')
+    a.ldrb_i('r5', 'r4', 0xB); a.lsr('r5', 'r5', 4)                     # pedra/cerca: fica a altura de antes
+    a.label('eorig')
+    a.mov('r3', 0xF); a.movh('r0', 'r5'); a.alu('and_', 'r0', 'r3'); a.ldrb_i('r1', 'r4', 0xB)
+    a.ldr_lit('r2', ELEV_BACK | 1); a.bx('r2')
     a.pool()
 
     # ---------- tile(r0 = x, r1 = y) -> r0 = valor do mapa (u16) ou -1 fora ----------
@@ -196,8 +218,9 @@ if __name__ == '__main__':
     R = open(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'roms', 'PokemonQuetzalCoop3Teste.gba'), 'rb').read()
     a = code(); data = a.build(); assert a.labels['tab'] % 4 == 0
     print('tamanho', hex(len(data)), 'hop', hex(a.labels['hop']), 'side', hex(a.labels['side']), file=sys.stderr)
-    s1, s2 = site(HOP_SITE, a.labels['hop']), site(SIDE_SITE, a.labels['side'])
-    o1, o2 = R[HOP_SITE - 0x08000000:][:8], R[SIDE_SITE - 0x08000000:][:8]
+    s1, s2, s3 = site(HOP_SITE, a.labels['hop']), site(SIDE_SITE, a.labels['side']), site(ELEV_SITE, a.labels['elev'])
+    o1, o2, o3 = R[HOP_SITE - 0x08000000:][:8], R[SIDE_SITE - 0x08000000:][:8], R[ELEV_SITE - 0x08000000:][:8]
     print('    [0x%X, "%s", "%s"],   // Acro Bike: pulinho com a roda levantada sobe em pedra/cerca; fonte: hack-fonte/nuvem/acro/acro.py' % (HOP_SITE - 0x08000000, o1.hex(), s1.hex()))
     print('    [0x%X, "%s", "%s"],   // Acro Bike: pulo de lado sobe em pedra/cerca' % (SIDE_SITE - 0x08000000, o2.hex(), s2.hex()))
+    print('    [0x%X, "%s", "%s"],   // Acro Bike: em cima da pedra/cerca fica a altura do chão (mar continua bloqueado)' % (ELEV_SITE - 0x08000000, o3.hex(), s3.hex()))
     print('    [0x%X, "%s"],   // Acro Bike sobe em pedras e cercas' % (CODE - 0x08000000, data.hex()))
