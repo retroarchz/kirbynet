@@ -175,3 +175,12 @@ botão "📋 Log do coop", Pokémon do meio alinhado, 3 contra 1 sem reiniciar. 
   70b25a82…/saves (não vão para o Git). Resultado: os dois relógios andam, o P2 anda, os dois chegam na 101 e um vê o
   outro a 1-3 px. MISTURA=1 de 1 minuto igual a antes (2,8/6,0/9,9 px, 0 erros de cabo).
 - Ainda não conferido: outras trocas de sala (estrela de warp, portas grandes, cair do mapa, espelho do chefe).
+
+## Seta do amigo fora da tela saía em pedaços (CORRIGIDO 02/11, 3ª conversa)
+
+- Print do usuário: na tela do Luan, a seta rosa que aponta para o Sandro fora da tela aparecia como pedaços rosa.
+- Causa (teste/seta.js; `ORIG=1` = jogo original; ler a memória do GBA 1 nos dois modos): o espelho copiava o desenho
+  principal do Kirby (sprite em +0x10: +8..+0x10 e +0x1A). Na tela de quem recebe, com o amigo fora da tela, o jogo usa
+  esse sprite para a seta; o do dono (Kirby na tela) estragava. Variantes: sem copiar +0x10 = seta inteira; copiando só
+  +0x10 = pedaços. O jogo refaz esse sprite a cada quadro (sub_0803F790), então ele não é mais copiado (só +0x7C e +0xA4).
+- Conferido: cuspe 1 estrela em cada tela, MISTURA 1 min igual (2,8/6,0/9,9 px), 0 erros de cabo, Kirby do amigo normal.

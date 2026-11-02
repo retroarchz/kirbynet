@@ -61,7 +61,9 @@
   function espelho(m, kb, b) {
     const cp = (a, z) => { for (let j = a; j < z; j++) m.w8(kb + j, b[j]); };
     cp(0x04, 0x10); cp(0x38, 0x6C); cp(0x78, 0x7C); cp(0xD0, 0xE8); cp(0xEC, 0x1A8);
-    for (const sp of [0x10, 0x7C, 0xA4]) { cp(sp + 8, sp + 0x10); cp(sp + 0x1A, sp + 0x1B); }
+    // o desenho principal (+0x10) NÃO: o jogo daqui o refaz a cada quadro e, com o amigo fora da tela, o usa como a
+    // seta que aponta para ele; copiado do dono (onde ele está na tela) a seta saía em pedaços
+    for (const sp of [0x7C, 0xA4]) { cp(sp + 8, sp + 0x10); cp(sp + 0x1A, sp + 0x1B); }
   }
 
   // mensagens: 0 = retrato {seq, teclas do próximo quadro, Kirby}; 1 = aviso de inimigo
