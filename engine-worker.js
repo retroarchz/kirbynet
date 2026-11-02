@@ -244,9 +244,12 @@ function kcLiga() {
   run.kc = KirbyCoop.create({ m, me: run.slot, n: run.n, romWrite: (o, b) => run.s.romWrite(o, b),
     send: (b, conf) => postMessage({ t: "kc", bytes: b, conf: !!conf }, [b.buffer]) });
   run.kc.liga();
+  // P1: o motor passa a rodar só o GBA dele (os dos amigos aqui viraram enfeite): ~30% menos trabalho por quadro.
+  // No GBA do P2 isso piora (o jogo dele fica num laço de espera que o cabo emulado deixava dormir), então ele fica com os dois.
+  run.kcSolo = run.slot === 0 && !!run.s.solo && run.s.solo(0);
   run.rb = null; run.waitSince = null; run.book.clear();
   for (const b of run.kcEarly.splice(0)) run.kc.recv(b);
-  postMessage({ t: "kcOn", frame: run.frames });
+  postMessage({ t: "kcOn", frame: run.frames, solo: run.kcSolo });
 }
 
 // Acelerando, o som de TODOS os quadros da rodada é comprimido no tempo real que passou (como no mGBA e no

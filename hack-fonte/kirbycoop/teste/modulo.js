@@ -28,7 +28,7 @@ let semente = +(process.env.SEMENTE || 7); const rnd = () => (semente = (semente
   };
   let t = 0;
   const kc = [null, null], hist = [[], []];
-  const liga = (i) => { const W = ap[i]; kc[i] = KC.create({ m: W.ram(i), me: i, n: 2, romWrite: (o, b) => W.s.romWrite(o, b), send: envia(i) }); kc[i].liga(); };
+  const liga = (i) => { const W = ap[i]; kc[i] = KC.create({ m: W.ram(i), me: i, n: 2, romWrite: (o, b) => W.s.romWrite(o, b), send: envia(i) }); kc[i].liga(); if (process.env.SOLO && i === 0) console.log("solo", i, W.s.solo(i)); };
   liga(0);
   const SEQ = ['R', 'R|A', 'R', 'B', 'L', 'L|A', 'A', 'D|A', 'R|B', 'U', 'L', 'B', 'R|A', 'A', '', 'D'];
   const nasc = [0, 0], vivas = [new Set(), new Set()], erro = [], mortes = [[], []];

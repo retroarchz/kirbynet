@@ -79,36 +79,38 @@
       const outPtr = x.kn_malloc(4);
       const AUD_MAX = 4096;
       const audPtr = x.kn_malloc(AUD_MAX * 4);
+      // GBA i (como o resto do site conhece) -> posição dele dentro do motor; só muda com solo()
+      const mp = [...Array(n).keys()];
       return {
         n,
         runFrame(keys) {
           const dv = new DataView(x.memory.buffer);
-          for (let i = 0; i < n; i++) dv.setUint16(keysPtr + 2 * i, keys[i] & 0x3FF, true);
+          for (let i = 0; i < n; i++) dv.setUint16(keysPtr + 2 * mp[i], keys[i] & 0x3FF, true);
           if (x.kn_run_frame(ptr, keysPtr) !== 0) throw new Error("O motor travou ao rodar o frame.");
         },
         // Copia a tela i (RGBA pronto para o canvas) para dentro de 'dst' (Uint8ClampedArray de 240*160*4)
         video(i, dst) {
-          x.kn_video_rgba(ptr, i, vidPtr);
+          x.kn_video_rgba(ptr, mp[i], vidPtr);
           dst.set(new Uint8Array(x.memory.buffer, vidPtr, W * H * 4));
         },
         hash() { return BigInt.asUintN(64, x.kn_game_hash(ptr)); },  // igual ao nativo
         // desenho do GBA i ligado/desligado: o jogo não muda, só a imagem deixa de ser feita
         // (cada aparelho desenha só os GBAs que mostra). Motor antigo sem isso: não faz nada.
-        render(i, on) { if (x.kn_render) x.kn_render(ptr, i, on ? 1 : 0); },
+        render(i, on) { if (x.kn_render) x.kn_render(ptr, mp[i], on ? 1 : 0); },
         // Códigos do GBA i (GameShark, Action Replay, CodeBreaker): troca todos pelos da lista (cada um
         // é um texto com uma ou mais linhas). Devolve, para cada código, 0 = entrou ou o número da linha
         // que o motor não entendeu. Motor antigo, sem códigos: null.
         cheats(i, codes) {
           if (!x.kn_cheat_add) return null;
-          x.kn_cheat_clear(ptr, i);
+          x.kn_cheat_clear(ptr, mp[i]);
           return codes.map(c => {
             const p = put(new TextEncoder().encode(c + "\0"));
-            const r = x.kn_cheat_add(ptr, i, p);
+            const r = x.kn_cheat_add(ptr, mp[i], p);
             x.kn_free(p);
             return r;
           });
         },
-        read16(i, address) { return x.kn_read16(ptr, i, address); },   // memória do GBA i (para testes)
+        read16(i, address) { return x.kn_read16(ptr, mp[i], address); },   // memória do GBA i (para testes)
         // Fotografia da partida, para voltar alguns quadros e refazer com os botões certos (rollback):
         // a memória inteira do motor, menos as ROMs (a daqui e a cópia de cada GBA), que nunca mudam.
         // É exata por definição (tudo o que o motor sabe está nessa memória) e fica fora do motor.
@@ -144,11 +146,11 @@
         },
         // Som do GBA i: { rate, samples: Int16Array estéreo intercalado } (não mexe na emulação)
         audio(i) {
-          const frames = x.kn_audio_read(ptr, i, audPtr, AUD_MAX);
-          return { rate: x.kn_audio_rate(ptr, i), samples: new Int16Array(x.memory.buffer, audPtr, frames * 2).slice() };
+          const frames = x.kn_audio_read(ptr, mp[i], audPtr, AUD_MAX);
+          return { rate: x.kn_audio_rate(ptr, mp[i]), samples: new Int16Array(x.memory.buffer, audPtr, frames * 2).slice() };
         },
         save(i) {
-          const len = x.kn_savedata(ptr, i, outPtr);
+          const len = x.kn_savedata(ptr, mp[i], outPtr);
           if (!len) return new Uint8Array(0);
           const p = new DataView(x.memory.buffer).getUint32(outPtr, true);
           const copy = new Uint8Array(x.memory.buffer, p, len).slice();
@@ -168,7 +170,8 @@
           if (!this._ram) this._ram = [];
           if (this._ram[i]) return this._ram[i];
           if (this._ramWait && this._ramWait[i] > 0) { this._ramWait[i]--; return null; }
-          const miss = () => { (this._ramWait || (this._ramWait = []))[i] = 60; return null; };
+          const I = i; i = mp[I];   // posição real dentro do motor (o cache continua pelo número do site)
+          const miss = () => { (this._ramWait || (this._ramWait = []))[I] = 60; return null; };
           const u32 = new Uint32Array(x.memory.buffer), mem = () => new DataView(x.memory.buffer);
           const rd32 = (a) => (x.kn_read16(ptr, i, a) | (x.kn_read16(ptr, i, a + 2) << 16)) >>> 0;
           const cands = [];
@@ -206,11 +209,36 @@
           // confere: a memória achada é a deste GBA
           for (let a = 0; a < 0x8000; a += 0x400 + 2) if (mem().getUint16(base[3] + a, true) !== x.kn_read16(ptr, i, 0x03000000 + a)) return miss();
           const where = (a) => base[a >>> 24] + (a & mask[a >>> 24]);
-          return (this._ram[i] = {
+          return (this._ram[I] = {
             r8: (a) => mem().getUint8(where(a)), r16: (a) => mem().getUint16(where(a), true), r32: (a) => mem().getUint32(where(a), true),
             w8: (a, v) => mem().setUint8(where(a), v), w16: (a, v) => mem().setUint16(where(a), v, true),
             siocnt: () => mem().getUint16(sio + 14, true), setSiocnt: (v) => mem().setUint16(sio + 14, v, true),
           });
+        },
+        // Só o GBA i continua rodando (os outros param de ser emulados): para o Kirby em "mundos separados", em que os
+        // GBAs dos amigos aqui viraram enfeite. O motor já tem esse modo (sem cabo roda só o GBA 0): o GBA i troca de
+        // lugar com o 0 dentro da struct KnGame { int n; mCore* cores[4]; mColor* video[4]; mColor* shown[4];
+        // bool rendering[4]; ...; bool linked; uint32 frames; ... } e linked vira 0. O site continua chamando o GBA
+        // pelo mesmo número (mp). linked é achado pelo frames logo depois dele (= kn_frame). Devolve false se não deu.
+        solo(i) {
+          if (!x.kn_frame || i < 0 || i >= n || mp[i] !== i) return false;
+          const u8 = new Uint8Array(x.memory.buffer), dv = new DataView(x.memory.buffer);
+          if (dv.getInt32(ptr, true) !== n) return false;
+          const fr = x.kn_frame(ptr) >>> 0;
+          if (!fr) return false;
+          let at = -1;
+          for (let p = ptr + 64; p < ptr + 0x20000 && p + 4 <= u8.length; p += 4)
+            if (dv.getUint32(p, true) === fr && u8[p - 4] === 1 && !u8[p - 3] && !u8[p - 2] && !u8[p - 1]) { if (at >= 0) return false; at = p - 4; }
+          if (at < 0) return false;
+          if (i !== 0) {
+            const sw4 = (o) => { const a = dv.getUint32(o, true); dv.setUint32(o, dv.getUint32(o + 4 * i, true), true); dv.setUint32(o + 4 * i, a, true); };
+            if (!dv.getUint32(ptr + 4, true) || !dv.getUint32(ptr + 4 + 4 * i, true)) return false;
+            sw4(ptr + 4); sw4(ptr + 20); sw4(ptr + 36);   // cores, video, shown
+            const r = u8[ptr + 52]; u8[ptr + 52] = u8[ptr + 52 + i]; u8[ptr + 52 + i] = r;   // rendering
+            mp[0] = i; mp[i] = 0;
+          }
+          u8[at] = 0;   // linked = false
+          return true;
         },
         destroy() {
           x.kn_destroy(ptr);

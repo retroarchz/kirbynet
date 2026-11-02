@@ -285,7 +285,7 @@ const CaboLog = {
 // Kirby na MINHA tela. Mesmo botão "📋 Log do coop". No console: KcLog.texto().
 const KcLog = {
   linhas: [],
-  liga(run, frame) { this.linhas.push(`${CaboLog.hora()} === mundos separados ligados no quadro ${frame} (eu sou P${(run.slot | 0) + 1})`); },
+  liga(run, frame, solo) { this.linhas.push(`${CaboLog.hora()} === mundos separados ligados no quadro ${frame} (eu sou P${(run.slot | 0) + 1})` + (solo ? " · motor só com o meu GBA" : "")); },
   anota(st, run) {
     const k = st.kc, net = run && run.net;
     if (!k) return;

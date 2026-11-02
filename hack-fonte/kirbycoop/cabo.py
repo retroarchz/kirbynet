@@ -25,6 +25,9 @@ assert all(x == 0xFF for x in d[BASE - B:BASE - B + 0x100]), 'área não está l
 a = Asm(BASE)
 a.label('cabo')
 a.push(['r4', 'r5', 'r6', 'r7'], lr=True)
+# o cabo de verdade não é mais usado: RCNT em modo "uso geral" solta este GBA do cabo emulado (no site o motor passa a
+# rodar só este GBA; preso ao cabo, o GBA escravo ficava esperando o mestre que não roda mais)
+a.ldr_lit('r0', 0x04000134); a.ldr_lit('r1', 0x8000); a.strh_i('r1', 'r0', 0)
 a.ldr_lit('r4', CAIXA); a.ldrb_i('r5', 'r4', 0); a.cmpi('r5', MAX); a.bc('ls', 'n_ok'); a.mov('r5', MAX)
 a.label('n_ok')
 a.mov('r0', 0); a.strb_i('r0', 'r4', 0)                       # esvazia antes (nada roda duas vezes)

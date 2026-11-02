@@ -150,3 +150,11 @@ botão "📋 Log do coop", Pokémon do meio alinhado, 3 contra 1 sem reiniciar. 
 - Log mostra o caminho do botão: "botões: foco %, página viu % (teclado %), jogo recebeu N quadros" e "BOTÃO PERDIDO".
   O usuário relatou (02/11) o amarelo (P2, na própria aba) sem andar; o log dele mostrou 60 fps e tecla 0 no jogo;
   não reproduzi (teclas do teste chegam). Esperando log novo dele (duas janelas lado a lado) e se usa teclado ou controle.
+- LENTIDÃO (02/11): "BOTÃO PERDIDO" no log só aparece com o jogo lento (13-30 fps): a página vê o botão e o jogo o
+  recebe tarde. Teste com os saves reais (Sandro P1, Luan P2, nuvem só leitura, sala 801) reproduziu isso com 2 Firefox
+  no mesmo PC. kirbycoop.js custa 0,46 ms/quadro; o motor 6 ms (2 GBAs, o do amigo vira enfeite em "Communication Error").
+  `kncore.js solo(i)`: troca o GBA i com o 0 na struct KnGame (cores/video/shown/rendering) e põe linked=0 (achado pelo
+  kn_frame logo depois): o motor roda só o GBA 0; o site continua usando o mesmo número (mapa mp). P1: 5,9 -> 4,1 ms,
+  resultados idênticos (modulo.js SOLO=1). P2: PIORA (10 ms: o jogo do escravo fica num laço de espera que o cabo
+  emulado deixava dormir; RCNT=0x8000 no cabo.py não resolveu) -> solo só no P1. Teste: teste/solo2.js, tempo.js.
+  Próximo para o P2: achar o laço de espera do escravo (ou fazer o P2 virar mestre no próprio GBA).
