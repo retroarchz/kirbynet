@@ -16,7 +16,7 @@
   const LAG = 5, MAXFILA = 2, ESTRELA = 0x080725E0, ESTRELA_MAIN = 0x080728B1;
   const PORTA = new Set([0x08055C15, 0x08055D9D]);   // estados do Kirby entrando numa porta (sub_08055C14, sub_08055D9C)
   // gerado por hack-fonte/kirbycoop/embute.py a partir de cabo.json e fantasma.json (não editar à mão)
-  const P = /*PATCHES*/{"golpes":33813504,"caixa":33814656,"bandeiras":33814720,"max":8,"chamadas":33814736,"maxch":4,"patches":[[16253440,[240,181,30,72,30,73,1,128,30,76,37,120,8,45,0,217,8,37,0,32,32,112,0,38,174,66,20,210,176,0,0,25,71,104,0,47,13,208,56,120,1,40,10,209,0,32,128,33,120,82,240,1,20,73,64,24,248,102,56,28,19,75,0,240,27,248,1,54,232,231,18,76,37,120,4,45,0,217,4,37,0,32,32,112,0,38,174,66,9,210,240,0,0,25,67,104,128,104,0,43,1,208,0,240,7,248,1,54,243,231,9,72,0,104,240,188,2,188,8,71,24,71,192,70,52,1,0,4,0,128,0,0,128,248,3,2,0,244,3,2,229,177,9,8,208,248,3,2,192,248,3,2]],[1405704,[0,75,24,71,1,2,248,8]]],"fantasma":[[16252928,[0,40,22,208,1,120,0,41,5,208,0,111,0,40,16,208,1,120,0,41,13,209,86,33,65,92,7,74,18,120,145,66,7,208,0,42,3,209,5,74,18,120,145,66,1,210,1,32,112,71,0,32,112,71,192,70,60,173,3,2,48,173,3,2,30,181,12,28,255,247,220,255,0,40,2,209,32,28,255,247,215,255,30,188,8,188,24,71,8,188,7,181,255,247,240,255,0,40,7,188,156,70,8,188,158,70,99,70,1,208,0,32,112,71,240,181,7,28,13,28,174,104,128,33,137,0,1,180,1,72,132,70,1,188,96,71,241,100,3,8,8,188,7,181,255,247,214,255,0,40,7,188,156,70,8,188,158,70,99,70,1,208,0,32,112,71,240,181,79,70,70,70,192,180,7,28,13,28,1,180,1,72,132,70,1,188,96,71,213,101,3,8,8,188,7,181,255,247,188,255,0,40,7,188,156,70,8,188,158,70,99,70,1,208,0,32,112,71,240,181,71,70,128,180,4,28,15,28,32,120,1,180,1,72,132,70,1,188,96,71,169,105,3,8]],[222436,[8,180,1,75,24,71,192,70,89,0,248,8]],[222664,[8,180,1,75,24,71,192,70,141,0,248,8]],[223644,[8,180,1,75,24,71,192,70,193,0,248,8]]]}/*FIM*/;
+  const P = /*PATCHES*/{"golpes":33813504,"caixa":33814656,"bandeiras":33814720,"max":8,"chamadas":33814736,"maxch":4,"patches":[[16253440,[240,181,30,72,30,73,1,128,30,76,37,120,8,45,0,217,8,37,0,32,32,112,0,38,174,66,20,210,176,0,0,25,71,104,0,47,13,208,56,120,1,40,10,209,0,32,128,33,120,82,240,1,20,73,64,24,248,102,56,28,19,75,0,240,27,248,1,54,232,231,18,76,37,120,4,45,0,217,4,37,0,32,32,112,0,38,174,66,9,210,240,0,0,25,67,104,128,104,0,43,1,208,0,240,7,248,1,54,243,231,9,72,0,104,240,188,2,188,8,71,24,71,192,70,52,1,0,4,0,128,0,0,128,248,3,2,0,244,3,2,229,177,9,8,208,248,3,2,192,248,3,2]],[1405704,[0,75,24,71,1,2,248,8]]],"fantasma":[[16252928,[0,40,28,208,1,120,0,41,11,208,130,33,65,92,163,41,21,208,164,41,19,208,0,111,0,40,16,208,1,120,0,41,13,209,86,33,65,92,7,74,18,120,145,66,7,208,0,42,3,209,5,74,18,120,145,66,1,210,1,32,112,71,0,32,112,71,192,70,60,173,3,2,48,173,3,2,30,181,12,28,255,247,214,255,0,40,2,209,32,28,255,247,209,255,30,188,8,188,24,71,8,188,7,181,255,247,240,255,0,40,7,188,156,70,8,188,158,70,99,70,1,208,0,32,112,71,240,181,7,28,13,28,174,104,128,33,137,0,1,180,1,72,132,70,1,188,96,71,241,100,3,8,8,188,7,181,255,247,214,255,0,40,7,188,156,70,8,188,158,70,99,70,1,208,0,32,112,71,240,181,79,70,70,70,192,180,7,28,13,28,1,180,1,72,132,70,1,188,96,71,213,101,3,8,8,188,7,181,255,247,188,255,0,40,7,188,156,70,8,188,158,70,99,70,1,208,0,32,112,71,240,181,71,70,128,180,4,28,15,28,32,120,1,180,1,72,132,70,1,188,96,71,169,105,3,8]],[222436,[8,180,1,75,24,71,192,70,101,0,248,8]],[222664,[8,180,1,75,24,71,192,70,153,0,248,8]],[223644,[8,180,1,75,24,71,192,70,205,0,248,8]]]}/*FIM*/;
 
   const w32 = (m, a, v) => { m.w16(a, v & 0xFFFF); m.w16(a + 2, (v >>> 16) & 0xFFFF); };
   const s32 = (m, a) => m.r32(a) | 0;
@@ -45,6 +45,19 @@
       if (m.r8(s) !== 1) continue;
       const tpl = m.r32(s + 0xB0);
       if (tpl >= 0x08000000 && tpl < 0x0A000000) o.set(s, { tpl, hp: (m.r16(s + 0x80) << 16) >> 16, fl: m.r32(s + 8), tipo: m.r8(s + 0x82) });
+    }
+    return o;
+  }
+  // estrelas de habilidade soltas por um Kirby (tipo 0xA3/0xA4): struct -> id de quem soltou
+  function estrelasHab(m) {
+    const o = new Map();
+    for (let i = 0; i < 0x80; i++) {
+      const t = TASKS + i * 0x14, f = m.r32(t + 8);
+      if (f < 0x08000000 || f >= 0x0A000000) continue;
+      const fl = m.r16(t + 0x12), off = m.r16(t + 6), s = fl & 0x10 ? 0x02000000 + off * 4 : 0x03000000 + off;
+      if (m.r8(s) !== 1) continue;
+      const ty = m.r8(s + 0x82);
+      if ((ty === 0xA3 || ty === 0xA4) && !(m.r32(s + 8) & 0x1000)) o.set(s, m.r8(s + 0x56));
     }
     return o;
   }
@@ -79,10 +92,12 @@
     b[0] = 1; b[1] = me; dv.setUint32(2, id, true); dv.setUint32(6, ev.tpl, true); dv.setInt16(10, ev.hp, true); b[12] = ev.atk; b[13] = ev.eng ? 1 : 0;
     return b;
   }
+  function encHab(me, id, dono) { const b = new Uint8Array(7); b[0] = 2; b[1] = me; new DataView(b.buffer).setUint32(2, id, true); b[6] = dono; return b; }
   function decode(b) {
     if (!b || b.length < 2) return null;
     const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
     if (b[0] === 0 && b.length >= 8 + KSZ) return { t: 0, from: b[1], seq: dv.getUint32(2, true), k: dv.getUint16(6, true), kb: b.slice(8, 8 + KSZ) };
+    if (b[0] === 2 && b.length >= 7) return { t: 2, from: b[1], id: dv.getUint32(2, true), dono: b[6] };
     if (b[0] === 1 && b.length >= 14) return { t: 1, from: b[1], id: dv.getUint32(2, true), tpl: dv.getUint32(6, true), hp: dv.getInt16(10, true), atk: b[12], eng: !!b[13] };
     return null;
   }
@@ -94,6 +109,8 @@
     const peer = [];
     for (let i = 0; i < n; i++) peer.push({ fila: [], soube: null, ultimo: -1, visto: null, vistoSeq: -9, chegou: 0, pulos: 0 });
     const hist = [], ant = new Map(), porAviso = new Set(), eventos = [], vistos = new Set();
+    let estAnt = new Map();   // estrelas de habilidade vistas no fim do quadro anterior (struct -> quem soltou)
+    const estApagadas = new Set();   // apagadas por aviso: não reavisar
     let q = 0, evId = 0, puxa = [];
     const est = { mandados: 0, recebidos: 0, avisosM: 0, avisosR: 0, estrelas: 0, pulos: 0, teclas: 0, portas: 0 };
 
@@ -137,6 +154,12 @@
     }
     // antes de cada quadro
     function pre() {
+      // estrela de habilidade que sumiu em outro aparelho (alguém comeu): some aqui também
+      for (const ev of eventos.filter(e => e.t === 2)) {
+        est.avisosR++;
+        for (const [s, d] of estrelasHab(m)) if (d === ev.dono) { w32(m, s + 8, m.r32(s + 8) | 0x1000); estApagadas.add(s); }
+      }
+      for (let j = eventos.length - 1; j >= 0; j--) if (eventos[j].t === 2) eventos.splice(j, 1);
       const agora = eventos.length ? objs(m) : null;
       for (const ev of eventos.splice(0)) {
         let ob = null, s = 0;
@@ -203,6 +226,10 @@
       }
       for (const s of porAviso) if (!agora.has(s) || agora.get(s).tpl !== (ant.get(s) || {}).tpl) porAviso.delete(s);
       ant.clear(); for (const [s, ob] of agora) ant.set(s, ob);
+      // estrela de habilidade que sumiu aqui (comida por alguém daqui, ou o tempo dela acabou): os outros apagam a dela
+      const estAgora = estrelasHab(m);
+      for (const [s, d] of estAnt) if (!estAgora.has(s) && !estApagadas.has(s)) { send(encHab(me, ++evId, d), true); est.avisosM++; }
+      estApagadas.clear(); estAnt = estAgora;
       q++;
     }
     // para o log: quantos retratos de cada um chegaram e foram pulados

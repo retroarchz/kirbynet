@@ -23,6 +23,11 @@ a = Asm(BASE)
 a.label('fantasma')
 a.cmpi('r0', 0); a.bc('eq', 'nao')
 a.ldrb_i('r1', 'r0', 0); a.cmpi('r1', 0); a.bc('eq', 'kirby')        # kind 0 = um Kirby
+# estrela de habilidade solta por um Kirby (tipo 0xA3/0xA4 em +0x82): NÃO é fantasma, qualquer um pode comer (o site
+# apaga a estrela dos outros aparelhos quando ela some num deles). O Kirby do amigo continua fantasma: só o daqui come
+a.mov('r1', 0x82); a.ldrb_r('r1', 'r0', 'r1')
+a.cmpi('r1', 0xA3); a.bc('eq', 'nao')
+a.cmpi('r1', 0xA4); a.bc('eq', 'nao')
 a.ldr_i('r0', 'r0', 0x70); a.cmpi('r0', 0); a.bc('eq', 'nao')         # senão: o dono (parent) é um Kirby?
 a.ldrb_i('r1', 'r0', 0); a.cmpi('r1', 0); a.bc('ne', 'nao')
 a.label('kirby')

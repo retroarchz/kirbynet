@@ -184,3 +184,15 @@ botão "📋 Log do coop", Pokémon do meio alinhado, 3 contra 1 sem reiniciar. 
   esse sprite para a seta; o do dono (Kirby na tela) estragava. Variantes: sem copiar +0x10 = seta inteira; copiando só
   +0x10 = pedaços. O jogo refaz esse sprite a cada quadro (sub_0803F790), então ele não é mais copiado (só +0x7C e +0xA4).
 - Conferido: cuspe 1 estrela em cada tela, MISTURA 1 min igual (2,8/6,0/9,9 px), 0 erros de cabo, Kirby do amigo normal.
+
+## Estrela de habilidade do amigo não dava para comer (CORRIGIDO 02/11, 3ª conversa)
+
+- Relato: soltou a habilidade (sai a estrela) e o amigo não conseguia comer para ganhar o poder.
+- Causa: sub_080A9038 cria a estrela (OBJ_ABILITY_STAR_1/2 = 0xA3/0xA4, tipo em +0x82) com parent = o Kirby que soltou e
+  unk56 = id dele; o fantasma tratava como "golpe do Kirby alheio" e ela atravessava tudo na tela do amigo.
+- Correção: fantasma.py deixa as estrelas 0xA3/0xA4 colidirem (o Kirby do amigo continua fantasma, então em cada tela só
+  o Kirby daqui come). kirbycoop.js: quando uma estrela de habilidade some num aparelho, manda o aviso confiável tipo 2
+  {quem soltou}; os outros apagam a estrela desse dono (bandeiras |= 0x1000). A habilidade nova chega pelo espelho.
+- Teste: `node teste/estrela.js` (P1 com Fogo solta com SELECT, P2 persegue e come), `ORIG=1` (jogo original),
+  `ATRASO=6/10/15`: o P2 ganha Fogo nas duas telas e a estrela some nas duas; coroa de fogo aparece certa na tela do P1.
+  MISTURA, CUSPE e BATE iguais a antes.
