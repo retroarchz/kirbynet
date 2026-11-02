@@ -198,3 +198,19 @@ botão "📋 Log do coop", Pokémon do meio alinhado, 3 contra 1 sem reiniciar. 
 - Teste: `node teste/estrela.js` (P1 com Fogo solta com SELECT, P2 persegue e come), `ORIG=1` (jogo original),
   `ATRASO=6/10/15`: o P2 ganha Fogo nas duas telas e a estrela some nas duas; coroa de fogo aparece certa na tela do P1.
   MISTURA, CUSPE e BATE iguais a antes.
+
+## Habilidades: golpes nas duas telas (02/11, 3ª conversa)
+
+- Testes: `teste/habil.js` (HAB=1..26: P1 solta a estrela, P2 come e ataca; compara golpes nascidos nas duas telas) e
+  `teste/golpe.js` (save novo, sala 803: DROP=120 HAB=n Q=1100; P2 ganha a habilidade pela estrela e sai batendo nos
+  Waddle Dees; QUEM=1 mostra quem acertou cada inimigo na tela do P1). Escrever só o byte da habilidade (+0x103) NÃO
+  vale: o jogo continua tratando o Kirby como normal (suga) — ganhar sempre pela estrela.
+- Resultado: as 26 dão a habilidade nas duas telas; golpes nascem iguais (±1-3 pelo tempo da rede); inimigos acabam iguais
+  nas duas telas em todas; as de um uso (Dormir, Mágica, Crash) somem nas duas.
+- Corrigido: (1) "engolido" agora = vida <= 0 com a bandeira 0x40000 (sendo sugado) e sem 0x01000000; antes o Gelo (e
+  outros golpes sem 0x01000000) virava "engolido" e o inimigo voava para a boca na tela do outro. (2) fantasma sobe
+  pelo dono (+0x70) até 3 níveis (só ponteiros 0x02/0x03xxxxxx): golpe criado por outro golpe também é fantasma.
+- Visto com QUEM=1: na tela do P1 um inimigo pode morrer pelo próprio P1 ou por um Kirby do COMPUTADOR (que é do P1) e
+  isso é avisado ao P2 — certo, mas é o item 2 (Kirbys do computador diferentes em cada tela).
+- Não testado ainda: copiar habilidade engolindo um inimigo com poder (deve funcionar: engolir já funciona e a
+  habilidade vem pelo espelho), chefes com habilidade.

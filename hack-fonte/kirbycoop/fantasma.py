@@ -28,8 +28,15 @@ a.ldrb_i('r1', 'r0', 0); a.cmpi('r1', 0); a.bc('eq', 'kirby')        # kind 0 = 
 a.mov('r1', 0x82); a.ldrb_r('r1', 'r0', 'r1')
 a.cmpi('r1', 0xA3); a.bc('eq', 'nao')
 a.cmpi('r1', 0xA4); a.bc('eq', 'nao')
-a.ldr_i('r0', 'r0', 0x70); a.cmpi('r0', 0); a.bc('eq', 'nao')         # senão: o dono (parent) é um Kirby?
-a.ldrb_i('r1', 'r0', 0); a.cmpi('r1', 0); a.bc('ne', 'nao')
+# senão: sobe pelo dono (parent em +0x70) até 3 níveis procurando um Kirby: golpe de golpe (ex. o campo da Faísca)
+# também é do Kirby. Só segue ponteiros para EWRAM/IWRAM (0x02/0x03xxxxxx)
+a.mov('r2', 3)
+a.label('sobe')
+a.ldr_i('r0', 'r0', 0x70); a.cmpi('r0', 0); a.bc('eq', 'nao')
+a.h(0x0E01)                                                            # lsr r1, r0, #24
+a.cmpi('r1', 2); a.bc('lo', 'nao'); a.cmpi('r1', 3); a.bc('hi', 'nao')
+a.ldrb_i('r1', 'r0', 0); a.cmpi('r1', 0); a.bc('eq', 'kirby')
+a.subi('r2', 1); a.bc('ne', 'sobe'); a.b('nao')
 a.label('kirby')
 a.mov('r1', 0x56); a.ldrb_r('r1', 'r0', 'r1')                          # id do jogador dele
 a.ldr_lit('r2', LOCAL); a.ldrb_i('r2', 'r2', 0)
