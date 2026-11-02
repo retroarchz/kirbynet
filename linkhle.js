@@ -69,6 +69,10 @@ const LinkHLE = (() => {
                  linkType: 0x020229C6, tipo: 2, abre: 0x0825FD45, passo: 0x0825FD8D, mestre: 0x0825FEB1, escravo: 0x0825FFA1 };
   const AUTO_B = 2, AUTO_AVISO = 30, AUTO_VALE = 1500, AUTO_PEDIDO = 4000, AUTO_LIMITE = 8000, AUTO_FORA = 30000, AUTO_REVE = 1500, AUTO_CALMA = 1000, AUTO_ASSENTA = 30, AUTO_CAPACETE = 120, AUTO_LIMITE_NIVEL = 3000, MOTO_DONO = 10657;
   // Protetor Glacial: estado por lugar (16 bytes, +0 fase) e a tarefa do jogo que desenha os escudos (protetor.py)
+  // Caixas de vida na batalha de 3 (Coop 3): as três do jogador cobriam os inimigos. Jogador à esquerda, na ordem dos Pokémon
+  // na tela; inimigos à direita. Tabela (x, y por posição) em 0x080AB6F8, trocada só com a bandeira da tripla ligada
+  const CAIXAS = { flag: 0x0203FE00, rom: 0xAB6F8,
+                   normal: [159, 76, 32, 19, 159, 101, 32, 44, 159, 51, 32, 69], tripla: [24, 15, 167, 76, 24, 61, 167, 101, 24, 38, 167, 51] };
   const ESCUDO = { base: 0x0203FF80, tarefa: 0x09FFAB41, lugares: 6, aviso: 12, repete: 120 };
 
   const DEAD_MS = 15000;   // ligado comigo e sem dar notícia há tanto tempo: caiu (o jogo recebe o "desconectar")
@@ -94,7 +98,7 @@ const LinkHLE = (() => {
     // depois. Vale para toda dupla do coop automático: quem ficava no cabo antigo durante a luta voltava ouvindo os outros, mas
     // o jogo dele quase não transmitia mais (os outros o viam parado)
     let mestre = 0, semHost = false, zArmado = false, zAntes = false, liberar = null;
-    let escudoQuadros = 0, escudoUlt = null, escudoFases = null;
+    let escudoQuadros = 0, escudoUlt = null, escudoFases = null, caixasTri = false, aoCaixas = null;
     // quem voltou de uma dupla sem mim: ao reabrir o cabo o mestre pede os dados de cada jogador
     // (LINKCMD_SEND_LINK_TYPE 0x2222, com o tipo de cabo). O meu jogo, no mapa, responde com o gLinkType
     // dele, que não é o do pedido: antes de o jogo ver o pedido, o gLinkType vira o pedido.
@@ -497,6 +501,12 @@ const LinkHLE = (() => {
           if (ask && now() - ask.at > 5000) ask = null;   // ninguém respondeu: continua esperando
           if (!waiting()) ram.w8(C.mail + 1, 0);          // liberação velha não vale para a próxima espera
         }
+        // a ROM liga a bandeira da tripla e nunca desliga: de volta ao mapa, a próxima batalha não pode herdar nada dela
+        if (C && ram.r8(CAIXAS.flag) && ram.r32(AUTO.cb2) === AUTO.field) ram.w8(CAIXAS.flag, 0);
+        if (C && aoCaixas) {
+          const tri = ram.r8(CAIXAS.flag) === 1;
+          if (tri !== caixasTri) { caixasTri = tri; aoCaixas(CAIXAS.rom, new Uint8Array(tri ? CAIXAS.tripla : CAIXAS.normal)); }
+        }
         if (ids && ram.r32(AUTO.cb2) === AUTO.batalha) {
           if (cur()[0] === me) escudoEnvia(); else if (escudoFases) escudoAplica();
         } else if (escudoFases || escudoUlt !== null) { escudoFases = null; escudoUlt = null; }
@@ -505,6 +515,7 @@ const LinkHLE = (() => {
       // o jogador trocou o capacete: quem está no cabo vê a mesma moto (só vale para o dono dela)
       capacete(v) { cap = v ? 1 : 0; if (souDono()) send({ k: "cap", v: cap }); },
       set aoCapacete(f) { aoCap = f; },
+      set aoCaixas(f) { aoCaixas = f; },   // f(endereço na ROM, bytes): quem sabe escrever na ROM da partida
       // tem um dono da moto no cabo e não sou eu: a tecla 0 não mexe na moto dele
       get motoAlheia() { return capOutro != null && !souDono(); },
       // liga o coop automático neste aparelho

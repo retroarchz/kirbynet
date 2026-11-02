@@ -335,6 +335,7 @@ function tick() {
             if (b) postMessage({ t: "cabo", bytes: b }, [b.buffer]);
           });
           if (run.hle && run.caboAuto) run.hle.autoLiga();
+          if (run.hle && run.s.romWrite) run.hle.aoCaixas = (at, b) => run.s.romWrite(at, b);
           if (run.hle) { run.hle.aoCapacete = (v) => postMessage({ t: "capOutro", v }); if (run.capV != null) run.hle.capacete(run.capV); }
           if (run.hle) for (const d of run.caboEarly.splice(0)) d.left != null ? run.hle.left(d.left) : run.hle.recv(d.from, d.m);
         }

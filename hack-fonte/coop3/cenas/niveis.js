@@ -6,6 +6,7 @@ module.exports = (W) => {
   const eq = (t) => W.players.forEach((p, i) => { const m = p.g.ram(0), v = []; for (let s = 0; s < 6; s++) { const o = PARTY + s * 0x68; v.push(`${s}:pid ${m.r32(o).toString(16)} nv ${m.r8(o + 0x58)} hp ${m.r16(o + 0x5A)}/${m.r16(o + 0x5C)}`); } console.log('E', t, 'P' + (i + 1), v.join(' | ')); });
   const bat = (t) => W.players.forEach((p, i) => { const m = p.g.ram(0), v = []; for (let b = 0; b < 6; b++) { const o = MONS + b * 0x60, h = []; for (let k = 0x24; k < 0x34; k++) h.push(m.r8(o + k).toString(16)); v.push(`b${b} esp ${m.r16(o)} [${h.join(' ')}]`); } console.log('B', t, 'P' + (i + 1), v.join(' | ')); });
   W.players.forEach(p => p.hle.autoLiga());
+  W.players.forEach(p => { p.hle.aoCaixas = (at, b) => p.g.romWrite(at, b); });
   W.play([[60]]);
   // equipes reais de cada um (a da nuvem), com a contagem certa
   const eqs = JSON.parse(fs.readFileSync(path.join(W.out, '..', 'equipes.json')));
@@ -21,6 +22,14 @@ module.exports = (W) => {
   eq('equipes escolhidas');
   W.play([[1200]]); eq('entrando'); W.shot('niveis-a.png');
   W.play([[600]]); W.shot('niveis.png');
+  if (process.env.SOTELA) {
+    if (process.env.ATEFIM) {
+      for (let k = 0; k < 9000 && W.players[0].g.ram(0).r32(0x03002664) !== 0x080C2965; k++) { W.step(W.players.map(() => k % 40 < 6 ? 'A' : '')); if (k % 120 === 0) W.players.forEach(p => { const q = p.g.ram(0); for (const c of [1, 3]) if (q.r16(0x0203F424 + c * 0x60 + 0x2A) > 1) q.w16(0x0203F424 + c * 0x60 + 0x2A, 1); }); }
+      W.play([[400]]);
+      console.log('FIM flag', W.players.map(p => p.g.ram(0).r8(0x0203FE00)).join(','), 'cb2', W.players.map(p => p.g.ram(0).r32(0x03002664).toString(16)).join(','), 'cabo', W.players.map(p => p.g.ram(0).r8(0x03003513)).join(','));
+    }
+    return;
+  }
   eq('na batalha');
   // menu de alvo do Cubchoo (P1): por quais posições o cursor passa em cada golpe modificado
   const m = W.players[0].g.ram(0), O = 0x0203F424, H = (x) => x.toString(16);

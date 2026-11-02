@@ -6,6 +6,7 @@ module.exports = (W) => {
   const [a, b] = (process.env.QUEM || '1,2').split(',').map(Number), par = [a, b];
   const fora = [0, 1, 2].find(i => !par.includes(i));
   W.players.forEach(p => p.hle.autoLiga());
+  W.players.forEach(p => { p.hle.aoCaixas = (at, b) => p.g.romWrite(at, b); });
   const resumo = (t) => W.players.forEach((p, i) => { const m = p.g.ram(0), c = p.hle.resumo; console.log('=', t, W.f, 'P' + (i + 1), 'cb2', m.r32(0x03002664).toString(16), 'cabo', m.r8(0x03003511), 'id', m.r8(0x03003512), 'n', m.r8(0x03003513), 'lig', c.ligados, 'nv', c.n, 'f', c.fase, 'sub', JSON.stringify(p.hle.sub), 'duo', JSON.stringify(p.hle.duo)); });
   W.fala(a); W.play([[200]]); W.fala(b); W.play([[300]]);
   resumo('dois esperando');
@@ -35,9 +36,9 @@ module.exports = (W) => {
     if (viu && k % 300 === 0) par.forEach(i => { const m = W.players[i].g.ram(0); for (const c of [1, 3]) if (m.r16(0x0203F424 + c * 0x60 + 0x2A) > 1) m.w16(0x0203F424 + c * 0x60 + 0x2A, 1); });
     const cb = par.map(i => W.players[i].g.ram(0).r32(0x03002664));
     if (cb[0] === 0x0803F431 && !viu) { viu = true; resumo('batalha'); W.shot('z-batalha.png'); }
+    if (viu && !W.fotoD && ++W.fotoN > 900) { W.fotoD = 1; W.shot('z-caixas.png'); console.log('FLAG tripla', W.players.map(p => p.g.ram(0).r8(0x0203FE00)).join(',')); }
     if (k % 4000 === 0) resumo('quadro');
-    if (viu && process.env.FOTO && ++W.fotoN === +process.env.FOTO) { W.shot('z-luta.png'); return; }
-    if (viu && cb[0] === 0x080C2965 && cb[1] === 0x080C2965) break;
+        if (viu && cb[0] === 0x080C2965 && cb[1] === 0x080C2965) break;
   }
   const conta = W.players.map(() => ({})); const ini = W.f;
   const log0 = W.log; W.log = (i, m) => { if (m.k === 'c') { const c = m.w[0].toString(16); conta[i][c] = (conta[i][c] || 0) + 1; if (['2222', '2ffe', 'cafe', '5fff', '5566', 'aaab', 'bbbb', 'aabb', 'eeee', '4444', '6666', '7777', 'ccdd', 'cccc'].includes(c) || !['bebe'].includes(c) && conta[i][c] <= 2) console.log('CMD', W.f, 'P' + (i + 1), m.w.map(v => v.toString(16)).join(' ')); } else if (!['au', 'st', 'cap'].includes(m.k)) console.log('MSG', W.f, 'P' + (i + 1), JSON.stringify(m)); };
