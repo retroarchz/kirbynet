@@ -335,6 +335,7 @@ function tick() {
             if (b) postMessage({ t: "cabo", bytes: b }, [b.buffer]);
           });
           if (run.hle && run.caboAuto) run.hle.autoLiga();
+          if (run.hle) { run.hle.aoCapacete = (v) => postMessage({ t: "capOutro", v }); if (run.capV != null) run.hle.capacete(run.capV); }
           if (run.hle) for (const d of run.caboEarly.splice(0)) d.left != null ? run.hle.left(d.left) : run.hle.recv(d.from, d.m);
         }
         if (run.hle && run.meNovo != null && run.hle.troca(run.meNovo)) { run.me = run.meNovo; run.meNovo = null; }
@@ -499,8 +500,12 @@ onmessage = async (ev) => {
   }
   else if (m.t === "moto") {   // Pokémon Quetzal, tecla 0: troca os quadros da moto na ROM da partida; nunca na sala por rollback
     if (run && run.quetzal && !SNES) {
-      if (run.rb || !run.s.romWrite) postMessage({ t: "moto", v: null });
-      else { run.s.romWrite(0xF4E7D4, new Uint8Array(m.bytes)); postMessage({ t: "moto", v: m.v }); }
+      if (run.rb || !run.s.romWrite || (!m.remoto && run.hle && run.hle.motoAlheia)) postMessage({ t: "moto", v: null });
+      else {
+        run.s.romWrite(0xF4E7D4, new Uint8Array(m.bytes));
+        postMessage({ t: "moto", v: m.v, remoto: !!m.remoto });
+        if (!m.remoto) { run.capV = m.v; if (run.hle) run.hle.capacete(m.v); }   // os outros veem a mesma moto
+      }
     }
   }
   else if (m.t === "relogio") {   // Pokémon Quetzal: hora real ou hora do jogo

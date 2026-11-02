@@ -63,9 +63,9 @@ const LinkHLE = (() => {
   // que está livre; o host dá a largada e cada jogo cria a tarefa de conexão do próprio Quetzal, sem as mensagens.
   // Tudo no cabo virtual e na memória: a ROM não muda. Mesmos endereços na Alpha 9 e na Coop 3.
   const AUTO = { cb1: 0x03002660, cb2: 0x03002664, field: 0x080C2965, over: 0x080C28E1, coop: 0x080C5761,
-                 tasks: 0x03005640, lock: 0x03000FDC, ctx: 0x03000EE8, ctxLivre: 2, fade: 0x02039AC3, avatar: 0x02039070,
+                 tasks: 0x03005640, objetos: 0x02038D10, lock: 0x03000FDC, ctx: 0x03000EE8, ctxLivre: 2, fade: 0x02039AC3, avatar: 0x02039070,
                  linkType: 0x020229C6, tipo: 2, abre: 0x0825FD45, passo: 0x0825FD8D, mestre: 0x0825FEB1, escravo: 0x0825FFA1 };
-  const AUTO_B = 2, AUTO_AVISO = 30, AUTO_VALE = 1500, AUTO_PEDIDO = 4000, AUTO_LIMITE = 8000, AUTO_FORA = 30000, AUTO_REVE = 1500, AUTO_CALMA = 1000, AUTO_ASSENTA = 30;
+  const AUTO_B = 2, AUTO_AVISO = 30, AUTO_VALE = 1500, AUTO_PEDIDO = 4000, AUTO_LIMITE = 8000, AUTO_FORA = 30000, AUTO_REVE = 1500, AUTO_CALMA = 1000, AUTO_ASSENTA = 30, AUTO_CAPACETE = 120, MOTO_DONO = 10657;
 
   const DEAD_MS = 15000;   // ligado comigo e sem dar notícia há tanto tempo: caiu (o jogo recebe o "desconectar")
 
@@ -99,6 +99,7 @@ const LinkHLE = (() => {
     let desligou = false, saindo = false, expulso = false, meuBye = false, grupo = "", grupoT = 0, assenta = 0;
     const evita = new Map();      // vaga -> até quando fica de fora: quem fez a ligação falhar não derruba os outros
     const avisados = new Map();   // vaga -> { n: nível (0 ocupado, 1 livre e sozinho, 2 parado no coop), t }
+    let cap = 0, capOutro = null, aoCap = null;   // capacete: o meu; o último que recebi do dono da moto; quem aplica
 
     const r8 = (o) => ram.r8(L + o), w8 = (o, v) => ram.w8(L + o, v);
     const r16 = (o) => ram.r16(L + o), w16 = (o, v) => ram.w16(L + o, v);
@@ -199,6 +200,11 @@ const LinkHLE = (() => {
       return open && ids && cb1 === AUTO.coop ? 2 : 0;
     }
     const entrePassos = () => ram.r8(AUTO.avatar + 3) !== 1;
+    // a moto com ou sem capacete é só do personagem 657: é o desenho dela na ROM de cada um
+    function souDono() {
+      const g = ram.r16(AUTO.objetos + ram.r8(AUTO.avatar + 5) * 0x24 + 4);
+      return g >= MOTO_DONO && g < MOTO_DONO + 9;
+    }
     const comNivel = (n, t) => [...avisados].filter(([s, v]) => v.n === n && t - v.t < AUTO_VALE && !(evita.get(s) > t)).map(([s]) => s);
     // cabo solto: cada um recebe o "desconectar" dos outros, o jogo volta ao normal sozinho, sem mudar nada no mapa
     function byeDe(from) {
@@ -237,6 +243,7 @@ const LinkHLE = (() => {
       if (fase === 0) {
         const n = nivel();
         if (++avisos % AUTO_AVISO === 0) send({ k: "au", n });
+        if (avisos % AUTO_CAPACETE === 0 && avisados.size && souDono()) send({ k: "cap", v: cap });   // quem chegou depois também vê
         if (pedido && t - pedido.t > AUTO_PEDIDO) pedido = null;
         if (n === 1 && entrePassos()) {
           if (pedido) { const l = pedido.ids; pedido = null; conecta(l); }
@@ -389,6 +396,11 @@ const LinkHLE = (() => {
         }
         if (auto) autoPasso();
       },
+      // o jogador trocou o capacete: quem está no cabo vê a mesma moto (só vale para o dono dela)
+      capacete(v) { cap = v ? 1 : 0; if (souDono()) send({ k: "cap", v: cap }); },
+      set aoCapacete(f) { aoCap = f; },
+      // tem um dono da moto no cabo e não sou eu: a tecla 0 não mexe na moto dele
+      get motoAlheia() { return capOutro != null && !souDono(); },
       // liga o coop automático neste aparelho
       autoLiga() { auto = true; },
       // entrou em outra sala: nova vaga. Só com o cabo fechado (quem estava no coop sai antes)
@@ -418,6 +430,7 @@ const LinkHLE = (() => {
         if (m.k === "au") avisados.set(from, { n: m.n, t: now() });
         else if (m.k === "vem") { if (auto && !fase && !open && Array.isArray(m.ids) && m.ids[0] === from && m.ids.includes(me)) pedido = { ids: m.ids, t: now() }; }
         else if (m.k === "sai") { if (auto && ids && from === ids[0] && !saindo) solta(); }
+        else if (m.k === "cap") { if (m.v !== capOutro && !souDono()) { capOutro = m.v; if (aoCap) aoCap(m.v); } }
         else if (m.k === "st") {
           const known = peers.has(from);
           peers.set(from, { open: !!m.open, master: !!m.master, t: now() });
@@ -470,7 +483,7 @@ const LinkHLE = (() => {
   // Mensagens pela sala, em bytes: [vaga de quem manda, tipo, ...]
   //   1 = comando (8 números de 16 bits), 2 = cabo aberto/fechado + se é o mestre, 3 = "começar" (vagas de quem entra)
   //   coop de teste: 4 = pedido do host (tipo, vagas), 5/6 = aceito/recusado, 7 = entrei na dupla (vagas), 8 = saí da dupla
-  //   coop automático: 10 = nível (0 ocupado, 1 livre, 2 parado no coop), 11 = largada (vagas), 12 = soltem o cabo
+  //   coop automático: 10 = nível (0 ocupado, 1 livre, 2 parado no coop), 11 = largada (vagas), 12 = soltem o cabo, 13 = capacete
   // Pokémon Quetzal, tecla Alt: alterna o valor de trapaça do save (embaralhado com o ID de treinador) entre 1 e 0.
   // Sem trapaça, os personagens de fim de jogo também somem: eles entregariam a visita à Fronteira de Batalha.
   // É ele que a troca compara. Só vale para quem começou com cheats: save+0x2CE fica marcado, mesmo com o valor em 0.
@@ -508,6 +521,7 @@ const LinkHLE = (() => {
     if (m.k === "au") return new Uint8Array([from, 10, m.n]);
     if (m.k === "vem") return new Uint8Array([from, 11, m.ids.length, ...m.ids]);
     if (m.k === "sai") return new Uint8Array([from, 12]);
+    if (m.k === "cap") return new Uint8Array([from, 13, m.v ? 1 : 0]);
     return null;
   }
   function decode(b) {
@@ -525,6 +539,7 @@ const LinkHLE = (() => {
     if (b[1] === 10 && b.length >= 3) return { from, m: { k: "au", n: b[2] } };
     if (b[1] === 11 && b.length >= 3 + b[2]) return { from, m: { k: "vem", ids: Array.from(b.subarray(3, 3 + b[2])) } };
     if (b[1] === 12) return { from, m: { k: "sai" } };
+    if (b[1] === 13 && b.length >= 3) return { from, m: { k: "cap", v: b[2] } };
     return null;
   }
   return { supports, create, encode, decode, trocaModo, GAMES };

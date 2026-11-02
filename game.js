@@ -1320,14 +1320,15 @@ const Moto = {
     }
     return this.dados[nome].slice();
   },
-  async aplica(run, v) {
+  // remoto: veio do dono da moto pelo cabo. Só muda o desenho aqui, não a escolha guardada neste navegador
+  async aplica(run, v, remoto) {
     if (!run || !run.moto) return;
-    try { const b = await this.ler(v ? "capacete" : "moto"); run.worker.postMessage({ t: "moto", v, bytes: b.buffer }, [b.buffer]); }
+    try { const b = await this.ler(v ? "capacete" : "moto"); run.worker.postMessage({ t: "moto", v, remoto: !!remoto, bytes: b.buffer }, [b.buffer]); }
     catch { if (this.avisar) toast("Não deu para trocar agora, tente de novo."); this.avisar = false; }
   },
   troca() { const run = Play.run; if (run && run.moto) { this.avisar = true; this.aplica(run, !this.ligado()); } },
   feito(v) {
-    if (v == null) { if (this.avisar) toast("Na sala online o capacete fica como está."); this.avisar = false; return; }
+    if (v == null) { if (this.avisar) toast("O capacete é só de quem está nessa moto."); this.avisar = false; return; }
     try { localStorage.setItem(this.chave, v ? "1" : "0"); } catch {}
     this.avisar = false;
   },
@@ -1486,7 +1487,8 @@ function onWorker(run, m) {
   }
   else if (m.t === "cheats") cheatsResult(run, m.res);
   else if (m.t === "modo") toast(m.v ? "↩ Voltou" : "✓ Pronto");
-  else if (m.t === "moto") Moto.feito(m.v);
+  else if (m.t === "moto") { if (!m.remoto) Moto.feito(m.v); }
+  else if (m.t === "capOutro") Moto.aplica(run, !!m.v, true);
   else if (m.t === "relogio") Relogio.gravar("kn-relogio-min", String(m.min));
   else if (m.t === "started") { Relogio.enviar(run); if (Moto.ligado()) Moto.aplica(run, true); }   // volta com o capacete escolhido
   else if (m.t === "snap") persistSaves(run, m.saves, false);   // o jogo gravou algo novo
