@@ -297,6 +297,9 @@ function tick() {
     while (run.frames < due && ran < cap && (speed === 1 || ran === 0 || performance.now() < budget)) {
       const tf = performance.now();
       let spec = false;   // quadro rodado com botões supostos (ainda pode ser desfeito)
+      if (run.kcPossivel && !run.kc && !run.kcAvisou && run.frames % 30 === 0 && KirbyCoop.conectado(run.s.ram(run.slot))) {
+        run.kcAvisou = true; postMessage({ t: "kcConectou" });
+      }
       if (run.kcPossivel && !run.kc && (run.kcPede || (run.frames % 30 === 0 && (!run.rb || run.frames === run.confirmed)
           && KirbyCoop.naFase(run.s.ram(run.slot))))) kcLiga();
       if (run.kc) {   // mundos separados: só o meu GBA recebe botões; os dos outros chegam pelo kirbycoop

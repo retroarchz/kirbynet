@@ -141,3 +141,12 @@ botão "📋 Log do coop", Pokémon do meio alinhado, 3 contra 1 sem reiniciar. 
 - Limitações conhecidas (não feitas): sair da fase / voltar ao menu depois da troca (cabo trocado: deve dar erro de
   comunicação), Kirbys do computador diferentes em cada tela, portas/salas diferentes, habilidades, chefes, 3-4 jogadores
   (código genérico, não testado).
+- Trocar CEDO (pedido do usuário: logo depois do OK da conexão), testado em `teste/cedo.js` (TROCA=quadro): em 1590,
+  1700 e 2000 o jogo volta ao título (entre a conexão e a fase o jogo usa outra conversa pelo cabo, não só botões); em
+  2300 (carregando a fase) chega na fase, mas o P1 some na tela do P2 (espelho estraga durante o carregamento). Por isso
+  a troca continua na fase; só o AVISO ("Conectados! ... ligam quando a fase começar") vem logo depois do OK
+  (`KirbyCoop.conectado` = multi 0x03002558 == 1, mensagem kcConectou). Para trocar antes seria preciso montar essa
+  outra conversa do menu.
+- Log mostra o caminho do botão: "botões: foco %, página viu % (teclado %), jogo recebeu N quadros" e "BOTÃO PERDIDO".
+  O usuário relatou (02/11) o amarelo (P2, na própria aba) sem andar; o log dele mostrou 60 fps e tecla 0 no jogo;
+  não reproduzi (teclas do teste chegam). Esperando log novo dele (duas janelas lado a lado) e se usa teclado ou controle.

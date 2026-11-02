@@ -1471,6 +1471,7 @@ function onWorker(run, m) {
   }
   else if (m.t === "net") { if (run.net) run.net.send(m.kind, m.bytes); }
   else if (m.t === "kc") { if (run.net && run.net.kc) run.net.kc(new Uint8Array(m.bytes), m.conf); }   // Kirby, mundos separados
+  else if (m.t === "kcConectou") { if (Play.run === run) toast("🌍 Conectados! Os mundos separados ligam sozinhos assim que a fase começar."); }
   else if (m.t === "kcOn") {
     run.kcOn = true; run.desync = null; S.desync = null; S.kc = true; KcLog.liga(run, m.frame);
     if (Play.run === run) { renderGame(S, false); toast("🌍 Mundos separados: cada um roda o próprio GBA, sem esperar ninguém."); }

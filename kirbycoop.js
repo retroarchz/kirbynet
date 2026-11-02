@@ -210,7 +210,9 @@
     return { liga, pre, post, recv, medidas };
   }
 
-  const api = { supports, naFase, create, decode, pacote, objs };
+  // o multiplayer do jogo conectou (depois do OK com 2 ou mais): só para avisar; a troca mesmo é na fase
+  function conectado(m) { return !!m && m.r8(MULTI) === 1; }
+  const api = { supports, naFase, conectado, create, decode, pacote, objs };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.KirbyCoop = api;
 })(typeof self !== "undefined" ? self : this);
