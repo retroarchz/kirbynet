@@ -26,9 +26,10 @@ const LinkHLE = (() => {
     // Mandado em nome de quem saiu da sala sem desconectar (fechou a página, caiu a internet).
     // O coop do Quetzal manda a cada quadro um pacote de estado BEBE (posição, mapa...); no DESCONECTAR o
     // último BEBE vem com a palavra 4 terminando em FF e a 6 = 8005, e depois CAFE BEBE.
-    c4091f572d52436c86ceaa0c5718cfb22dc2d59d: { link: 0x03003510, vbl: 0x03000d8c, adv: 0x030034e4,
-      bye: (last) => [...(last && last[0] === 0xBEBE ? [[0xBEBE, last[1], last[2], last[3], (last[4] & 0xFF00) | 0xFF, last[5], 0x8005, last[7]]] : []),
-                      [0xCAFE, 0xBEBE, 0, 0, 0, 0, 0, 0]] },
+    c4091f572d52436c86ceaa0c5718cfb22dc2d59d: { link: 0x03003510, vbl: 0x03000d8c, adv: 0x030034e4, recv: 0x03003430,
+      // last = último BEBE dele. Sem o BEBE com 8005 o jogo não sai: quem estava parado pode não ter mandado nenhum há tempos.
+      bye: (last) => { const b = last || [0xBEBE, 0, 0, 0, 0, 0, 0, 0];
+                       return [[0xBEBE, b[1], b[2], b[3], (b[4] & 0xFF00) | 0xFF, b[5], 0x8005, b[7]], [0xCAFE, 0xBEBE, 0, 0, 0, 0, 0, 0]]; } },
   };
   // Quetzal coop-3 de teste (build 2026-10-29): o protocolo e os endereços do cabo
   // são os mesmos. A identidade da ROM continua distinta na sala e nos saves.
@@ -49,7 +50,7 @@ const LinkHLE = (() => {
   const IS_MASTER = 0x00, STATE = 0x01, LOCAL_ID = 0x02, COUNT = 0x03, HANDSHAKE = 0x04, INTR = 0x0D,
         HS_MASTER = 0x0E, FIELD_F = 0x0F, HW_ERR = 0x10, BAD_SUM = 0x11, LAG = 0x13,
         SQ = 0x18, SQ_POS = 0x338, SQ_CNT = 0x339, RQ = 0x33C, RQ_POS = 0xFBC, RQ_CNT = 0xFBD;
-  const CMD = 8, CAP = 50, ST_HANDSHAKE = 2, ST_CONN = 4, MASTER = 8;
+  const CMD = 8, CAP = 50, ST_HANDSHAKE = 2, ST_CONN = 4, MASTER = 8, RECV_BYTES = 5 * CMD * 2;
   // sHandshakePlayerCount fica 7 bytes depois de sNumVBlanksWithoutSerialIntr (mesma ordem do link.c)
   const HS_COUNT = 7;
   // SIOCNT no modo multiplayer: bit 2 = SI (0 só no mestre), bit 3 = SD (todos ligados), bits 4-5 = id,
@@ -64,7 +65,7 @@ const LinkHLE = (() => {
   const AUTO = { cb1: 0x03002660, cb2: 0x03002664, field: 0x080C2965, over: 0x080C28E1, coop: 0x080C5761,
                  tasks: 0x03005640, lock: 0x03000FDC, ctx: 0x03000EE8, ctxLivre: 2, fade: 0x02039AC3, avatar: 0x02039070,
                  linkType: 0x020229C6, tipo: 2, abre: 0x0825FD45, passo: 0x0825FD8D, mestre: 0x0825FEB1, escravo: 0x0825FFA1 };
-  const AUTO_B = 2, AUTO_AVISO = 30, AUTO_VALE = 1500, AUTO_PEDIDO = 4000, AUTO_LIMITE = 8000, AUTO_FORA = 30000, AUTO_REVE = 1500, AUTO_CALMA = 1000;
+  const AUTO_B = 2, AUTO_AVISO = 30, AUTO_VALE = 1500, AUTO_PEDIDO = 4000, AUTO_LIMITE = 8000, AUTO_FORA = 30000, AUTO_REVE = 1500, AUTO_CALMA = 1000, AUTO_ASSENTA = 30;
 
   const DEAD_MS = 15000;   // ligado comigo e sem dar notícia há tanto tempo: caiu (o jogo recebe o "desconectar")
 
@@ -77,7 +78,7 @@ const LinkHLE = (() => {
     const dead = new Set();    // ligados comigo que pararam de dar notícia (já receberam o "desconectar")
     const inbox = new Map();   // vaga -> comandos que chegaram dele (cada um: 8 números)
     const echo = [];           // os meus comandos: voltam para mim na linha seguinte, como no fio
-    const lastCmd = new Map(); // vaga -> último comando dele (para o "desconectar" em nome de quem caiu)
+    const lastCmd = new Map(); // vaga -> último BEBE dele (para o "desconectar" em nome de quem caiu)
     // armado = o jogo abriu o cabo de verdade (estado 1 com o SIOCNT em multiplayer, o que o OpenLink faz).
     // Antes disso a memória do gLink pode ter lixo (no boot), e mexer nela estragaria o jogo.
     // sub: cabo só da dupla (vagas), busy: vagas numa dupla sem mim, ask: pedido do host esperando resposta
@@ -95,7 +96,7 @@ const LinkHLE = (() => {
     // auto: fase 0 = jogando, 1 = abrindo o cabo, 2 = conectando, 3 = desistindo (B da própria tarefa do jogo)
     let auto = false, fase = 0, lista = null, tarefa = 0, faseT = 0, pedido = null, pausa = 0, avisos = 0;
     // desligou: o jogador usou DESCONECTAR, então fica sozinho até abrir o COOP de novo. saindo/expulso: a saída não foi dele
-    let desligou = false, saindo = false, expulso = false, meuBye = false, grupo = "", grupoT = 0;
+    let desligou = false, saindo = false, expulso = false, meuBye = false, grupo = "", grupoT = 0, assenta = 0;
     const evita = new Map();      // vaga -> até quando fica de fora: quem fez a ligação falhar não derruba os outros
     const avisados = new Map();   // vaga -> { n: nível (0 ocupado, 1 livre e sozinho, 2 parado no coop), t }
 
@@ -124,6 +125,9 @@ const LinkHLE = (() => {
       w8(STATE, ST_CONN); w8(LOCAL_ID, id); w8(COUNT, ids.length);
       w8(IS_MASTER, id === 0 ? MASTER : 0); w8(HS_MASTER, 0); w8(INTR, 9);
       w8(SQ_POS, 0); w8(SQ_CNT, 0); w8(RQ_POS, 0); w8(RQ_CNT, 0);
+      // gRecvCmds guarda o último comando recebido. Se foi o "desconectar" da ligação anterior (palavra 6 com o bit 15), o jogo o
+      // relê no 1º quadro da ligação nova e fecha o cabo (0x0800B3F0): religar falhava de vez em quando e parecia não ter motivo
+      for (let j = 0; j < RECV_BYTES; j += 2) ram.w16(G.recv + j, 0);
       setSio(id, ids.length);
     }
     function reset() {
@@ -253,7 +257,7 @@ const LinkHLE = (() => {
           const f = lista[0] === me ? AUTO.mestre : AUTO.escravo;
           ram.w16(tarefa, f & 0xFFFF); ram.w16(tarefa + 2, f >>> 16);
           ram.w16(tarefa + 10, lista.length); ram.w16(tarefa + 12, lista.length);
-          fase = 2; faseT = t;
+          fase = 2; faseT = t; assenta = 0;
         }
       } else if (fase === 2) {
         if (ram.r32(AUTO.cb1) === AUTO.coop) { fase = 0; lista = null; avisados.clear(); }
@@ -346,7 +350,9 @@ const LinkHLE = (() => {
         if (st === ST_HANDSHAKE && !go) {
           // o mestre apertou A em "Pressione A para começar": todos que estão com o cabo aberto entram
           const list = [me, ...linkPeers()];
-          const largada = fase === 2 && lista.every(s => list.includes(s));
+          // espera o cabo assentar: o jogo decide quem é o mestre logo depois de abrir, e na mesma rede a resposta dos outros
+          // chega quase na hora. Largada colada nesse momento faz o jogo reiniciar o cabo por cima (o mestre caía para o estado 1)
+          const largada = fase === 2 && ++assenta >= AUTO_ASSENTA && lista.every(s => list.includes(s));
           if (role === "m" && list.length > 1 && (ram.r8(G.adv) === 1 || largada)) {
             ram.w8(G.adv, 0);
             const quem = largada ? lista : list;
@@ -442,11 +448,15 @@ const LinkHLE = (() => {
         } else if (m.k === "c" && Array.isArray(m.w) && m.w.length === CMD) {
           // numa dupla: só os comandos dos dois; fora dela: nada de quem está numa dupla sem mim
           if (sub ? !sub.includes(from) : busy.has(from)) return;
+          // Só de quem está no cabo comigo. Na sala, quem está fora recebe tudo o que os ligados transmitem: guardado, isso vira
+          // uma fila de minutos que entupia o jogo ao ligar (a ligação falhava e o "desconectar" chegava 30 s atrasado)
+          const comigo = ids || go;
+          if (!comigo || !comigo.includes(from)) return;
           if (C && rejoin.has(from) && (m.w[0] & 0xFFFF) === 0x2222 && ids && r8(STATE) === ST_CONN) { rejoin.clear(); ram.w16(C.linkType, m.w[1] & 0xFFFF); }
           if ((m.w[0] & 0xFFFF) === 0xCAFE) expulso = true;   // o "desconectar" veio de outro jogador
           if (!inbox.has(from)) inbox.set(from, []);
           const c = m.w.map(v => v & 0xFFFF);
-          inbox.get(from).push(c); lastCmd.set(from, c);
+          inbox.get(from).push(c); if (c[0] === 0xBEBE) lastCmd.set(from, c);
         }
       },
       // alguém saiu da sala: se estava no coop comigo, o meu jogo recebe o "desconectar" dele
