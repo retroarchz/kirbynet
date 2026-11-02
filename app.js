@@ -395,7 +395,10 @@ function renderGame(m, fresh) {
 }
 function showStatus(st) {
   let t = `${st.fps.toFixed(1)} fps · frame ${st.frame}`;
-  if (st.delay != null) t += ` · atraso ${st.delay}`;
+  // Kirby em mundos separados: ninguém espera botão de ninguém, então "atraso", ping e pico não travam nada e não
+  // aparecem aqui (continuam no "📋 Log do coop"); o rodapé só avisa se faltarem retratos do amigo.
+  if (st.kc) {}
+  else if (st.delay != null) t += ` · atraso ${st.delay}`;
   // "Mesmo PC": carga deste aparelho rodando todos os GBAs (serve para testar se ele aguenta 4 em rede)
   else if (st.load != null) {
     const cpu = Math.max(st.load, st.page ?? 0);
@@ -403,7 +406,7 @@ function showStatus(st) {
   }
   // cada jogador (últimos 10 s): rede e carga do aparelho. "P2 6 ms UDP ⚠️ pico 180 ms ×3, CPU 45%"
   // CPU = o maior entre motor e página; 85%+ = o aparelho está no limite e segura todo mundo.
-  const q = st.delay != null && Play.run && Play.run.net && Play.run.net.q;
+  const q = !st.kc && st.delay != null && Play.run && Play.run.net && Play.run.net.q;
   if (q && Object.keys(q).length) {
     t += " · " + Object.keys(q).sort().map(s => {
       const v = q[s];
