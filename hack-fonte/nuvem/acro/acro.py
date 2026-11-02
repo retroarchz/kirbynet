@@ -38,6 +38,18 @@ CB_SITE, CB_MOVE, CB_ARG = 0x080CAD60, 0x080D7168, 0x080CAD85
 DESL = 0x0203FF40
 OFFS = [(0x150, 8, 8), (0x152, 8, 8), (0x154, 8, 8), (0x151, -8, 8), (0x153, -8, 8),
         (0x158, 8, -8), (0x15C, 8, -8), (0x159, -8, -8)]   # quadrado do bloco -> onde fica o centro da pedra (px)
+# A pé (pedido 02/11): virado para a pedra/cerca, apertando X (= B do GBA) ele dá o pulinho do barranco para cima dela.
+# PlayerNotOnBikeMoving (0x080CB538, r5 = direção, r6 = teclas seguradas): no "bate na parede" (0x080CB58C) desvia.
+# Enquanto ele bate na parede o jogo não lê teclas, então o aperto do B fica guardado por 40 quadros (TRAVA_B, contado
+# no callback do sprite). Item (bola) em cima da pedra é um objeto: o pulo não cai em cima dele (pega com A antes).
+PE_SITE, PE_BATE, PE_FIM = 0x080CB58C, 0x080CC248, 0x080CB6AE
+MAIN_HELD, MAIN_NEW = 0x0300268C, 0x0300268E   # gMain.heldKeys / newKeys
+TRAVA_B = 0x0203FF3F
+# Pokémon que segue: quando o jogador pula para as pedras do mar ele ia para a água atrás dele. O callback do sprite
+# dele (0x080DC4F4) desvia: depois da atualização do jogo, se ele está num quadrado de água (altura 1) e o jogador não
+# está surfando, a imagem fica invisível neste quadro (sprite +0x3E bit 2). O jogo recalcula a cada quadro.
+SEG_SITE, SEG_ARG = 0x080DC4F4, 0x080DC519
+SE_PULO, PLAY_SE, JUMP1, SET_ANIM = 0x0A, 0x080F3D84, 0x080D73E8, 0x080CC13C
 HOP1 = 0x080CC43C            # pulinho de 1 casa com a roda levantada (o do jogo quando está livre)
 HOP2 = 0x080CC460            # pulo de 2 casas com a roda levantada (barranco)
 JUMP2 = 0x080CC364           # pulo de barranco normal (2 casas)
@@ -113,6 +125,20 @@ def code():
     a.ldr_lit('r2', ELEV_BACK | 1); a.bx('r2')
     a.pool()
 
+    # ---------- a pé: bateu na parede (r5 = direção, r6 = teclas seguradas) ----------
+    a.label('pe')
+    a.mov('r0', 2); a.alu('tst', 'r6', 'r0'); a.bc('ne', 'petenta')
+    a.ldr_lit('r1', TRAVA_B); a.ldrb_i('r0', 'r1', 0); a.cmpi('r0', 0); a.bc('eq', 'pebate')
+    a.label('petenta')
+    a.ldr_lit('r1', TRAVA_B); a.mov('r0', 0); a.strb_i('r0', 'r1', 0)
+    a.movh('r0', 'r5'); a.mov('r1', 2); a.bl('pula'); a.cmpi('r0', 0); a.bc('ne', 'pefim')
+    a.label('pebate')
+    a.movh('r0', 'r5'); a.ldr_lit('r3', PE_BATE | 1); a.bl('callr3pe')
+    a.label('pefim')
+    a.ldr_lit('r0', PE_FIM | 1); a.bx('r0')
+    a.label('callr3pe'); a.bx('r3')
+    a.pool()
+
     # ---------- tile(r0 = x, r1 = y) -> r0 = valor do mapa (u16) ou -1 fora ----------
     a.label('tile')
     a.ldr_lit('r2', LAYOUT)
@@ -180,9 +206,13 @@ def code():
     a.mov('r6', 0); a.cmpi('r1', 0xC); a.bc('hi', 'csem')
     a.bl('desloc'); a.movh('r6', 'r0')                                     # alvo
     a.label('csem')
+    a.ldr_lit('r2', MAIN_NEW); a.ldrh_i('r0', 'r2', 0); a.ldr_lit('r2', TRAVA_B); a.ldrb_i('r1', 'r2', 0)
+    a.mov('r3', 2); a.alu('tst', 'r0', 'r3'); a.bc('eq', 'tbx'); a.mov('r1', 41)
+    a.label('tbx'); a.cmpi('r1', 0); a.bc('eq', 'tbok'); a.subi('r1', 1)
+    a.label('tbok'); a.strb_i('r1', 'r2', 0)
     a.ldr_lit('r7', DESL)
     a.ldr_i('r0', 'r7', 0); a.mov('r1', 0); a.alu('cmp', 'r6', 'r1'); a.bc('ne', 'clento')
-    a.cmpi('r0', 0); a.bc('eq', 'cfim')                                       # nada a fazer (rápido)
+    a.cmpi('r0', 0); a.bc('eq', 'crapido')                                    # nada a fazer (rápido)
     a.label('clento')
     # jogo reposicionou o sprite? (pulo > 6 px em x ou y desde o último quadro) ou estado vazio: zera e pega a base nova
     a.cmpi('r0', 0); a.bc('eq', 'czera')
@@ -222,9 +252,23 @@ def code():
         a.mov('r1', eixo); a.ldrsb_r('r0', 'r7', 'r1'); a.mov('r1', 2 + eixo); a.ldrsb_r('r1', 'r7', 'r1'); a.add_r('r0', 'r0', 'r1')
         a.ldrh_i('r1', 'r7', lb); a.add_r('r0', 'r0', 'r1'); a.strh_i('r0', 'r4', so2); a.strh_i('r0', 'r7', lw)
     a.ldrh_i('r0', 'r4', 0x20); a.strh_i('r0', 'r7', 4); a.ldrh_i('r0', 'r4', 0x22); a.strh_i('r0', 'r7', 6)
+    a.b('cfim')
+    a.label('crapido')
     a.label('cfim')
     a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r0']); a.bx('r0')
     a.label('callr3c'); a.bx('r3')
+    # ---------- callback do sprite do Pokémon que segue (r0 = sprite) ----------
+    a.label('cbseg')
+    a.push(['r4', 'r5'], lr=True)
+    a.movh('r4', 'r0')
+    a.mov('r1', 0x2E); a.ldrsh_r('r2', 'r4', 'r1')
+    a.mov('r1', 0x24); a.alu('mul', 'r2', 'r1'); a.ldr_lit('r1', OBJS); a.add_r('r5', 'r2', 'r1')
+    a.movh('r0', 'r5'); a.movh('r1', 'r4'); a.ldr_lit('r2', SEG_ARG); a.ldr_lit('r3', CB_MOVE | 1); a.bl('callr3c')
+    a.ldr_lit('r2', AVATAR); a.ldrb_i('r2', 'r2', 0); a.mov('r3', 8); a.alu('tst', 'r2', 'r3'); a.bc('ne', 'sgfim')   # surfando
+    a.ldrh_i('r0', 'r5', 0x10); a.ldrh_i('r1', 'r5', 0x12); a.bl('tile'); a.lsr('r0', 'r0', 12)
+    a.cmpi('r0', 1); a.bc('ne', 'sgfim')
+    a.mov('r1', 0x3E); a.ldrh_r('r0', 'r4', 'r1'); a.mov('r2', 4); a.alu('orr', 'r0', 'r2'); a.strh_r('r0', 'r4', 'r1')
+    a.label('sgfim'); a.pop(['r4', 'r5']); a.pop(['r0']); a.bx('r0')
     a.pool()
 
     # ---------- pula(r0 = direção, r1 = 0 pulinho / 1 de lado) -> 0 nada, 1 pulou, 2 = pulo de lado do jogo ----------
@@ -274,6 +318,7 @@ def code():
     a.movh('r0', 'r10'); a.add_r('r0', 'r0', 'r6'); a.movh('r1', 'r11'); a.add_r('r1', 'r1', 'r7')
     a.bl('livre'); a.cmpi('r0', 0); a.bc('eq', 'dois')
     a.movh('r0', 'r8'); a.cmpi('r0', 0); a.bc('eq', 'um_hop')
+    a.cmpi('r0', 2); a.bfar('eq', 'ape1')
     a.mov('r0', 2); a.b('fim')                               # de lado: o pulo de lado do próprio jogo
     a.label('um_hop')
     a.movh('r0', 'r4'); a.ldr_lit('r3', HOP1 | 1); a.bl('callr3b'); a.mov('r0', 1); a.b('fim')
@@ -304,6 +349,11 @@ def code():
     a.pop(['r2', 'r3']); a.movh('r8', 'r2'); a.movh('r9', 'r3')
     a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r1']); a.bx('r1')
     a.label('callr3b'); a.bx('r3')
+    a.label('ape1')   # a pé, 1 casa: som do barranco + pulinho de 1 casa do jogo
+    a.mov('r0', SE_PULO); a.ldr_lit('r3', PLAY_SE | 1); a.bl('callr3b')
+    a.movh('r0', 'r4'); a.ldr_lit('r3', JUMP1 | 1); a.bl('callr3b')
+    a.mov('r1', 2); a.ldr_lit('r3', SET_ANIM | 1); a.bl('callr3b')
+    a.mov('r0', 1); a.b('fim')
     # ---------- em cima de uma pedra do mar (r0 = deslocamento do quadrado atual) ----------
     # A pedra ocupa um bloco 2x2 e o desenho está no centro dela. Procura, nas duas fileiras (ou colunas) da pedra, a
     # partir da borda da frente, pedra/cerca ou chão a 1 e depois a 2 casas; se for preciso, troca o quadrado do
@@ -387,6 +437,7 @@ def code():
     a.ldr_sp('r0', 36); a.addsp(40)
     a.cmpi('r0', 1); a.bc('ne', 'pdois')
     a.movh('r0', 'r8'); a.cmpi('r0', 0); a.bc('eq', 'pum_hop')
+    a.cmpi('r0', 2); a.bfar('eq', 'ape1')
     a.mov('r0', 2); a.b('fim')
     a.label('pum_hop'); a.movh('r0', 'r4'); a.ldr_lit('r3', HOP1 | 1); a.bl('callr3b'); a.mov('r0', 1); a.b('fim')
     a.label('pdois')
@@ -433,8 +484,12 @@ if __name__ == '__main__':
     s1, s2, s3 = site(HOP_SITE, a.labels['hop']), site(SIDE_SITE, a.labels['side']), site(ELEV_SITE, a.labels['elev'])
     o1, o2, o3 = R[HOP_SITE - 0x08000000:][:8], R[SIDE_SITE - 0x08000000:][:8], R[ELEV_SITE - 0x08000000:][:8]
     s4, o4 = site(CB_SITE, a.labels['cb'], 'r3'), R[CB_SITE - 0x08000000:][:8]
+    s5, o5 = site(PE_SITE, a.labels['pe']), R[PE_SITE - 0x08000000:][:8]
+    s6, o6 = site(SEG_SITE, a.labels['cbseg'], 'r3'), R[SEG_SITE - 0x08000000:][:8]
     print('    [0x%X, "%s", "%s"],   // Acro Bike: pulinho com a roda levantada sobe em pedra/cerca; fonte: hack-fonte/nuvem/acro/acro.py' % (HOP_SITE - 0x08000000, o1.hex(), s1.hex()))
     print('    [0x%X, "%s", "%s"],   // Acro Bike: pulo de lado sobe em pedra/cerca' % (SIDE_SITE - 0x08000000, o2.hex(), s2.hex()))
     print('    [0x%X, "%s", "%s"],   // Acro Bike: em cima da pedra/cerca fica a altura do chão (mar continua bloqueado)' % (ELEV_SITE - 0x08000000, o3.hex(), s3.hex()))
     print('    [0x%X, "%s", "%s"],   // Acro Bike: em cima da pedra do mar o desenho fica no centro dela' % (CB_SITE - 0x08000000, o4.hex(), s4.hex()))
+    print('    [0x%X, "%s", "%s"],   // a pé: virado para a pedra/cerca, X dá o pulinho para cima dela' % (PE_SITE - 0x08000000, o5.hex(), s5.hex()))
+    print('    [0x%X, "%s", "%s"],   // o Pokémon que segue some na água enquanto o jogador está nas pedras' % (SEG_SITE - 0x08000000, o6.hex(), s6.hex()))
     print('    [0x%X, "%s"],   // Acro Bike sobe em pedras e cercas' % (CODE - 0x08000000, data.hex()))
