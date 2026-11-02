@@ -88,7 +88,9 @@ const LinkHLE = (() => {
     // duo: vagas da dupla em andamento (da liberação até voltar ao mapa depois da batalha). O jogo fecha e
     // reabre o cabo para a batalha: nesse handshake só entram os dois. sub vale enquanto o cabo é o de todos.
     let sub = null, subSave = null, ask = null, duo = null, duoBattle = false;
-    // mestre: vaga que comanda o cabo (muda numa dupla sem o host). semHost: a dupla segue sozinha e o automático religa todos depois
+    // mestre: vaga que comanda o cabo (muda numa dupla sem o host). semHost: a dupla segue sozinha e o automático religa todos
+    // depois. Vale para toda dupla do coop automático: quem ficava no cabo antigo durante a luta voltava ouvindo os outros, mas
+    // o jogo dele quase não transmitia mais (os outros o viam parado)
     let mestre = 0, semHost = false, zArmado = false, zAntes = false;
     // quem voltou de uma dupla sem mim: ao reabrir o cabo o mestre pede os dados de cada jogador
     // (LINKCMD_SEND_LINK_TYPE 0x2222, com o tipo de cabo). O meu jogo, no mapa, responde com o gLinkType
@@ -244,9 +246,18 @@ const LinkHLE = (() => {
       ram.w8(c + 6, vaga);
       return b;
     }
+    // Bonecos dos outros jogadores (200+vaga) e os Pokémon que os seguem. Quem muda de número numa religação ficava com o boneco
+    // velho parado na tela, e o novo não nascia: limpa antes, a religação recarrega o mapa e cria todos com os números certos
+    function limpaBonecos() {
+      for (let o = 0; o < 24; o++) {
+        const q = AUTO.objetos + o * 0x24, id = ram.r8(q + 8);
+        if ((ram.r8(q) & 1) && id >= 200 && id <= 215) ram.w8(q, ram.r8(q) & ~1);
+      }
+    }
     function conecta(list) {
       const b = criaTarefa(AUTO.abre);
       if (!b) return false;
+      limpaBonecos();
       ram.w16(AUTO.linkType, AUTO.tipo); ram.w8(AUTO.lock, 1);
       lista = list.slice(); tarefa = b; fase = 1; faseT = now(); pedido = null;
       return true;
@@ -319,7 +330,7 @@ const LinkHLE = (() => {
     function release(list, t) {
       if (t === 2) {
         if (duo) return;   // os dois apertaram Z ao mesmo tempo
-        ask = null; duo = list.slice(); duoBattle = false; mestre = list[0]; semHost = !list.includes(ids[0]);
+        ask = null; duo = list.slice(); duoBattle = false; mestre = list[0]; semHost = auto || !list.includes(ids[0]);
         duoSaved(list); enterSub(list);
       }
       ram.w8(C.mail + 1, 1);
@@ -507,8 +518,8 @@ const LinkHLE = (() => {
           if (ask.ids.every(s => ask.ok.has(s))) { const a = ask; ask = null; if (waiting()) release(a.ids, a.t); }
         } else if (C && m.k === "sub") {
           if (Array.isArray(m.ids) && !m.ids.includes(me)) {
-            // dupla sem o host: ele sai do cabo e segue jogando. Ao voltarem ao mapa, o automático liga todos de novo
-            if (auto && ids && !m.ids.includes(ids[0])) solta();
+            // quem não está na dupla sai do cabo e segue jogando. Ao voltarem ao mapa, o automático liga todos de novo
+            if (auto && ids) solta();
             else for (const s of m.ids) { busy.add(s); if (inbox.has(s)) inbox.get(s).length = 0; }
           }
         } else if (C && m.k === "full") {

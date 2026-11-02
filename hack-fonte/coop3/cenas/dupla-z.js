@@ -37,10 +37,32 @@ module.exports = (W) => {
     if (viu && process.env.FOTO && ++W.fotoN === +process.env.FOTO) { W.shot('z-luta.png'); return; }
     if (viu && cb[0] === 0x080C2965 && cb[1] === 0x080C2965) break;
   }
+  const conta = W.players.map(() => ({})); const ini = W.f;
+  const log0 = W.log; W.log = (i, m) => { if (m.k === 'c') { const c = m.w[0].toString(16); conta[i][c] = (conta[i][c] || 0) + 1; if (['2222', '2ffe', 'cafe', '5fff', '5566', 'aaab', 'bbbb', 'aabb', 'eeee', '4444', '6666', '7777', 'ccdd', 'cccc'].includes(c) || !['bebe'].includes(c) && conta[i][c] <= 2) console.log('CMD', W.f, 'P' + (i + 1), m.w.map(v => v.toString(16)).join(' ')); } else if (!['au', 'st', 'cap'].includes(m.k)) console.log('MSG', W.f, 'P' + (i + 1), JSON.stringify(m)); };
+  const estL = () => W.players.forEach((p, i) => { const m = p.g.ram(0); console.log('L', W.f, 'P' + (i + 1), 'enviados', JSON.stringify(conta[i]), 'sq', m.r8(0x03003510 + 0x339), 'cb', m.r32(0x03003484).toString(16), 'stat', m.r32(0x03003480).toString(16)); });
   resumo('voltaram'); W.shot('z-voltaram.png');
   const t0 = W.f, tres = () => W.players.every(p => p.hle.resumo.ligados === 3 && p.g.ram(0).r32(0x03002660) === 0x080C5761 && !p.g.ram(0).r8(0x03000FDC));
   for (let i = 0; i < 2400 && !tres(); i++) W.step(['', '', '']);
   console.log('=== TRES DE NOVO:', tres(), 'em', W.f - t0, 'quadros; quem ficou fora: P' + (fora + 1));
   resumo('fim');
-  W.play([[16, 'R', 'L', 'U'], [60]]); resumo('andaram'); W.shot('z-fim.png');
+  // o que cada um enxerga dos outros: objetos de jogador do coop (ids 200+) e a fila de comandos ainda não entregue
+  const ve = (t) => W.players.forEach((p, i) => { const m = p.g.ram(0), v = []; for (let o = 0; o < 24; o++) { const q = 0x02038D10 + o * 0x24; if ((m.r8(q) & 1) && m.r8(q + 8) >= 200) v.push(m.r8(q + 8) + ':' + m.r16(q + 0x10) + ',' + m.r16(q + 0x12)); } const d = p.hle.debugSnapshot(), eu = m.r16(0x02038D10 + m.r8(0x02039075) * 0x24 + 0x10) + ',' + m.r16(0x02038D10 + m.r8(0x02039075) * 0x24 + 0x12); console.log('V', t, W.f, 'P' + (i + 1), 'eu', eu, 'vejo', v.join(' '), 'fila', JSON.stringify(d.inbox.map(([k, q]) => [k, q.length])), 'eco', d.echo.length, 'rq', m.r8(0x03003510 + 0xFBD), 'ids', JSON.stringify(d.ids), 'myid', m.r8(0x030055F0), 'count', m.r8(0x030055F4), 'tab40', Array.from({ length: 6 }, (_, k) => m.r8(0x03004540 + k).toString(16)).join(' '), 'a8', Array.from({ length: 4 }, (_, k) => m.r8(0x030045A8 + k)).join(' '), 'lp', Array.from({ length: 3 }, (_, k) => { let n = ''; for (let j = 0; j < 4; j++) n += m.r8(0x020229F0 + k * 0x24 + 8 + j).toString(16).padStart(2, '0'); return n; }).join(' ')); });
+  W.play([[120]]); ve('antes');
+  const fora2 = ['', '', '']; fora2[fora] = 'L';
+  W.play([[40, ...fora2], [60]]); ve('fora andou L');
+  W.play([[300]]); ve('+300');
+  const dentro = ['', '', '']; dentro[b] = 'L';
+  W.play([[40, ...dentro], [60]]); ve('dupla andou L');
+  W.play([[300]]); ve('+300');
+  estL();
+  // atraso: quantos quadros entre um jogador andar e o outro enxergar a nova posição
+  const pos = (i) => { const m = W.players[i].g.ram(0), q = 0x02038D10 + m.r8(0x02039075) * 0x24; return m.r16(q + 0x10); };
+  const viu2 = (de, em) => { const m = W.players[em].g.ram(0); for (let o = 0; o < 24; o++) { const q = 0x02038D10 + o * 0x24; if ((m.r8(q) & 1) && m.r8(q + 8) === 200 + de) return m.r16(q + 0x10); } return null; };
+  for (const [de, em] of [[b, a], [fora, a], [a, b], [fora, b]]) {
+    const ks = ['', '', '']; ks[de] = 'R'; const alvo = pos(de) + 1; let f1 = 0, f2 = 0;
+    for (let t = 0; t < 200 && !(f1 && f2); t++) { W.step(t < 18 ? ks : ['', '', '']); if (!f1 && pos(de) >= alvo) f1 = t + 1; if (!f2 && viu2(de, em) >= alvo) f2 = t + 1; }
+    console.log('ATRASO', 'P' + (de + 1) + ' -> tela do P' + (em + 1), 'andou no quadro', f1, 'o outro viu no quadro', f2, 'diferença', f2 ? f2 - f1 : 'NUNCA');
+    W.play([[60]]);
+  }
+  W.shot('z-fim.png');
 };
