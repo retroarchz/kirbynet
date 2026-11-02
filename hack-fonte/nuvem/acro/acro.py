@@ -37,7 +37,8 @@ ELEV_SITE, ELEV_BACK, ELEV_FIM = 0x080DAE8C, 0x080DAE94, 0x080DAEAE
 CB_SITE, CB_MOVE, CB_ARG = 0x080CAD60, 0x080D7168, 0x080CAD85
 DESL = 0x0203FF40
 OFFS = [(0x150, 8, 8), (0x152, 8, 8), (0x154, 8, 8), (0x151, -8, 8), (0x153, -8, 8),
-        (0x158, 8, -8), (0x15C, 8, -8), (0x159, -8, -8)]   # quadrado do bloco -> onde fica o centro da pedra (px)
+        (0x158, 8, -8), (0x15C, 8, -8), (0x159, -8, -8),
+        (0x164, 8, 8), (0x16C, 8, -8), (0x15A, 8, -8), (0x15B, -8, -8)]   # quadrado do bloco -> onde fica o centro da pedra (px)
 # A pé (pedido 02/11): virado para a pedra/cerca, apertando X (= B do GBA) ele dá o pulinho do barranco para cima dela.
 # PlayerNotOnBikeMoving (0x080CB538, r5 = direção, r6 = teclas seguradas): no "bate na parede" (0x080CB58C) desvia.
 # Enquanto ele bate na parede o jogo não lê teclas, então o aperto do B fica guardado por 40 quadros (TRAVA_B, contado
@@ -69,6 +70,8 @@ PLAT = [
     (PRIM, [0x0E2]),                                                     # pedrinha da areia
     (PRIM, [0x080, 0x081, 0x082, 0x088, 0x071, 0x08A, 0x090, 0x079, 0x092]),   # pedra grande marrom (3x3)
     (PRIM, [0x150, 0x151, 0x152, 0x153, 0x154, 0x158, 0x159, 0x15C]),    # pedras cinza do mar
+    (PRIM, [0x164, 0x16C, 0x15A, 0x15B]),                                # pedras do mar encostadas na margem (print 02/11 20:14)
+    (PRIM, [0x172, 0x174, 0x17A, 0x17B, 0x17C, 0x182, 0x184, 0x0B4, 0x089]),   # pedra grande do mar (o meio é 0x071/0x079)
     (SEC, [0x280, 0x282, 0x288, 0x28A, 0x291, 0x292]),                   # cerca de troncos
 ]
 
@@ -247,9 +250,20 @@ def code():
     a.mov('r0', 0); a.strb_i('r0', 'r2', 0)
     a.label('cpo')
     a.ldrh_i('r0', 'r5', 0x10); a.ldrh_i('r1', 'r5', 0x12); a.bl('tile')
-    # rápido (roda todo quadro): só procura na lista se o quadrado for 0x150..0x15C; sem alvo e sem deslocamento: nada
+    # em cima de cerca/pedra o desenho vai para a frente da camada de cima do mapa (a borda da pedra grande cobria o
+    # jogador): tabela de pedaços (subsprites) 2 = prioridade 1, como na altura 4 (o jogo recalcula todo quadro). Só olha a lista se o quadrado bloqueia ou tem altura 0/1
+    a.movh('r7', 'r0')
+    a.lsr('r1', 'r0', 10); a.mov('r2', 3); a.alu('tst', 'r1', 'r2'); a.bc('ne', 'cfr')
+    a.lsr('r1', 'r0', 12); a.cmpi('r1', 1); a.bc('hi', 'cfrn')
+    a.label('cfr')
+    a.bl('plat'); a.cmpi('r0', 0); a.bc('eq', 'cfrn')
+    a.mov('r1', 0x42); a.ldrb_r('r0', 'r4', 'r1'); a.mov('r2', 0x3F); a.alu('bic', 'r0', 'r2')
+    a.mov('r2', 2); a.alu('orr', 'r0', 'r2'); a.strb_r('r0', 'r4', 'r1')      # tabela de pedaços 2 = prioridade 1
+    a.label('cfrn')
+    a.movh('r0', 'r7')
+    # rápido (roda todo quadro): só procura na lista se o quadrado for 0x150..0x16C; sem alvo e sem deslocamento: nada
     a.lsl('r1', 'r0', 22); a.lsr('r1', 'r1', 22); a.mov('r2', 0xA8); a.lsl('r2', 'r2', 1); a.sub_r('r1', 'r1', 'r2')
-    a.mov('r6', 0); a.cmpi('r1', 0xC); a.bc('hi', 'csem')
+    a.mov('r6', 0); a.cmpi('r1', 0x1C); a.bc('hi', 'csem')
     a.bl('desloc'); a.movh('r6', 'r0')                                     # alvo
     a.label('csem')
     a.ldr_lit('r2', MAIN_NEW); a.ldrh_i('r0', 'r2', 0); a.ldr_lit('r2', TRAVA_B); a.ldrb_i('r1', 'r2', 0)
