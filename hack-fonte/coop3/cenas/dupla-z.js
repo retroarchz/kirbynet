@@ -6,6 +6,7 @@ module.exports = (W) => {
   const [a, b] = (process.env.QUEM || '1,2').split(',').map(Number), par = [a, b];
   const fora = [0, 1, 2].find(i => !par.includes(i));
   W.players.forEach(p => p.hle.autoLiga());
+  if (process.env.INIMIGOS === '1') require('./um-inimigo.js')(W);
   W.players.forEach(p => { p.hle.aoCaixas = (at, b) => p.g.romWrite(at, b); });
   const resumo = (t) => W.players.forEach((p, i) => { const m = p.g.ram(0), c = p.hle.resumo; console.log('=', t, W.f, 'P' + (i + 1), 'cb2', m.r32(0x03002664).toString(16), 'cabo', m.r8(0x03003511), 'id', m.r8(0x03003512), 'n', m.r8(0x03003513), 'lig', c.ligados, 'nv', c.n, 'f', c.fase, 'sub', JSON.stringify(p.hle.sub), 'duo', JSON.stringify(p.hle.duo)); });
   W.fala(a); W.play([[200]]); W.fala(b); W.play([[300]]);

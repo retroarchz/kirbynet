@@ -22,7 +22,11 @@ link = link.replace('    return {\n', `    return {
 if (!/let .*\bsub\b/.test(link)) link = link.replace('let armed = false', 'let sub = null; const busy = new Set(); let armed = false');
 fs.writeFileSync(path.join(rt, 'link-espera.js'), link);
 let hle = fs.readFileSync(path.join(rt, 'hle.js'), 'utf8').replace(/require\("[^"]*link\.js"\)/, `require(${JSON.stringify(path.join(rt, 'link-espera.js'))})`);
+// W.para[i] = quadros que o aparelho i fica parado (aba engasgada): as mensagens dos outros continuam chegando para ele
+hle = hle.replace('if (p.dead) continue;', 'if (p.dead) continue; if (W.para && W.para[p.i] > 0) { W.para[p.i]--; continue; }');
 hle = hle.replace('const SHA = "c4091f572d52436c86ceaa0c5718cfb22dc2d59d"', 'const SHA = process.env.SHA || "cee4fb273fd301762c2dc29d65d83db08f1d68ca"');
+// WATCH_WASM: motor instrumentado (watch-wasm.js) que para quando o GBA pula para o endereço 0 (reinício por ponteiro vazio)
+if (process.env.WATCH_WASM) hle = hle.split('core.js")').join('core-watch.js")').replace(/readFileSync\("[^"]*kncore\.wasm"\)/, () => 'readFileSync(' + JSON.stringify(path.resolve(process.env.WATCH_WASM)) + ')');
 fs.writeFileSync(path.join(rt, 'hle-espera.js'), hle);
 const { world } = require(path.join(rt, 'hle-espera.js'));
 const RD = (p, a) => p.g.ram(0);

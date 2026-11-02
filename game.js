@@ -583,7 +583,7 @@ function netJoin(url, hello, cb) {
   let margAcc = {};  // slot -> folga dos botões dele aqui, desde o último relatório
   // status do motor (1x por segundo): guarda a carga e soma a folga de cada um até o relatório
   net.status = (m) => {
-    net.load = { cpu: m.load, page: m.page };
+    net.load = { cpu: m.load, page: m.page, fps: m.fps };
     net.delay = m.delay;
     for (const [s, v] of Object.entries(m.marg || {})) {
       const a = margAcc[s] || (margAcc[s] = { min: 99, late: 0, tight: 0, sum: 0, cnt: 0 });
@@ -627,7 +627,7 @@ function netJoin(url, hello, cb) {
     net.send("Q", JSON.stringify({ med: Math.round(rtts[rtts.length >> 1]), max: Math.round(worst),
                                    spikes: rtts.filter(r => r >= 50).length, via,
                                    lost: losses.length, gap: Math.max(0, ...losses.map(l => l.run)) * 250,
-                                   cpu: ld.cpu ?? -1, page: ld.page ?? -1, delay: net.delay ?? -1, marg: margAcc }));
+                                   cpu: ld.cpu ?? -1, page: ld.page ?? -1, fps: ld.fps != null ? Math.round(ld.fps) : -1, delay: net.delay ?? -1, marg: margAcc }));
     margAcc = {};
   }, 250);
 
@@ -1470,7 +1470,8 @@ function onWorker(run, m) {
     const now = performance.now();
     m.page = Math.round(run.pageBusy / Math.max(1, now - run.pageT) * 100);
     run.pageBusy = 0; run.pageT = now;
-    if (run.net && run.net.status) run.net.status(m);
+    // coop pelo cabo (run.link): também manda a carga e o fps deste aparelho para os outros verem no log de atraso
+    { const nl = run.net || run.link; if (nl && nl.status) nl.status(m); }
     if (Play.run === run) showStatus(m);
     // alguém caiu (internet, celular bloqueado, navegador fechado) sem a conexão fechar: em vez de ficar
     // esperando para sempre, a partida para com aviso aos 30 s (o save de cada um já está guardado).

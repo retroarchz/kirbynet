@@ -47,12 +47,46 @@ const LinkHLE = (() => {
   GAMES.a9162e75a98631c4d31541bf1168fcee62770ec9 = { ...GAMES.c4091f572d52436c86ceaa0c5718cfb22dc2d59d, coop: COOP3 };
   GAMES["58ae63d52c0c0088a99c241bda502c36c8b3c3e6"] = GAMES.a9162e75a98631c4d31541bf1168fcee62770ec9;   // 30/10: pose do 3º treinador, cores e caixas de vida
   GAMES["84e4248d13c0a43a765319e5a0c40ae7570e7c3f"] = GAMES.a9162e75a98631c4d31541bf1168fcee62770ec9;   // 30/10: o Pokémon do meio pode ser alvo e recebe golpes de área
-  GAMES["cee4fb273fd301762c2dc29d65d83db08f1d68ca"] = GAMES.a9162e75a98631c4d31541bf1168fcee62770ec9;   // 30/10: IA sem laço infinito, texto do 3º jogador
+  // Batalha de 3 (02/11): os três Pokémon do jogador na mesma altura (eram y 80, 92 e 84: o do meio ficava mais baixo e desenhado
+  // atrás dos outros dois). Tabela de posições da tripla (x, y de cada lugar) em 0x09FE4580, só lida com a tripla ligada. E a
+  // prioridade de desenho por lugar (0x080FA1D0: lugar 0 = 30, 1 = 40, 2 = 20, outro = 50) vira tabela, com o lugar 4 na frente (15).
+  // Escrito na ROM carregada (romWrite): o arquivo não muda e os saves continuam valendo. Só esta ROM: endereços dela
+  const TELA_COOP3 = [
+    [0x1FE4580, [20, 84, 0, 0, 212, 38, 0, 0, 112, 84, 0, 0, 164, 38, 0, 0, 66, 84, 0, 0, 116, 38, 0, 0]],
+    // adr r1, tabela; ldrb r1, [r1, r0]; b fim (0x080FA206); tabela [30, 40, 20, 50, 15, 50, 0, 0]
+    [0xFA1F2, [0x01, 0xA1, 0x09, 0x5C, 0x06, 0xE0, 30, 40, 20, 50, 15, 50, 0, 0]],
+    // Treinador com 1 Pokémon (3 contra 1): o lugar 3 ficava sem Pokémon e ganhava a caixa de vida falsa do coop3.py (feita para o
+    // lugar 5), mas o resto do jogo trata o lugar 3 como normal e desenhava nela: o jogo do mestre reiniciava no envio dos Pokémon.
+    // Lugares 0-3 voltam à caixa do próprio jogo (0x080AACEC, como na dupla original); só 4 e 5 usam a do coop3 (0x09FF074D).
+    // Código em 0x09FFA3C0 (área livre, nenhum mod do site usa): cmp r0,#4; bcc orig; ldr r1,=coop3; bx r1; ldr r1,=orig; bx r1
+    [0x1FFA3C0, [0x04, 0x28, 0x01, 0xD3, 0x01, 0x49, 0x08, 0x47, 0x01, 0x49, 0x08, 0x47, 0x4D, 0x07, 0xFF, 0x09, 0xED, 0xAC, 0x0A, 0x08]],
+    [0x8A4A4, [0xC1, 0xA3, 0xFF, 0x09]],   // a ponte da criação das caixas (0x0808A498) passa a chamar o código acima
+    // Defeito do jogo original no coop, que derrubava o 3 contra 1: no fim da entrada do inimigo (0x080949BC) a batalha coop sempre
+    // trata o 2º Pokémon do treinador, mesmo quando ele não tem (TwoOpponentIntroMons 0x080397CC = não). Destruía o sprite de número
+    // gBattleControllerData[parceiro] = 0, que é a caixa de vida do P1; o lugar era reaproveitado e o jogo do mestre reiniciava.
+    // Agora, sem 2º Pokémon, pula a caixa de vida dele (0x08094AC2) e a destruição da bola dele (0x08094D12)
+    [0x94AC2, [0x30, 0xD0]],
+    [0x94D12, [0x38, 0xD0]],
+    // O mesmo nos outros jogadores (controle LinkOpponent 0x080994EC): no coop ele nem pergunta se o 2º existe. Mostrava uma caixa
+    // vazia "Nv0" e destruía o sprite 0 (a caixa de vida do P1 sumia). As duas perguntas "é coop?" (0x082617E0, em 0x080995CE e
+    // 0x0809978C) passam a ser "é coop e o parceiro do inimigo r6 tem Pokémon?" (IsValidForBattle 0x080338E8), em 0x09FFA340,
+    // pela ponte 0x0808A4D8 (próximo espaço livre da área baixa do coop3.py)
+    [0x1FFA340, [0x10, 0xB5, 0x0A, 0x4B, 0x00, 0xF0, 0x11, 0xF8, 0x00, 0x06, 0x0B, 0xD0, 0x02, 0x20, 0x70, 0x40, 0x40, 0x00, 0x07, 0x49,
+                 0x08, 0x5A, 0x68, 0x21, 0x48, 0x43, 0x06, 0x49, 0x40, 0x18, 0x06, 0x4B, 0x00, 0xF0, 0x03, 0xF8, 0x10, 0xBC, 0x02, 0xBC,
+                 0x08, 0x47, 0x18, 0x47, 0xE1, 0x17, 0x26, 0x08, 0x00, 0xF4, 0x03, 0x02, 0xAC, 0x3A, 0x02, 0x02, 0xE9, 0x38, 0x03, 0x08]],
+    [0x8A4D8, [0x78, 0x47, 0xC0, 0x46, 0x00, 0xC0, 0x9F, 0xE5, 0x1C, 0xFF, 0x2F, 0xE1, 0x41, 0xA3, 0xFF, 0x09]],
+    [0x995CE, [0xF0, 0xF7, 0x83, 0xFF]],
+    [0x9978C, [0xF0, 0xF7, 0xA4, 0xFE]],
+  ];
+  GAMES["cee4fb273fd301762c2dc29d65d83db08f1d68ca"] = { ...GAMES.a9162e75a98631c4d31541bf1168fcee62770ec9, tela: TELA_COOP3 };   // 30/10: IA sem laço infinito, texto do 3º jogador
   // struct Link
   const IS_MASTER = 0x00, STATE = 0x01, LOCAL_ID = 0x02, COUNT = 0x03, HANDSHAKE = 0x04, INTR = 0x0D,
         HS_MASTER = 0x0E, FIELD_F = 0x0F, HW_ERR = 0x10, BAD_SUM = 0x11, LAG = 0x13,
         SQ = 0x18, SQ_POS = 0x338, SQ_CNT = 0x339, RQ = 0x33C, RQ_POS = 0xFBC, RQ_CNT = 0xFBD;
   const CMD = 8, CAP = 50, ST_HANDSHAKE = 2, ST_CONN = 4, MASTER = 8, RECV_BYTES = 5 * CMD * 2;
+  // filas: até quantas linhas ficam na fila do jogo; com quantos comandos de um jogador esperando começa a tirar os repetidos;
+  // máximo de comandos esperando (BEBE velho além disso sai)
+  const JOGO_FILA = 2, FILA_FOLGA = 3, FILA_MAX = 6;
   // sHandshakePlayerCount fica 7 bytes depois de sNumVBlanksWithoutSerialIntr (mesma ordem do link.c)
   const HS_COUNT = 7;
   // SIOCNT no modo multiplayer: bit 2 = SI (0 só no mestre), bit 3 = SD (todos ligados), bits 4-5 = id,
@@ -149,8 +183,27 @@ const LinkHLE = (() => {
       ids = null; go = null; echo.length = 0; ask = null; busy.clear();
       for (const q of inbox.values()) q.length = 0;
     }
+    // Fila de um jogador grande demais (aba ou aparelho que engasgou, aparelho mais lento): o BEBE é o estado inteiro dele (mapa,
+    // x, y, movimento), então os velhos já não valem nada. Sem isto o atraso ficava para sempre: 2 s parado = 2,5 s de atraso
+    // até o fim da partida, porque o jogo só consome uma linha por quadro. Nunca descarta outro comando nem o BEBE do "desconectar"
+    const ehBebe = (c) => c[0] === 0xBEBE && !(c[6] & 0x8000);
+    const mesmoEstado = (a, b) => a[1] === b[1] && a[2] === b[2] && a[3] === b[3] && a[4] === b[4] && a[5] === b[5] && a[7] === b[7];
+    let descartados = 0;
+    const filaMax = new Map(), ultimo = new Map();   // para o log de atraso: maior fila de cada um no último segundo, última notícia
+    function enxuga(q) {
+      if (q.length <= FILA_FOLGA) return;
+      const n0 = q.length;
+      // 1) BEBE seguido de outro BEBE com o mesmo estado (parado ou no meio do passo): fica só o mais novo
+      for (let k = q.length - 2; k >= 0; k--) if (ehBebe(q[k]) && ehBebe(q[k + 1]) && mesmoEstado(q[k], q[k + 1])) q.splice(k, 1);
+      // 2) ainda muito atrasado: os BEBE mais velhos saem (o boneco pula para onde o outro está agora, em vez de chegar tarde)
+      for (let k = 0; q.length > FILA_MAX && k < q.length;) {
+        if (ehBebe(q[k]) && q.slice(k + 1).some(ehBebe)) q.splice(k, 1); else k++;
+      }
+      descartados += n0 - q.length;
+    }
     // uma linha na fila de recebimento: o comando de cada jogador (zeros = nada dele neste quadro)
     function pushRow() {
+      for (const s of cur()) { const q = s === me ? echo : inbox.get(s); if (q) enxuga(q); }
       const row = cur().map(s => (s === me ? echo : inbox.get(s) || []).shift() || null);
       if (row.every(c => !c)) return false;
       const cnt = r8(RQ_CNT);
@@ -428,8 +481,9 @@ const LinkHLE = (() => {
           ram.w8(G.vbl, 0);   // ninguém fica esperando a transmissão do fio
           w8(LAG, 0); w8(HW_ERR, 0); w8(BAD_SUM, 0); w8(LOCAL_ID, id);
           if (id === 0) w8(INTR, 9);
-          // em dia: uma linha por quadro, como o fio; atrasado (vários na fila): até 3
-          for (let k = 0; k < 3 && pushRow(); k++) if (echo.length < 2 && ids.every(s => s === me || (inbox.get(s) || []).length < 2)) break;
+          // uma linha por quadro, como o fio. O jogo só tira uma linha da fila dele por quadro: encher a fila do jogo não adianta
+          // nada e o que entra lá fica atrasado para sempre. O atraso fica aqui fora, onde o enxuga() pode jogar fora o velho
+          for (let k = 0; k < 2 && r8(RQ_CNT) < JOGO_FILA && pushRow(); k++);
         }
       },
       // depois de rodar o quadro
@@ -515,7 +569,7 @@ const LinkHLE = (() => {
       // o jogador trocou o capacete: quem está no cabo vê a mesma moto (só vale para o dono dela)
       capacete(v) { cap = v ? 1 : 0; if (souDono()) send({ k: "cap", v: cap }); },
       set aoCapacete(f) { aoCap = f; },
-      set aoCaixas(f) { aoCaixas = f; },   // f(endereço na ROM, bytes): quem sabe escrever na ROM da partida
+      set aoCaixas(f) { aoCaixas = f; if (f && G.tela) for (const [at, b] of G.tela) f(at, new Uint8Array(b)); },   // f(endereço na ROM, bytes): quem sabe escrever na ROM da partida
       // tem um dono da moto no cabo e não sou eu: a tecla 0 não mexe na moto dele
       get motoAlheia() { return capOutro != null && !souDono(); },
       // liga o coop automático neste aparelho
@@ -533,6 +587,18 @@ const LinkHLE = (() => {
       // para a linha de baixo da tela: quantos ligados no cabo, meu nível, e quem da sala está em que nível
       get resumo() { const t = now(); return { ligados: ids ? ids.length : 0, n: nivel(), fase, desligou, me, outros: [...avisados].map(([s, v]) => [s, t - v.t < AUTO_VALE ? v.n : -1]) }; },
       get desligou() { return desligou; },
+      // log de atraso (1 vez por segundo): por jogador ligado, comandos dele esperando agora, o máximo no último segundo e há
+      // quantos ms não chega nada dele; linhas na fila do jogo; BEBE velhos descartados no último segundo. Zera os máximos
+      medidas() {
+        const t = now(), fila = {};
+        if (ids && open) for (const s of cur()) if (s !== me) {
+          const q = inbox.get(s) || [];
+          fila[s] = { agora: q.length, max: Math.max(filaMax.get(s) || 0, q.length), sem: ultimo.has(s) ? Math.round(t - ultimo.get(s)) : -1 };
+        }
+        const r = { ligados: ids && open ? cur().length : 0, jogo: open ? r8(RQ_CNT) : 0, desc: descartados, fila };
+        filaMax.clear(); descartados = 0;
+        return r;
+      },
       // teclas do jogador: durante a conexão (1 s) o jogo não recebe nada, senão o B cancelaria
       teclas(k) {
         if (!fase) return k;
@@ -593,6 +659,7 @@ const LinkHLE = (() => {
           if (!inbox.has(from)) inbox.set(from, []);
           const c = m.w.map(v => v & 0xFFFF);
           inbox.get(from).push(c); if (c[0] === 0xBEBE) lastCmd.set(from, c);
+          ultimo.set(from, now()); filaMax.set(from, Math.max(filaMax.get(from) || 0, inbox.get(from).length));
         }
       },
       // alguém saiu da sala: se estava no coop comigo, o meu jogo recebe o "desconectar" dele

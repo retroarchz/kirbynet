@@ -388,6 +388,7 @@ function renderGame(m, fresh) {
   $("btn-all").classList.toggle("hidden", m.mode === "local" || SYS.oneScreen || !!m.free);
   $("btn-ff").classList.toggle("hidden", m.mode !== "local");   // acelerar: só sozinho / "Mesmo PC"
   $("btn-ffx").classList.toggle("hidden", m.mode !== "local");
+  $("btn-cabolog").classList.toggle("hidden", !m.cabo);   // log de atraso do coop pelo cabo
   updateTurboButton();
   $("desync").classList.toggle("hidden", m.desync == null);
   if (m.desync != null) $("desync").textContent = `⚠️ Os PCs dessincronizaram no frame ${m.desync}. Saiam e recomecem.`;
@@ -416,6 +417,7 @@ function showStatus(st) {
   }
   if (Play.run && Play.run.free && !Play.run.cabo) t += " · 🌍 " + ghostSummary(Play.run);   // onde estão os outros
   // cabo pela internet (GBA): quem está na sala; o coop em si se liga pelo menu do jogo (START > COOP)
+  if (Play.run && Play.run.cabo) { CaboLog.anota(st, Play.run); if (Play.run.auto && st.cabo && st.cabo.ligados) t += CaboLog.curto(Play.run); }
   if (Play.run && Play.run.cabo) t += Play.run.auto ? " · " + AutoCoop.texto(st.coop) : " · 🔗 cabo: " + (Play.run.names || []).map((n, i) => n != null ? `P${i + 1} ${n}` : null).filter(Boolean).join(", ");
   // rollback: quantas vezes no último segundo o jogo voltou para corrigir botões que chegaram atrasados
   if (st.rb && st.rb.count) t += ` · ↺ ${st.rb.count}`;
@@ -556,6 +558,7 @@ const goFull = () => {
   (el.requestFullscreen || el.webkitRequestFullscreen || (() => {})).call(el);
 };
 $("btn-sound").onclick = () => Sound.toggle();
+$("btn-cabolog").onclick = (e) => { e.currentTarget.blur(); CaboLog.baixa(); };
 $("btn-touch").onclick = () => toggleTouch();
 $("btn-full").onclick = goFull;
 $("btn-fit").onclick = () => Fit.cycle();

@@ -236,6 +236,50 @@ async function scanRooms() {
 // "Mesmo Wi-Fi" = mesmo endereço público, como a lista de salas sempre foi. Não exigir conexão direta: entre aparelhos ela
 // pode passar por servidor e continuar sendo da mesma casa (um filtro assim recusou gente que devia entrar).
 // Nada aqui pode parar o jogo: sem internet, sem servidor ou se a sala cair, cada um segue jogando e tenta de novo depois.
+// Log de atraso do coop pelo cabo: uma linha por segundo com o ping de cada um, quantos comandos dele estavam esperando
+// na fila (cada um = 1 quadro de atraso), há quanto tempo não chega nada e quantas posições velhas foram descartadas.
+// Botão "📋 Log do coop" baixa o arquivo; no console: CaboLog.texto(). Guarda a última hora.
+const CaboLog = {
+  linhas: [], ligAntes: 0, est: {},
+  hora() { return new Date().toLocaleTimeString("pt-BR"); },
+  nome(run, s) { return (run.names && run.names[s]) || "P" + (+s + 1); },
+  // atraso estimado de quando ele anda até eu ver: rede dele até a sala + da sala até mim + a fila + ~2 quadros do jogo
+  anota(st, run) {
+    const c = st.cabo, net = run && run.link;
+    if (!c || !run) return;
+    const q = (net && net.q) || {}, eu = net ? net.slot : -1, meu = q[eu] || {};
+    if (c.ligados !== this.ligAntes) {
+      this.linhas.push(`${this.hora()} === cabo com ${c.ligados || 0} ${c.ligados ? "(" + Object.keys(c.fila).map(s => this.nome(run, s)).join(", ") + " e eu)" : "(desligado)"}`);
+      this.ligAntes = c.ligados;
+    }
+    this.est = {};
+    if (!c.ligados) return;
+    const partes = Object.entries(c.fila).map(([s, f]) => {
+      const p = q[s] || {}, ms = Math.round(((p.med || 0) + (meu.med || 0)) / 2 + (f.agora + 2) * 1000 / 60);
+      this.est[s] = ms;
+      const alerta = f.max > 6 || ms > 250 || f.sem > 1000 || (p.max || 0) > 300 ? " ⚠️" : "";
+      return `${this.nome(run, s)}: ≈${ms} ms, ping ${p.med ?? "?"}/${p.max ?? "?"} ms, fila ${f.agora} (máx ${f.max}), sem notícia ${f.sem} ms` +
+             (p.cpu >= 0 || p.page >= 0 ? `, CPU ${Math.max(p.cpu ?? -1, p.page ?? -1)}%` : "") +
+             (p.fps >= 0 ? `, ${p.fps} fps` + (p.fps < 55 ? " ⚠️ jogo dele lento (aba no fundo ou aparelho fraco?)" : "") : "") + alerta;
+    });
+    this.linhas.push(`${this.hora()} ${st.fps.toFixed(1)} fps · meu ping ${meu.med ?? "?"}/${meu.max ?? "?"} ms · fila do jogo ${c.jogo}` +
+                     (c.desc ? ` · ${c.desc} posições velhas descartadas` : "") + (st.fps < 55 ? " ⚠️ jogo lento" : "") + " | " + partes.join(" | "));
+    if (this.linhas.length > 3600) this.linhas.splice(0, this.linhas.length - 3600);
+  },
+  // para a linha de baixo: "⏱ Luan 40 ms"
+  curto(run) {
+    const e = Object.entries(this.est);
+    return e.length ? " · ⏱ " + e.map(([s, ms]) => this.nome(run, s) + " " + ms + " ms" + (ms > 250 ? " ⚠️" : "")).join(", ") : "";
+  },
+  texto() { return "Log do coop (atraso) — " + new Date().toLocaleString("pt-BR") + "\n≈ = atraso estimado entre ele andar e você ver\n\n" + this.linhas.join("\n") + "\n"; },
+  baixa() {
+    const url = URL.createObjectURL(new Blob([this.texto()], { type: "text/plain" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = "log-coop-" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-") + ".txt";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  },
+};
 const SALA_FECHOU = "A sala fechou.", AUTO_SEM_RESPOSTA = 6000;
 function autoCoopServe(sha1) {
   return typeof SITE !== "undefined" && SITE && typeof Peer !== "undefined" && SYS.id === "gba" && typeof LinkHLE !== "undefined" && LinkHLE.supports(sha1);
@@ -479,7 +523,7 @@ const SiteRoom = {
       let q; try { q = JSON.parse(dec(data)); } catch (e) { return; }
       const int = (v, d) => Number.isFinite(+v) ? Math.trunc(+v) : d;
       const out = { slot, med: int(q.med, 0), max: int(q.max, 0), spikes: int(q.spikes, 0), via: q.via === "udp" ? "udp" : "tcp",
-                    cpu: int(q.cpu, -1), page: int(q.page, -1), delay: int(q.delay, -1), lost: int(q.lost, 0), gap: int(q.gap, 0), marg: {} };
+                    cpu: int(q.cpu, -1), page: int(q.page, -1), fps: int(q.fps, -1), delay: int(q.delay, -1), lost: int(q.lost, 0), gap: int(q.gap, 0), marg: {} };
       for (const [k, v] of Object.entries(q.marg && typeof q.marg === "object" ? q.marg : {}))
         if (v && typeof v === "object") out.marg[String(int(k, 0))] = Object.fromEntries(["min", "late", "tight", "sum", "cnt"].map(f => [f, int(v[f], 0)]));
       this.broadcast("Q", enc(JSON.stringify(out)));
