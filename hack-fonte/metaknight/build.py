@@ -29,6 +29,7 @@ HOOK5 = 0x08F41380         # objeto do golpe da espada da Master (sub_08075EDC)
 HOOK6 = 0x08F41100         # golpe bloqueado pela defesa: som de "parry" do Dark Meta Knight
 HOOK7 = 0x08F41700         # fim do corte da investida (Master): giro só se apertou B de novo
 HOOK8 = 0x08F41800         # sub_0803D280 (confirma uma faixa da paleta de objetos): mantém as cores do Meta Knight
+HOOK9 = 0x08F41900         # estrela de viagem (efeito 0x2DE embaixo do Kirby nas poses 90/91): some para o Meta Knight
 DATA = 0x08F41400
 MAPA = DATA                # 185: animationIndex -> variante da 0x390 sem espada (0xFF = animação do Kirby)
 MAPS = DATA + 0x100        # 185: idem com a espada (habilidade Sword)
@@ -60,6 +61,10 @@ SITE7 = 0x0805F944         # r4 = kirby, r6 = &kirby->animationIndex
 # efeito que muda a cor do Kirby (dano, piscar, recarregar a tinta) termina aqui, depois do gancho que pinta o Meta
 # Knight a cada quadro: sem isso, por alguns quadros ele aparecia com a cor da tinta (Sapphire = azul)
 SITE8 = 0x0803D280
+# sub_0808EEF4: tarefa da estrela em que o Kirby viaja (efeito 0x2DE, criado por sub_0808EDB8 quando ele entra na
+# pose 90/91). Em 0x0808EFF8 "efeito->flags |= 4" (r3 = Kirby dono, r4 = efeito; r0-r2 livres): para o Meta Knight
+# também liga 0x400 (EffectObjectPostUpdate não desenha); ele vai voando com a capa virando asas
+SITE9 = 0x0808EFF8
 PAL_COPY = 0x081592F4
 SPIN_CONT = 0x0805F94C     # segue o giro (flags do 0x77)
 SHAKE = 0x0806FE64         # RequestScreenShake(força 0..3, objeto): tremor da tela
@@ -125,6 +130,7 @@ COMMON = [
     ([30, 37, 72], 0x1A),                      # engolindo
     ([32, 33, 34, 35, 62], 0xF),               # flutuando: capa-asas
     (55, 0x1E),                                # levando dano
+    ([90, 91], 0xF),                           # viajando na estrela: voando com a capa-asas (a estrela some, hook9)
     (list(range(74, 90)), 0x15),               # girando (canhão / estrela)
     ([93, 94, 100, 101, 102], 0xB),            # segurando item / baú: braços para cima
     (list(range(123, 141)), 0x1E),             # queimando / congelado / choque
@@ -551,6 +557,29 @@ def hook8():
     return a.build()
 
 
+def hook9():
+    a = Asm(HOOK9)
+    a.ldrh_i('r1', 'r4', 6); a.mov('r0', 4); a.alu('orr', 'r1', 'r0')          # original: flags |= 4
+    a.cmpi('r3', 0); a.bc('eq', 'done')
+    a.ldrb_i('r0', 'r3', 0); a.cmpi('r0', 0); a.bc('ne', 'done')                 # dono é um Kirby
+    a.mov('r0', 0x56); a.ldrb_r('r0', 'r3', 'r0')                               # jogador
+    a.ldr_lit('r2', NUM_HUMANS); a.ldrb_i('r2', 'r2', 0); a.alu('cmp', 'r0', 'r2'); a.bc('hs', 'done')
+    a.ldr_lit('r2', PAINT); a.ldrb_r('r0', 'r2', 'r0'); a.cmpi('r0', SAPPHIRE); a.bc('ne', 'done')
+    a.mov('r0', 0x80); a.lsl('r0', 'r0', 3); a.alu('orr', 'r1', 'r0')           # Meta Knight: flags |= 0x400 (escondida)
+    a.label('done')
+    a.strh_i('r1', 'r4', 6)
+    a.ldr_lit('r0', (SITE9 + 8) | 1); a.bx('r0')
+    a.pool()
+    return a.build()
+
+
+def site9():
+    s = Asm(SITE9)
+    s.ldr_lit('r0', HOOK9 | 1); s.bx('r0')     # literal em SITE9+4
+    s.pool()
+    return s.build()
+
+
 def site8():
     s = Asm(SITE8)
     s.ldr_lit('r3', HOOK8 | 1); s.bx('r3')     # literal em SITE8+4 (a função inteira vai para o HOOK8)
@@ -608,6 +637,8 @@ def patches():
     s6, h6 = site6(), hook6()
     s7, h7 = site7(), hook7()
     s8, h8 = site8(), hook8()
+    s9, h9 = site9(), hook9()
+    assert len(s9) == 8 and len(h9) <= 0x100
     assert len(s8) == 8 and len(h8) <= 0x100
     assert len(s7) == 8 and HOOK7 >= DATA + 0x2B0 and len(h7) <= 0x100
     assert len(s6) == 8 and len(h6) <= HOOK3 - HOOK6
@@ -618,9 +649,9 @@ def patches():
     data[0x200:0x200 + 41] = body_tiles()
     data[0x240:0x240 + 96] = b''.join(icon_tiles())
     data[0x2A0:0x2AC] = struct.pack('<6H', *[MKPAL[i] for i in range(1, 7)])
-    return [(SITE - 0x08000000, st), (SITE2 - 0x08000000, s2), (SITE3 - 0x08000000, s3), (SITE4 - 0x08000000, s4), (SITE5 - 0x08000000, s5), (SITE6 - 0x08000000, s6), (SITE7 - 0x08000000, s7), (SITE8 - 0x08000000, s8),
+    return [(SITE - 0x08000000, st), (SITE2 - 0x08000000, s2), (SITE3 - 0x08000000, s3), (SITE4 - 0x08000000, s4), (SITE5 - 0x08000000, s5), (SITE6 - 0x08000000, s6), (SITE7 - 0x08000000, s7), (SITE8 - 0x08000000, s8), (SITE9 - 0x08000000, s9),
             (prev, struct.pack('<HBb', MK_ANIM, 0, 0)), (PREV_TILES - 0x08000000, struct.pack('<H', 20)),
-            (HOOK - 0x08000000, code), (HOOK2 - 0x08000000, h2), (HOOK3 - 0x08000000, h3), (HOOK4 - 0x08000000, h4), (HOOK5 - 0x08000000, h5), (HOOK6 - 0x08000000, h6), (HOOK7 - 0x08000000, h7), (HOOK8 - 0x08000000, h8),
+            (HOOK - 0x08000000, code), (HOOK2 - 0x08000000, h2), (HOOK3 - 0x08000000, h3), (HOOK4 - 0x08000000, h4), (HOOK5 - 0x08000000, h5), (HOOK6 - 0x08000000, h6), (HOOK7 - 0x08000000, h7), (HOOK8 - 0x08000000, h8), (HOOK9 - 0x08000000, h9),
             (DATA - 0x08000000, bytes(data))]
 
 

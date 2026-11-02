@@ -27,6 +27,9 @@ O que faz
   (Sapphire = azul).
 - Flutuar = capa virando asas (com e sem espada). Icone de vidas do HUD = desenho do usuario
   (ref/icone_usuario.png) adaptado para 16x16 (e a barra de vida nas cores dele).
+- Estrela de viagem (poses 90/91 do Kirby; efeito 0x2DE da tarefa sub_0808EEF4): o Meta Knight vai voando com a
+  capa-asas e a estrela some (0x0808EFF8 desvia para 0x08F41900: flags |= 0x400 se o dono e o Meta Knight).
+  Teste: Downloads/mkhack/t_estrela2.js (estado sub_080575D8 = entra na estrela depois de 33 quadros).
 - Collection Room: a previa "CHANGE COLOR" da Sapphire mostra o Meta Knight.
 
 Como funciona (enderecos da decompilacao github.com/jiangzhengwenjz/katam, mesma ROM, sha1 274b102b...)
