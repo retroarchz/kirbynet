@@ -14,6 +14,7 @@
   const D = 0x020382D0, RECV = 0x03002490, BLK = 0x14, SIOFLAGS = 0x03002554, MULTI = 0x03002558;
   const KIRBYS = 0x02020EE0, KSZ = 0x1A8, TASKS = 0x030019F0;
   const LAG = 5, MAXFILA = 2, ESTRELA = 0x080725E0, ESTRELA_MAIN = 0x080728B1;
+  const PORTA = new Set([0x08055C15, 0x08055D9D]);   // estados do Kirby entrando numa porta (sub_08055C14, sub_08055D9C)
   // gerado por hack-fonte/kirbycoop/embute.py a partir de cabo.json e fantasma.json (não editar à mão)
   const P = /*PATCHES*/{"golpes":33813504,"caixa":33814656,"bandeiras":33814720,"max":8,"chamadas":33814736,"maxch":4,"patches":[[16253440,[240,181,30,72,30,73,1,128,30,76,37,120,8,45,0,217,8,37,0,32,32,112,0,38,174,66,20,210,176,0,0,25,71,104,0,47,13,208,56,120,1,40,10,209,0,32,128,33,120,82,240,1,20,73,64,24,248,102,56,28,19,75,0,240,27,248,1,54,232,231,18,76,37,120,4,45,0,217,4,37,0,32,32,112,0,38,174,66,9,210,240,0,0,25,67,104,128,104,0,43,1,208,0,240,7,248,1,54,243,231,9,72,0,104,240,188,2,188,8,71,24,71,192,70,52,1,0,4,0,128,0,0,128,248,3,2,0,244,3,2,229,177,9,8,208,248,3,2,192,248,3,2]],[1405704,[0,75,24,71,1,2,248,8]]],"fantasma":[[16252928,[0,40,22,208,1,120,0,41,5,208,0,111,0,40,16,208,1,120,0,41,13,209,86,33,65,92,7,74,18,120,145,66,7,208,0,42,3,209,5,74,18,120,145,66,1,210,1,32,112,71,0,32,112,71,192,70,60,173,3,2,48,173,3,2,30,181,12,28,255,247,220,255,0,40,2,209,32,28,255,247,215,255,30,188,8,188,24,71,8,188,7,181,255,247,240,255,0,40,7,188,156,70,8,188,158,70,99,70,1,208,0,32,112,71,240,181,7,28,13,28,174,104,128,33,137,0,1,180,1,72,132,70,1,188,96,71,241,100,3,8,8,188,7,181,255,247,214,255,0,40,7,188,156,70,8,188,158,70,99,70,1,208,0,32,112,71,240,181,79,70,70,70,192,180,7,28,13,28,1,180,1,72,132,70,1,188,96,71,213,101,3,8,8,188,7,181,255,247,188,255,0,40,7,188,156,70,8,188,158,70,99,70,1,208,0,32,112,71,240,181,71,70,128,180,4,28,15,28,32,120,1,180,1,72,132,70,1,188,96,71,169,105,3,8]],[222436,[8,180,1,75,24,71,192,70,89,0,248,8]],[222664,[8,180,1,75,24,71,192,70,141,0,248,8]],[223644,[8,180,1,75,24,71,192,70,193,0,248,8]]]}/*FIM*/;
 
@@ -92,7 +93,7 @@
     for (let i = 0; i < n; i++) peer.push({ fila: [], soube: null, ultimo: -1, visto: null, vistoSeq: -9, chegou: 0, pulos: 0 });
     const hist = [], ant = new Map(), porAviso = new Set(), eventos = [], vistos = new Set();
     let q = 0, evId = 0, puxa = [];
-    const est = { mandados: 0, recebidos: 0, avisosM: 0, avisosR: 0, estrelas: 0, pulos: 0, teclas: 0 };
+    const est = { mandados: 0, recebidos: 0, avisosM: 0, avisosR: 0, estrelas: 0, pulos: 0, teclas: 0, portas: 0 };
 
     function liga() {
       for (const [off, bytes] of P.patches) romWrite(off, new Uint8Array(bytes));
@@ -166,7 +167,12 @@
           while (p.fila.length > MAXFILA) { p.fila.shift(); p.pulos++; est.pulos++; }
           p.soube = p.fila.shift(); p.ultimo = p.soube.seq;
           const a = p.visto, b = p.soube.kb;
-          espelho(m, kb, b);
+          // entrando numa porta/espelho (aqui ou no retrato): o jogo daqui faz a entrada inteira sozinho com as teclas
+          // do amigo, como no cabo. Copiar o retrato no meio dela (o dono já trocou de sala e apagou a porta) deixava
+          // este GBA preso carregando uma sala que não existe: o amigo de quem recebe congelava
+          const stB = (b[0x78] | b[0x79] << 8 | b[0x7A] << 16 | b[0x7B] << 24) >>> 0;
+          if (PORTA.has(m.r32(kb + 0x78)) || PORTA.has(stB)) est.portas++;
+          else espelho(m, kb, b);
           // cuspiu num retrato que se perdeu: o jogo daqui não refez o passo, então a estrela é pedida ao jogo
           if (a && p.soube.seq > p.vistoSeq + 1 && (a[8] & 0x80) && !(b[8] & 0x80) && [38, 73].includes(b[0xD4] | b[0xD5] << 8) && !temEstrela(m, kb)) {
             m.w8(kb + 0xDD, a[0xDD]);

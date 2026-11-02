@@ -158,3 +158,20 @@ botão "📋 Log do coop", Pokémon do meio alinhado, 3 contra 1 sem reiniciar. 
   resultados idênticos (modulo.js SOLO=1). P2: PIORA (10 ms: o jogo do escravo fica num laço de espera que o cabo
   emulado deixava dormir; RCNT=0x8000 no cabo.py não resolveu) -> solo só no P1. Teste: teste/solo2.js, tempo.js.
   Próximo para o P2: achar o laço de espera do escravo (ou fazer o P2 virar mestre no próprio GBA).
+
+## Porta/espelho congelava o amigo (CORRIGIDO 02/11, 3ª conversa)
+
+- Vídeo do usuário (Firefox, Sandro P1 e Luan P2 em abas): o Sandro entrou no espelho pequeno da sala 801 e foi para a
+  floresta (sala 101); na aba do Luan o jogo seguia a 60 fps, mas o Kirby amarelo ficava "dormindo" e não andava mais.
+- Causa (teste/porta.js com os saves reais): no GBA de quem recebe, o relógio do multiplayer (gUnk_020382D0.unk0) parava
+  e gMainFlags nunca mais ganhava 0x1000000. Pilha da IWRAM: preso em sub_08055D9C (Kirby entrando na porta) ->
+  sub_080562D0 -> FillLevelInfo... para o Kirby do AMIGO. O dono já tinha rodado sub_080562D0 (trocou de sala e zerou
+  unk10C, a porta); o retrato copiado no meio da entrada fazia este GBA rodá-la de novo com dados pela metade.
+- Correção (kirbycoop.js): enquanto o Kirby do amigo está num estado de porta (0x08055C15 / 0x08055D9D), aqui OU no
+  retrato, o espelho não é aplicado; o jogo daqui faz a entrada inteira com as teclas do amigo (como no cabo) e o espelho
+  volta depois. Contador `portas` nas medidas.
+- Teste: `node teste/porta.js` (P1 entra no espelho; P2 anda), `SEGUE=1 ATE=1500 Q=2000` (P2 entra também), `ORIG=1`
+  (jogo original no cabo emulado), `VIS=1` (posição de um na tela do outro). Saves reais em scratchpad
+  70b25a82…/saves (não vão para o Git). Resultado: os dois relógios andam, o P2 anda, os dois chegam na 101 e um vê o
+  outro a 1-3 px. MISTURA=1 de 1 minuto igual a antes (2,8/6,0/9,9 px, 0 erros de cabo).
+- Ainda não conferido: outras trocas de sala (estrela de warp, portas grandes, cair do mapa, espelho do chefe).
