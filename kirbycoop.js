@@ -92,7 +92,7 @@
     for (let i = 0; i < n; i++) peer.push({ fila: [], soube: null, ultimo: -1, visto: null, vistoSeq: -9, chegou: 0, pulos: 0 });
     const hist = [], ant = new Map(), porAviso = new Set(), eventos = [], vistos = new Set();
     let q = 0, evId = 0, puxa = [];
-    const est = { mandados: 0, recebidos: 0, avisosM: 0, avisosR: 0, estrelas: 0, pulos: 0 };
+    const est = { mandados: 0, recebidos: 0, avisosM: 0, avisosR: 0, estrelas: 0, pulos: 0, teclas: 0 };
 
     function liga() {
       for (const [off, bytes] of P.patches) romWrite(off, new Uint8Array(bytes));
@@ -181,6 +181,7 @@
     // depois de cada quadro: meu retrato e os inimigos que eu acertei
     function post(minhas) {
       hist[q] = minhas & 0x3FF;
+      if (hist[q]) est.teclas++;   // quadros em que o meu GBA recebeu algum botão (para o log)
       delete hist[q - 16];
       send(encSnap(me, q, hist[q + 1 - LAG] || 0, m), false);
       est.mandados++;

@@ -816,6 +816,10 @@ function sendKeys(run) {
   // janela de códigos aberta: nenhum botão vai para o jogo (digitar o código não aperta nada)
   // em sala só os botões do GBA viajam (o Especial só serve aos prontos, que não valem em sala)
   const k = run.net ? [maskFor(0) & 0x3FF] : [...Array(run.n).keys()].map(p => cheatsOpen() ? 0 : maskFor(p));
+  if (run.kcOn) {   // Kirby, mundos separados: o log conta se a página está vendo botão (teclado ou controle)
+    const a = run.kcTec || (run.kcTec = { n: 0, bot: 0, tecl: 0, foco: 0 });
+    a.n++; if (k[0]) a.bot++; if (down.size) a.tecl++; if (document.hasFocus()) a.foco++;
+  }
   const sig = k.join(",");
   if (sig === run.lastKeys) return;
   run.lastKeys = sig;

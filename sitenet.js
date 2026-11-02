@@ -295,7 +295,13 @@ const KcLog = {
       return `${CaboLog.nome(run, s)}: ${p.chegou} retratos/s` + (p.chegou < 50 ? " ⚠️" : "") + (p.pulos ? `, ${p.pulos} pulados` : "") +
              `, fila ${p.fila}, ping ${pq.med ?? "?"}/${pq.max ?? "?"} ms` + (pq.via ? " " + pq.via : "");
     });
-    this.linhas.push(`${CaboLog.hora()} ${st.fps.toFixed(1)} fps` + (st.fps < 55 ? " ⚠️ jogo lento" : "") +
+    // botões: % do último segundo em que a janela tinha foco, a página via botão (e se era teclado) e quadros em que o jogo recebeu
+    const a = run.kcTec || { n: 0, bot: 0, tecl: 0, foco: 0 }, pc = (v) => a.n ? Math.round(v / a.n * 100) : 0;
+    const pads = navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean).length : 0;
+    const botoes = ` · botões: foco ${pc(a.foco)}%` + (document.hidden ? " (ESCONDIDA)" : "") + `, página viu ${pc(a.bot)}% (teclado ${pc(a.tecl)}%` +
+                   (pads ? `, ${pads} controle(s)` : "") + `), jogo recebeu ${k.teclas} quadros` + (a.bot > 0 && !k.teclas ? " ⚠️ BOTÃO PERDIDO" : "");
+    run.kcTec = { n: 0, bot: 0, tecl: 0, foco: 0 };
+    this.linhas.push(`${CaboLog.hora()} ${st.fps.toFixed(1)} fps` + (st.fps < 55 ? " ⚠️ jogo lento" : "") + botoes +
                      ` · kirbys ${JSON.stringify(k.kirbys)} · eu=P${k.local + 1} x=${k.x} band=${(k.bandeiras >>> 0).toString(16)} · salas ${k.salas.map((r, i) => "P" + (i + 1) + "=" + r).join(" ")}` +
                      (k.avisosM || k.avisosR ? ` · avisos de inimigo: mandei ${k.avisosM}, recebi ${k.avisosR}` : "") +
                      (k.estrelas ? ` · ${k.estrelas} estrela(s) criada(s) pela rede de segurança` : "") + " | " + partes.join(" | "));
