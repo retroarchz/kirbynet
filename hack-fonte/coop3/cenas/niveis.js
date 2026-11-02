@@ -44,8 +44,20 @@ module.exports = (W) => {
     if (g === 0 && process.env.USA) {   // usa de verdade no 4
       for (let k = 0; k < 6 && m.r8(0x03005570) !== 4; k++) W.play([[6, ...W.k(0, 'R')], [16]]);
       W.shot('alvo-no-4.png'); console.log('cursor em', m.r8(0x03005570)); W.play([[6, ...W.k(0, 'A')], [60]]);
-      for (let k = 0; k < 2400; k++) W.step(['', k % 40 < 6 ? 'A' : '', k % 40 < 6 ? 'A' : '']);
+      for (let k = 0; k < 500; k++) W.step(['', k % 40 < 6 ? 'A' : '', k % 40 < 6 ? 'A' : '']);
+      W.shot('esc-placa.png');
+      m.w8(0x0203FF80 + 4 * 16, 2); W.play([[150]]); W.shot('esc-cristal.png');
+      m.w8(0x0203FF80 + 4 * 16, 0); W.play([[150]]); W.shot('esc-sumiu.png');
+      const caixa = () => W.players.map((p, i) => { const q = p.g.ram(0), id = q.r8(0x0203F9F8 + 4), o = 0x02020630 + id * 68; return 'P' + (i + 1) + ' id ' + id + ' ativo ' + (q.r8(o + 0x3E) & 1) + ' invis ' + ((q.r8(o + 0x3E) >> 2) & 1) + ' tile ' + (q.r16(o + 4) & 1023); }).join(' | ');
+      console.log('CAIXA4 sumiu', caixa());
+      for (const f of [120, 240, 360, 480]) { for (let k = 0; k < 120; k++) W.step(['', k % 40 < 6 ? 'A' : '', k % 40 < 6 ? 'A' : '']); console.log('CAIXA4 +' + f, caixa()); }
+      W.shot('esc-depois.png');
+      W.players.forEach((p, i) => { const q = p.g.ram(0); console.log('TAREFA P' + (i + 1), 'fase', q.r8(0x0203FF80 + 64), 'sprite', q.r8(0x0203FF80 + 67), 'desenhada', q.r8(0x0203FF80 + 77)); });
+      return;
       W.shot('escudo.png');
+      const fases = () => W.players.map((p, i) => 'P' + (i + 1) + ' ' + [0, 2, 4].map(b => p.g.ram(0).r8(0x0203FF80 + b * 16)).join(',')).join(' | ');
+      console.log('FASES', fases());
+      for (let r = 0; r < 5; r++) { for (let k = 0; k < 1200; k++) W.step(['', k % 40 < 6 ? 'A' : '', k % 40 < 6 ? 'A' : '']); console.log('FASES +' + (r + 1), fases(), 'cb2', W.players[1].g.ram(0).r32(0x03002664).toString(16)); if (r === 0) W.shot('escudo2.png'); W.play([[6, ...W.k(0, 'A')], [40], [6, ...W.k(0, 'A')], [40]]); }
       W.players.forEach((p, i) => { const q = p.g.ram(0), v = []; for (let b = 0; b < 6; b++) v.push(Array.from({ length: 4 }, (_, k) => q.r8(0x0203FF80 + b * 16 + k).toString(16)).join(' ')); console.log('ESCUDO P' + (i + 1), v.join(' | ')); });
       return;
     }

@@ -41,7 +41,7 @@ const LinkHLE = (() => {
                   players: 0x020229F0, playerSize: 0x24, cb2: 0x03002664, field: 0x080C2965, battle: 0x0803F431,
                   saved: 0x02022AA4, savedCount: 0x030034A0, linkType: 0x020229C6,
                   held: 0x0300268C, waitArr: 0x030045A0, theirTr: 0x03004590, myTr: 0x03004570, myTr2: 0x0203A6D6,
-                  tabelas: [[0x030045A0, 1], [0x03004578, 1], [0x03004588, 1], [0x03004590, 2], [0x030045A8, 1], [0x03004540, 2], [0x03004550, 2]] };
+                  mons: 0x0203F424, tabelas: [[0x030045A0, 1], [0x03004578, 1], [0x03004588, 1], [0x03004590, 2], [0x030045A8, 1], [0x03004540, 2], [0x03004550, 2]] };
   // teste anterior (29/10, sem a espera do host): cabo comum. Teste atual: com a espera decidida pelo host.
   GAMES.b3121dfb3be248bcd51cf83815c463a72e2781e1 = GAMES.c4091f572d52436c86ceaa0c5718cfb22dc2d59d;
   GAMES.a9162e75a98631c4d31541bf1168fcee62770ec9 = { ...GAMES.c4091f572d52436c86ceaa0c5718cfb22dc2d59d, coop: COOP3 };
@@ -65,9 +65,11 @@ const LinkHLE = (() => {
   // que está livre; o host dá a largada e cada jogo cria a tarefa de conexão do próprio Quetzal, sem as mensagens.
   // Tudo no cabo virtual e na memória: a ROM não muda. Mesmos endereços na Alpha 9 e na Coop 3.
   const AUTO = { cb1: 0x03002660, cb2: 0x03002664, field: 0x080C2965, over: 0x080C28E1, coop: 0x080C5761,
-                 tasks: 0x03005640, objetos: 0x02038D10, lock: 0x03000FDC, ctx: 0x03000EE8, ctxLivre: 2, fade: 0x02039AC3, avatar: 0x02039070,
+                 tasks: 0x03005640, objetos: 0x02038D10, batalha: 0x0803F431, mons: 0x0202305C, lock: 0x03000FDC, ctx: 0x03000EE8, ctxLivre: 2, fade: 0x02039AC3, avatar: 0x02039070,
                  linkType: 0x020229C6, tipo: 2, abre: 0x0825FD45, passo: 0x0825FD8D, mestre: 0x0825FEB1, escravo: 0x0825FFA1 };
   const AUTO_B = 2, AUTO_AVISO = 30, AUTO_VALE = 1500, AUTO_PEDIDO = 4000, AUTO_LIMITE = 8000, AUTO_FORA = 30000, AUTO_REVE = 1500, AUTO_CALMA = 1000, AUTO_ASSENTA = 30, AUTO_CAPACETE = 120, AUTO_LIMITE_NIVEL = 3000, MOTO_DONO = 10657;
+  // Protetor Glacial: estado por lugar (16 bytes, +0 fase) e a tarefa do jogo que desenha os escudos (protetor.py)
+  const ESCUDO = { base: 0x0203FF80, tarefa: 0x09FFAB41, lugares: 6, aviso: 12, repete: 120 };
 
   const DEAD_MS = 15000;   // ligado comigo e sem dar notícia há tanto tempo: caiu (o jogo recebe o "desconectar")
 
@@ -92,6 +94,7 @@ const LinkHLE = (() => {
     // depois. Vale para toda dupla do coop automático: quem ficava no cabo antigo durante a luta voltava ouvindo os outros, mas
     // o jogo dele quase não transmitia mais (os outros o viam parado)
     let mestre = 0, semHost = false, zArmado = false, zAntes = false, liberar = null;
+    let escudoQuadros = 0, escudoUlt = null, escudoFases = null;
     // quem voltou de uma dupla sem mim: ao reabrir o cabo o mestre pede os dados de cada jogador
     // (LINKCMD_SEND_LINK_TYPE 0x2222, com o tipo de cabo). O meu jogo, no mapa, responde com o gLinkType
     // dele, que não é o do pedido: antes de o jogo ver o pedido, o gLinkType vira o pedido.
@@ -340,6 +343,30 @@ const LinkHLE = (() => {
       ram.w8(C.mail + 1, 1);
       liberar = null;
     }
+    // Só o mestre calcula a batalha: o escudo existia só na memória dele e só a tela dele o desenhava. Ele avisa a fase de cada
+    // lugar, e os outros preenchem o que a tarefa de desenho do jogo confere e a ligam
+    function escudoEnvia() {
+      if (++escudoQuadros % ESCUDO.aviso) return;
+      const v = Array.from({ length: ESCUDO.lugares }, (_, b) => ram.r8(ESCUDO.base + b * 16)), chave = v.join();
+      if (chave === escudoUlt && escudoQuadros % ESCUDO.repete) return;
+      if (chave === "0,0,0,0,0,0" && escudoUlt === null) return;
+      escudoUlt = chave;
+      send({ k: "esc", v });
+    }
+    function escudoAplica() {
+      const mons = (C && C.mons) || AUTO.mons;
+      let algum = false;
+      escudoFases.forEach((f, b) => {
+        const e = ESCUDO.base + b * 16, m = mons + b * 0x60;
+        ram.w8(e, f);
+        if (!f) return;
+        algum = true;
+        if (!ram.r16(m + 0x2A)) ram.w16(m + 0x2A, 1);   // esta tabela não é usada aqui: é só o que a tarefa confere
+        for (let k = 0; k < 4; k++) ram.w8(e + 4 + k, ram.r8(m + 0x4C + k));
+      });
+      if (algum && !tarefaExiste(ESCUDO.tarefa)) criaTarefa(ESCUDO.tarefa);
+    }
+    const tarefaExiste = (f) => { for (let t = 0; t < 16; t++) { const b = AUTO.tasks + 40 * t; if (ram.r8(b + 4) && ram.r32(b) === f) return true; } return false; };
     function release(list, t) {
       if (t === 2) {
         if (duo) return;   // os dois apertaram Z ao mesmo tempo
@@ -470,6 +497,9 @@ const LinkHLE = (() => {
           if (ask && now() - ask.at > 5000) ask = null;   // ninguém respondeu: continua esperando
           if (!waiting()) ram.w8(C.mail + 1, 0);          // liberação velha não vale para a próxima espera
         }
+        if (ids && ram.r32(AUTO.cb2) === AUTO.batalha) {
+          if (cur()[0] === me) escudoEnvia(); else if (escudoFases) escudoAplica();
+        } else if (escudoFases || escudoUlt !== null) { escudoFases = null; escudoUlt = null; }
         if (auto) autoPasso();
       },
       // o jogador trocou o capacete: quem está no cabo vê a mesma moto (só vale para o dono dela)
@@ -506,6 +536,7 @@ const LinkHLE = (() => {
         if (m.k === "au") avisados.set(from, { n: m.n, t: now() });
         else if (m.k === "vem") { if (auto && !fase && !open && Array.isArray(m.ids) && m.ids[0] === from && m.ids.includes(me)) pedido = { ids: m.ids, t: now() }; }
         else if (m.k === "sai") { if (auto && ids && from === ids[0] && !saindo) solta(); }
+        else if (m.k === "esc") { if (ids && from === cur()[0] && Array.isArray(m.v)) escudoFases = m.v; }
         else if (m.k === "cap") { if (m.v !== capOutro && !souDono()) { capOutro = m.v; if (aoCap) aoCap(m.v); } }
         else if (m.k === "st") {
           const known = peers.has(from);
@@ -564,7 +595,8 @@ const LinkHLE = (() => {
   // Mensagens pela sala, em bytes: [vaga de quem manda, tipo, ...]
   //   1 = comando (8 números de 16 bits), 2 = cabo aberto/fechado + se é o mestre, 3 = "começar" (vagas de quem entra)
   //   coop de teste: 4 = pedido do host (tipo, vagas), 5/6 = aceito/recusado, 7 = entrei na dupla (vagas), 8 = saí da dupla
-  //   coop automático: 10 = nível (0 ocupado, 1 livre, 2 parado no coop), 11 = largada (vagas), 12 = soltem o cabo, 13 = capacete
+  //   coop automático: 10 = nível (0 ocupado, 1 livre, 2 parado no coop), 11 = largada (vagas), 12 = soltem o cabo, 13 = capacete,
+  //   14 = fase do escudo do Protetor Glacial em cada lugar
   // Pokémon Quetzal, tecla Alt: alterna o valor de trapaça do save (embaralhado com o ID de treinador) entre 1 e 0.
   // Sem trapaça, os personagens de fim de jogo também somem: eles entregariam a visita à Fronteira de Batalha.
   // É ele que a troca compara. Só vale para quem começou com cheats: save+0x2CE fica marcado, mesmo com o valor em 0.
@@ -603,6 +635,7 @@ const LinkHLE = (() => {
     if (m.k === "vem") return new Uint8Array([from, 11, m.ids.length, ...m.ids]);
     if (m.k === "sai") return new Uint8Array([from, 12]);
     if (m.k === "cap") return new Uint8Array([from, 13, m.v ? 1 : 0]);
+    if (m.k === "esc") return new Uint8Array([from, 14, ...m.v]);
     return null;
   }
   function decode(b) {
@@ -621,6 +654,7 @@ const LinkHLE = (() => {
     if (b[1] === 11 && b.length >= 3 + b[2]) return { from, m: { k: "vem", ids: Array.from(b.subarray(3, 3 + b[2])) } };
     if (b[1] === 12) return { from, m: { k: "sai" } };
     if (b[1] === 13 && b.length >= 3) return { from, m: { k: "cap", v: b[2] } };
+    if (b[1] === 14 && b.length >= 8) return { from, m: { k: "esc", v: Array.from(b.subarray(2, 8)) } };
     return null;
   }
   return { supports, create, encode, decode, trocaModo, GAMES };
