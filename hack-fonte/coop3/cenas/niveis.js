@@ -22,6 +22,36 @@ module.exports = (W) => {
   W.play([[1200]]); eq('entrando'); W.shot('niveis-a.png');
   W.play([[600]]); W.shot('niveis.png');
   eq('na batalha');
+  // menu de alvo do Cubchoo (P1): por quais posições o cursor passa em cada golpe modificado
+  const m = W.players[0].g.ram(0), O = 0x0203F424, H = (x) => x.toString(16);
+  const estado = () => [H(m.r32(0x0203FA00)), m.r8(0x03005570), m.r8(0x0203FA40)];
+  const golpes = (process.env.GOLPES || '681,682,329,58').split(',').map(Number);
+  golpes.forEach((g, i) => { m.w16(O + 0x0C + 2 * i, g); m.w8(O + 0x24 + i, 5); });
+  console.log('moves', [0, 1, 2, 3].map(i => m.r16(O + 0x0C + 2 * i)));
+  W.play([[6, ...W.k(0, 'A')], [40]]); console.log('LUTAR', estado());
+  for (let g = 0; g < 4; g++) {
+    const cur = m.r8(0x0203FA40);
+    if ((cur & 1) !== (g & 1)) W.play([[6, ...W.k(0, g & 1 ? 'R' : 'L')], [14]]);
+    if ((m.r8(0x0203FA40) & 2) !== (g & 2)) W.play([[6, ...W.k(0, g & 2 ? 'D' : 'U')], [14]]);
+    W.play([[6, ...W.k(0, 'A')], [30]]);
+    const e = estado(), inicio = e[1], dir = [], esq = [];
+    if (e[0] === '808e8ed') { console.log('GOLPE', golpes[g], 'sem cursor (saiu direto ou recusado)', e); continue; }
+    for (let k = 0; k < 7; k++) { W.play([[6, ...W.k(0, 'R')], [16]]); dir.push(m.r8(0x03005570)); }
+    for (let k = 0; k < 7; k++) { W.play([[6, ...W.k(0, 'L')], [16]]); esq.push(m.r8(0x03005570)); }
+    for (let k = 0; k < 7; k++) { W.play([[6, ...W.k(0, 'D')], [16]]); dir.push(m.r8(0x03005570)); }
+    console.log('GOLPE', golpes[g], 'tela', e[0], 'inicio', inicio, 'DIREITA/BAIXO', JSON.stringify(dir), 'ESQUERDA', JSON.stringify(esq));
+    W.shot('alvo-' + golpes[g] + '.png');
+    if (g === 0 && process.env.USA) {   // usa de verdade no 4
+      for (let k = 0; k < 6 && m.r8(0x03005570) !== 4; k++) W.play([[6, ...W.k(0, 'R')], [16]]);
+      W.shot('alvo-no-4.png'); console.log('cursor em', m.r8(0x03005570)); W.play([[6, ...W.k(0, 'A')], [60]]);
+      for (let k = 0; k < 2400; k++) W.step(['', k % 40 < 6 ? 'A' : '', k % 40 < 6 ? 'A' : '']);
+      W.shot('escudo.png');
+      W.players.forEach((p, i) => { const q = p.g.ram(0), v = []; for (let b = 0; b < 6; b++) v.push(Array.from({ length: 4 }, (_, k) => q.r8(0x0203FF80 + b * 16 + k).toString(16)).join(' ')); console.log('ESCUDO P' + (i + 1), v.join(' | ')); });
+      return;
+    }
+    W.play([[6, ...W.k(0, 'B')], [30]]); console.log('  voltou', estado());
+  }
+  W.shot('longa.png');
   // joga turnos: todos apertam A; a cada ~10 s fotografa e olha a equipe
   for (let r = 1; r <= 0; r++) {
     for (let k = 0; k < 600; k++) W.step(W.players.map(() => k % 40 < 6 ? 'A' : ''));

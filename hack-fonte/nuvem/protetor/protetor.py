@@ -558,6 +558,19 @@ assert _pgat <= 0x09FEFF00
 _mv = bytearray(ROM[0x53AD34 + 24 * 367:0x53AD34 + 24 * 367 + 24])    # Acupressure: alvo "eu ou aliado"
 struct.pack_into('<H', _mv, 0, EF_PG); _mv[2] = 0; _mv[3] = PG_GELO_T; _mv[4] = 0; _mv[5] = 5; _mv[10] = 7   # prioridade +7: antes de qualquer golpe
 put(0x0853AD34 + 24 * ID_PG, bytes(_mv))
+# cursor do alvo "eu ou aliado": o jogo fazia cursor ^= 2, então com 3 jogadores o da posição 4 nunca aparecia. Gira por todos.
+_cur = Asm(0x09FF08A0)
+_cur.ldr_lit('r2', 0x0808E37D); _cur.b('comum')
+_cur.label('dir'); _cur.ldr_lit('r2', 0x0808E49D)
+_cur.label('comum')
+_cur.ldrb_i('r0', 'r4', 0); _cur.addi('r0', 2)
+_cur.ldr_lit('r1', 0x02023044); _cur.ldrb_i('r1', 'r1', 0); _cur.alu('cmp', 'r0', 'r1'); _cur.bc('lo', 'ok')
+_cur.mov('r0', 0)
+_cur.label('ok'); _cur.strb_i('r0', 'r4', 0); _cur.bx('r2'); _cur.pool()
+put(0x09FF08A0, _cur.build())
+for _at, _alvo in ((0x0808E2A8, 0x09FF08A0), (0x0808E3C8, _cur.labels['dir'])):
+    assert ROM[_at - 0x08000000:_at - 0x08000000 + 8].hex() == '2078022148402070'
+    put(_at, bytes.fromhex('00480047') + struct.pack('<I', _alvo | 1))
 _nm = enc('Protetor Glacial'); assert len(_nm) <= 17     # com o 0xFF do fim
 put(0x085188EB - 17 + 17 * ID_PG, _nm + b'\xff' * (17 - len(_nm)))
 # animação: som; o resto é o efeito de transformação do sprite
