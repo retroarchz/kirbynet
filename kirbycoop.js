@@ -165,7 +165,7 @@
   // m = memória do MEU GBA (kncore ram), me = minha vaga, n = jogadores, romWrite(off, bytes),
   // send(bytes, confiavel) = manda para todos (retrato: pode se perder; aviso: não pode)
   function create(o) {
-    const { m, me, n, romWrite, send } = o;
+    const { m, me, n, romWrite, send } = o, esp = o.especial | 0;   // esp: Meta Knight (byte da defesa por jogador)
     const peer = [];
     for (let i = 0; i < n; i++) peer.push({ fila: [], soube: null, ultimo: -1, visto: null, vistoSeq: -9, chegou: 0, pulos: 0 });
     const cpu = [0, 1, 2, 3].map(() => ({ fila: [], ultimo: -1 }));
@@ -287,6 +287,7 @@
           p.visto = b; p.vistoSeq = p.soube.seq;
         }
         const k = p.soube ? p.soube.k : 0;
+        if (esp) m.w8(esp + i, k & 0x400 ? 1 : 0);
         pacote(k, quadro, u6).forEach((x, j) => m.w16(RECV + i * BLK + 2 * j, x));
       }
       // Kirbys do computador: o retrato e o cérebro do P1 (o cérebro daqui continua de onde o dele parou)
@@ -312,7 +313,7 @@
     }
     // depois de cada quadro: meu retrato e os inimigos que eu acertei
     function post(minhas) {
-      hist[q] = minhas & 0x3FF;
+      hist[q] = minhas & 0x7FF;   // 0x400 = Especial (defesa do Meta Knight): vai junto no retrato; o pacote do cabo usa só 10 bits
       if (hist[q]) est.teclas++;   // quadros em que o meu GBA recebeu algum botão (para o log)
       delete hist[q - 16];
       send(encSnap(me, q, hist[q + 1 - LAG] || 0, m), false);

@@ -738,11 +738,15 @@ function startRun(opts) {
   if (patched) { run.saves = opts.saves = patched; persistSaves(run, patched, false); toast("❓ Pronto! Já está no seu save."); }
   // prontos que mudam a ROM (ex.: Meta Knight): só na cópia desta partida, sozinho ou "Mesmo PC"
   if (Cheats.usable(run)) CheatPresets.applyRom(roms);
+  // Amazing Mirror em sala: o Meta Knight vale para TODOS os aparelhos (a ROM tem que ser igual em todos; sem a tinta
+  // Sapphire o jogo é o mesmo do original). Quem escolher a Sapphire na Collection Room antes do multiplayer vira o MK.
+  const mkSala = !!run.net && !run.free && SYS.id === "gba" && Cheats.game === "B8KE" && amMetaKnight(roms) === 1;
+  run.mkSala = mkSala;
   quetzalTipos(roms);   // ajustes fixos do Quetzal: valem sempre (também online, todos iguais)
   run.moto = quetzalNuvem(roms);   // deu certo: a tecla 0 pode trocar o desenho da moto
   worker.postMessage({ t: "start", module: Play.mod, n: run.n, rom: roms, saves: opts.saves,
                        net: !!run.net && !run.free, free: !!run.free || run.auto, auto: run.auto, me: run.slot | 0, slot: run.free ? 0 : run.slot,
-                       cabo: run.cabo || null, especial: Cheats.usable(run) ? CheatPresets.especial() : 0,
+                       cabo: run.cabo || null, especial: Cheats.usable(run) ? CheatPresets.especial() : mkSala ? AM_MK_ESPECIAL : 0,
                        delay: run.delay || 0, cheats: cheats.length ? cheats : null }, [roms.buffer]);
   $("btn-cheats").classList.toggle("hidden", !Cheats.usable(run));
   $("relogio-linha").classList.toggle("hidden", !run.moto);
@@ -814,8 +818,8 @@ function sendKeys(run) {
     run.worker.postMessage({ t: "speed", speed: want ? Turbo.speed : 1 });
   }
   // janela de códigos aberta: nenhum botão vai para o jogo (digitar o código não aperta nada)
-  // em sala só os botões do GBA viajam (o Especial só serve aos prontos, que não valem em sala)
-  const k = run.net ? [maskFor(0) & 0x3FF] : [...Array(run.n).keys()].map(p => cheatsOpen() ? 0 : maskFor(p));
+  // em sala só os botões do GBA viajam (o Especial só serve aos prontos; em sala, só ao Meta Knight do Amazing Mirror)
+  const k = run.net ? [maskFor(0) & (run.mkSala ? 0x7FF : 0x3FF)] : [...Array(run.n).keys()].map(p => cheatsOpen() ? 0 : maskFor(p));
   if (run.kcOn) {   // Kirby, mundos separados: o log conta se a página está vendo botão (teclado ou controle)
     const a = run.kcTec || (run.kcTec = { n: 0, bot: 0, tecl: 0, foco: 0 });
     a.n++; if (k[0]) a.bot++; if (down.size) a.tecl++; if (document.hasFocus()) a.foco++;
@@ -938,6 +942,7 @@ function presentStep(run, ts) {
 // Só GBA, sozinho ou no "Mesmo PC" (em sala, um código só num aparelho separaria as partidas).
 // Ficam guardados neste navegador, por jogo (pelo código do cartucho, ex. B8KE), e entram sozinhos
 // na próxima partida desse jogo.
+const AM_MK_ESPECIAL = 0x0203FFB8;   // Meta Knight: 1 byte por jogador = botão Especial (defesa) apertado
 const Cheats = {
   game: "",   // código do cartucho da partida atual
   key() { return "kirbynet.cheats." + this.game; },
@@ -954,7 +959,7 @@ const Cheats = {
 const CHEAT_PRESETS = {
   B8KE: [{ id: "colecao", name: "Collection Room completa (tintas, músicas, mapas e vidas)", patch: amCollectionRoom },
          { id: "metaknight", name: "Jogar de Meta Knight (tinta Sapphire na Collection Room; Backspace guarda/saca a espada, segurar B solta a onda, C defende)", rom: amMetaKnight,
-           especial: 0x0203FFB8 }],   // botão Especial (tecla C / LT) = defesa; o L continua sendo o L do jogo
+           especial: AM_MK_ESPECIAL }],   // botão Especial (tecla C / LT) = defesa; o L continua sendo o L do jogo
 };
 // Kirby & The Amazing Mirror (USA): quem escolhe a tinta Sapphire na Collection Room vira o Meta Knight (desenhos
 // do próprio jogo: corpo 0x390 e espada Galaxia 0x391). Espada sacada = habilidade Master do jogo (golpes com dano;

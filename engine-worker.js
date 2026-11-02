@@ -107,6 +107,7 @@ function stepNet(use, full) {
     run.rb.snaps.set(f, run.s.snapshot(old || run.rb.spare.pop()));
   }
   const t = performance.now();
+  espW(use);
   run.s.runFrame(use);
   const dt = performance.now() - t;
   run.costAvg = run.costAvg ? run.costAvg * 0.97 + dt * 0.03 : dt;
@@ -115,6 +116,15 @@ function stepNet(use, full) {
   // e a memória do navegador acabava em poucos minutos: "a página parou de funcionar")
   else { run.used.delete(f); dropSnap(f); run.confirmed = f + 1; }
   return speculative;
+}
+// botão Especial (não é do GBA; o motor só vê os 10 de verdade): o pronto que usa ele (defesa do Meta Knight) lê da
+// memória do jogo, um byte por jogador, escrito aqui em cada GBA antes do quadro (em sala também: entra no rollback)
+function espW(k) {
+  if (!run.especial) return;
+  for (let i = 0; i < run.n; i++) {
+    const ram = run.s.ram(i);
+    if (ram) for (let p = 0; p < run.n; p++) ram.w8(run.especial + p, k[p] & 0x400 ? 1 : 0);
+  }
 }
 function sendHash() {
   const b = new Uint8Array(13), dv = new DataView(b.buffer);
@@ -241,7 +251,7 @@ function sendNet(kind, bytes) { postMessage({ t: "net", kind, bytes }, [bytes.bu
 function kcLiga() {
   const m = run.s.ram(run.slot);
   if (!m) return;   // memória do GBA ainda não achada: tenta no próximo quadro
-  run.kc = KirbyCoop.create({ m, me: run.slot, n: run.n, romWrite: (o, b) => run.s.romWrite(o, b),
+  run.kc = KirbyCoop.create({ m, me: run.slot, n: run.n, especial: run.especial, romWrite: (o, b) => run.s.romWrite(o, b),
     send: (b, conf) => postMessage({ t: "kc", bytes: b, conf: !!conf }, [b.buffer]) });
   run.kc.liga();
   // P1: o motor passa a rodar só o GBA dele (os dos amigos aqui viraram enfeite): ~30% menos trabalho por quadro.
@@ -308,9 +318,11 @@ function tick() {
       if (run.kc) {   // mundos separados: só o meu GBA recebe botões; os dos outros chegam pelo kirbycoop
         const k = new Array(run.n).fill(0);
         k[run.slot] = keys[0] & 0x3FF;
-        run.kc.pre();
+        const m0 = run.s.ram(run.slot);
+        run.kc.pre();   // (escreve o Especial dos amigos, que vem no retrato deles)
+        if (run.especial) m0.w8(run.especial + run.slot, keys[0] & 0x400 ? 1 : 0);
         run.s.runFrame(k);
-        run.kc.post(k[run.slot]);
+        run.kc.post(keys[0] & 0x7FF);
       } else if (run.net) {
         const held = keys[0] | 0;
         while (run.sent <= run.frames + run.delay) {
@@ -339,17 +351,12 @@ function tick() {
           run.waitSince = null;
         }
         if (run.rb) spec = stepNet(use, full);
-        else { run.s.runFrame(row); relogio(); }
+        else { espW(row); run.s.runFrame(row); relogio(); }
         run.book.delete(run.frames - 600);
       } else {
         const k = [];
         for (let p = 0; p < run.n; p++) k.push(keys[p] | 0);
-        // botão Especial (não é do GBA; o motor só vê os 10 de verdade): o pronto que usa ele lê da memória
-        // do jogo, um byte por jogador, escrito aqui em cada GBA antes do quadro
-        if (run.especial) for (let i = 0; i < run.n; i++) {
-          const ram = run.s.ram(i);
-          if (ram) for (let p = 0; p < run.n; p++) ram.w8(run.especial + p, k[p] & 0x400 ? 1 : 0);
-        }
+        espW(k);
         if (run.free && SNES) {   // Mundo livre: inimigos dos outros que sumiram há 1,5 s saem; os outros entram neste SNES
           for (const [kk, sn] of Object.entries(run.peerSnaps)) if (run.frames - sn.at > 90) delete run.peerSnaps[kk];
           coopBefore(run.s, Object.values(run.peerSnaps));
@@ -491,7 +498,7 @@ onmessage = async (ev) => {
               pendingHits: [], sentIds: new Set(),
               // GBA: cabo link pela internet (só nos jogos que o linkhle.js conhece)
               cabo: m.free && !SNES ? m.cabo || null : null, hle: null, caboEarly: [], caboAuto: !!m.auto, meNovo: null,
-              especial: !m.net && !SNES && m.especial ? m.especial : 0,
+              especial: !SNES && m.especial ? m.especial : 0,   // em sala só vem do Meta Knight (igual em todos)
               rb: m.net && s.canSnapshot && !NO_RB ? { snaps: new Map(), spare: [], count: 0, resim: 0 } : null,
               // Kirby AM em sala: pode trocar para mundos separados na fase (kirbycoop.js)
               kcPossivel: !!m.net && !SNES && m.n >= 2 && !!s.romWrite && typeof KirbyCoop !== "undefined" && KirbyCoop.supports(rom0),
