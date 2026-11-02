@@ -50,6 +50,16 @@ TRAVA_B = 0x0203FF3F
 # está surfando, a imagem fica invisível neste quadro (sprite +0x3E bit 2). O jogo recalcula a cada quadro.
 SEG_SITE, SEG_ARG = 0x080DC4F4, 0x080DC519
 SE_PULO, PLAY_SE, JUMP1, SET_ANIM = 0x0A, 0x080F3D84, 0x080D73E8, 0x080CC13C
+# Andar em cima (pedido 02/11): CheckForObjectEventCollision (0x080CB798, chamada só pela colisão do jogador a pé
+# 0x080CB70E e de bike 0x0818CFA2) é envolvida. Em cima de cerca/pedra da lista (menos as do mar): o quadrado vizinho
+# que também é cerca/pedra fica livre (bloqueio 1..3 vira 0) e o chão comum fica bloqueado (0 vira 2): ele anda por cima
+# e só desce com X + direção (o pulo aceita chão a 1 casa quando está numa plataforma).
+# Entrada desviada com r12 (os 4 registradores são argumentos; o 5º vai na pilha); STUB refaz o começo original.
+COL_SITE, COL_CONT = 0x080CB798, 0x080CB7A8
+COL_ORIG = bytes.fromhex('f0b557464e464546e0b481b081460998')   # push..ldr r0,[sp,#0x24]
+# Poeirinha: a pé o pulo não solta poeira ao pousar (bit disableJumpLandingGroundEffect, byte 3 bit 1 do objeto);
+# o callback do jogador desliga o bit quando o movimento acaba (POEIRA = 1 enquanto ligado por nós).
+POEIRA = 0x0203FF3D
 HOP1 = 0x080CC43C            # pulinho de 1 casa com a roda levantada (o do jogo quando está livre)
 HOP2 = 0x080CC460            # pulo de 2 casas com a roda levantada (barranco)
 JUMP2 = 0x080CC364           # pulo de barranco normal (2 casas)
@@ -76,7 +86,8 @@ class A(Asm):
     def subsp(self, imm): self.h(0xB080 | imm >> 2)
     def build(self):
         # literais podem ser nomes de rótulos (endereços de dados definidos depois)
-        self.items = [('word', self.labels[x]) if k == 'word' and isinstance(x, str) else (k, x) for k, x in self.items]
+        lab = lambda x: self.labels[x[:-2]] + 1 if x.endswith('+1') else self.labels[x]
+        self.items = [('word', lab(x)) if k == 'word' and isinstance(x, str) else (k, x) for k, x in self.items]
         return super().build()
 
 
@@ -130,13 +141,43 @@ def code():
     a.mov('r0', 2); a.alu('tst', 'r6', 'r0'); a.bc('ne', 'petenta')
     a.ldr_lit('r1', TRAVA_B); a.ldrb_i('r0', 'r1', 0); a.cmpi('r0', 0); a.bc('eq', 'pebate')
     a.label('petenta')
-    a.ldr_lit('r1', TRAVA_B); a.mov('r0', 0); a.strb_i('r0', 'r1', 0)
+    a.ldr_lit('r1', TRAVA_B); a.mov('r0', 0x80); a.strb_i('r0', 'r1', 0)    # gasto (o callback não guarda o mesmo aperto)
     a.movh('r0', 'r5'); a.mov('r1', 2); a.bl('pula'); a.cmpi('r0', 0); a.bc('ne', 'pefim')
     a.label('pebate')
     a.movh('r0', 'r5'); a.ldr_lit('r3', PE_BATE | 1); a.bl('callr3pe')
     a.label('pefim')
     a.ldr_lit('r0', PE_FIM | 1); a.bx('r0')
     a.label('callr3pe'); a.bx('r3')
+    a.pool()
+
+    # ---------- colisão do jogador: andar em cima de cerca/pedra ----------
+    a.label('colstub')   # começo original de CheckForObjectEventCollision (mesma pilha) e segue no resto dela
+    for k in range(0, len(COL_ORIG), 2): a.h(COL_ORIG[k] | COL_ORIG[k + 1] << 8)
+    a.ldr_lit('r7', COL_CONT | 1); a.bx('r7')
+    a.label('col')
+    a.push(['r4', 'r5', 'r6', 'r7'], lr=True); a.subsp(4)
+    a.movh('r4', 'r0'); a.movh('r5', 'r1'); a.movh('r6', 'r2'); a.movh('r7', 'r3')
+    a.ldr_sp('r0', 24); a.str_sp('r0', 0)                                   # 5º argumento
+    a.ldr_lit('r0', 'colstub+1'); a.movh('r12', 'r0')
+    a.movh('r0', 'r4'); a.movh('r1', 'r5'); a.movh('r2', 'r6'); a.movh('r3', 'r7'); a.bl('bxip')
+    a.lsl('r0', 'r0', 24); a.lsr('r7', 'r0', 24)                           # r7 = resultado
+    a.bl('jogador_r0'); a.alu('cmp', 'r0', 'r4'); a.bc('ne', 'colfim')
+    a.ldrh_i('r0', 'r4', 0x10); a.ldrh_i('r1', 'r4', 0x12); a.bl('tile'); a.str_sp('r0', 0)
+    a.bl('plat'); a.cmpi('r0', 0); a.bc('eq', 'colfim')
+    a.ldr_sp('r0', 0); a.bl('desloc'); a.cmpi('r0', 0); a.bc('ne', 'colfim')     # pedra do mar: como antes
+    a.lsl('r0', 'r5', 16); a.lsr('r0', 'r0', 16); a.lsl('r1', 'r6', 16); a.lsr('r1', 'r1', 16)
+    a.bl('tile'); a.str_sp('r0', 0); a.bl('plat'); a.cmpi('r0', 0); a.bc('eq', 'coltnao')
+    a.ldr_sp('r0', 0); a.bl('desloc'); a.cmpi('r0', 0); a.bc('ne', 'colfim')
+    a.cmpi('r7', 0); a.bc('eq', 'colfim'); a.cmpi('r7', 3); a.bc('hi', 'colfim')
+    a.mov('r7', 0); a.b('colfim')                                           # cerca -> cerca: anda
+    a.label('coltnao')
+    a.cmpi('r7', 0); a.bc('ne', 'colfim'); a.mov('r7', 2)                    # cerca -> chão: só pulando
+    a.label('colfim')
+    a.movh('r0', 'r7'); a.addsp(4); a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r1']); a.bx('r1')
+    a.label('bxip'); a.bx('r12')
+    a.label('jogador_r0')
+    a.ldr_lit('r0', AVATAR); a.ldrb_i('r0', 'r0', 5); a.lsl('r0', 'r0', 25); a.lsr('r0', 'r0', 25)
+    a.mov('r1', 0x24); a.alu('mul', 'r0', 'r1'); a.ldr_lit('r1', OBJS); a.add_r('r0', 'r0', 'r1'); a.bx('lr')
     a.pool()
 
     # ---------- tile(r0 = x, r1 = y) -> r0 = valor do mapa (u16) ou -1 fora ----------
@@ -200,6 +241,11 @@ def code():
     a.mov('r1', 0x2E); a.ldrsh_r('r2', 'r4', 'r1')
     a.mov('r1', 0x24); a.alu('mul', 'r2', 'r1'); a.ldr_lit('r1', OBJS); a.add_r('r5', 'r2', 'r1')   # r5 = objeto
     a.movh('r0', 'r5'); a.movh('r1', 'r4'); a.ldr_lit('r2', CB_ARG); a.ldr_lit('r3', CB_MOVE | 1); a.bl('callr3c')
+    a.ldr_lit('r2', POEIRA); a.ldrb_i('r0', 'r2', 0); a.cmpi('r0', 0); a.bc('eq', 'cpo')
+    a.ldrb_i('r0', 'r5', 0); a.mov('r1', 0x80); a.alu('tst', 'r0', 'r1'); a.bc('eq', 'cpo')   # heldMovementFinished
+    a.ldrb_i('r0', 'r5', 3); a.mov('r1', 2); a.alu('bic', 'r0', 'r1'); a.strb_i('r0', 'r5', 3)
+    a.mov('r0', 0); a.strb_i('r0', 'r2', 0)
+    a.label('cpo')
     a.ldrh_i('r0', 'r5', 0x10); a.ldrh_i('r1', 'r5', 0x12); a.bl('tile')
     # rápido (roda todo quadro): só procura na lista se o quadrado for 0x150..0x15C; sem alvo e sem deslocamento: nada
     a.lsl('r1', 'r0', 22); a.lsr('r1', 'r1', 22); a.mov('r2', 0xA8); a.lsl('r2', 'r2', 1); a.sub_r('r1', 'r1', 'r2')
@@ -207,6 +253,8 @@ def code():
     a.bl('desloc'); a.movh('r6', 'r0')                                     # alvo
     a.label('csem')
     a.ldr_lit('r2', MAIN_NEW); a.ldrh_i('r0', 'r2', 0); a.ldr_lit('r2', TRAVA_B); a.ldrb_i('r1', 'r2', 0)
+    a.cmpi('r1', 0x80); a.bc('ne', 'tbn'); a.mov('r1', 0); a.b('tbok')      # gasto neste quadro: não guarda de novo
+    a.label('tbn')
     a.mov('r3', 2); a.alu('tst', 'r0', 'r3'); a.bc('eq', 'tbx'); a.mov('r1', 41)
     a.label('tbx'); a.cmpi('r1', 0); a.bc('eq', 'tbok'); a.subi('r1', 1)
     a.label('tbok'); a.strb_i('r1', 'r2', 0)
@@ -295,7 +343,11 @@ def code():
     a.movh('r0', 'r10'); a.add_r('r0', 'r0', 'r6'); a.movh('r1', 'r11'); a.add_r('r1', 'r1', 'r7')
     a.bl('tile'); a.push(['r0'])
     a.bl('plat'); a.pop(['r1'])
-    a.cmpi('r0', 0); a.bc('eq', 'dois')
+    a.cmpi('r0', 0); a.bc('ne', 'umplat')
+    # não é plataforma: em cima de uma, chão comum a 1 casa vale (descer da cerca)
+    a.movh('r0', 'r9'); a.cmpi('r0', 0); a.bc('eq', 'dois')
+    a.movh('r0', 'r1'); a.bl('chao'); a.cmpi('r0', 0); a.bc('eq', 'dois'); a.b('umok')
+    a.label('umplat')
     # pedra do mar: os 4 quadrados são a mesma pedra; ir para outro quadrado dela não é pular para outra pedra
     a.movh('r0', 'r1'); a.bl('desloc'); a.cmpi('r0', 0); a.bc('eq', 'umok')
     a.push(['r0'])
@@ -340,6 +392,8 @@ def code():
     a.movh('r1', 'r11'); a.add_r('r1', 'r1', 'r7'); a.add_r('r1', 'r1', 'r7')
     a.bl('livre'); a.cmpi('r0', 0); a.bc('eq', 'nada')
     a.movh('r0', 'r8'); a.cmpi('r0', 0); a.bc('eq', 'dois_hop')
+    a.cmpi('r0', 2); a.bc('ne', 'dois_np'); a.bl('jogador'); a.bl('poeira')
+    a.label('dois_np')
     a.movh('r0', 'r4'); a.ldr_lit('r3', JUMP2 | 1); a.bl('callr3b'); a.mov('r0', 1); a.b('fim')
     a.label('dois_hop')
     a.movh('r0', 'r4'); a.ldr_lit('r3', HOP2 | 1); a.bl('callr3b'); a.mov('r0', 1); a.b('fim')
@@ -349,7 +403,11 @@ def code():
     a.pop(['r2', 'r3']); a.movh('r8', 'r2'); a.movh('r9', 'r3')
     a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r1']); a.bx('r1')
     a.label('callr3b'); a.bx('r3')
+    a.label('poeira')   # a pé: pouso sem poeira (r5 = jogador)
+    a.ldrb_i('r0', 'r5', 3); a.mov('r1', 2); a.alu('orr', 'r0', 'r1'); a.strb_i('r0', 'r5', 3)
+    a.ldr_lit('r1', POEIRA); a.mov('r0', 1); a.strb_i('r0', 'r1', 0); a.bx('lr')
     a.label('ape1')   # a pé, 1 casa: som do barranco + pulinho de 1 casa do jogo
+    a.bl('jogador'); a.bl('poeira')
     a.mov('r0', SE_PULO); a.ldr_lit('r3', PLAY_SE | 1); a.bl('callr3b')
     a.movh('r0', 'r4'); a.ldr_lit('r3', JUMP1 | 1); a.bl('callr3b')
     a.mov('r1', 2); a.ldr_lit('r3', SET_ANIM | 1); a.bl('callr3b')
@@ -442,6 +500,8 @@ def code():
     a.label('pum_hop'); a.movh('r0', 'r4'); a.ldr_lit('r3', HOP1 | 1); a.bl('callr3b'); a.mov('r0', 1); a.b('fim')
     a.label('pdois')
     a.movh('r0', 'r8'); a.cmpi('r0', 0); a.bc('eq', 'pdois_hop')
+    a.cmpi('r0', 2); a.bc('ne', 'pdois_np'); a.bl('poeira')
+    a.label('pdois_np')
     a.movh('r0', 'r4'); a.ldr_lit('r3', JUMP2 | 1); a.bl('callr3b'); a.mov('r0', 1); a.b('fim')
     a.label('pdois_hop'); a.movh('r0', 'r4'); a.ldr_lit('r3', HOP2 | 1); a.bl('callr3b'); a.mov('r0', 1); a.b('fim')
 
@@ -470,6 +530,14 @@ def code():
     return a
 
 
+def site_r12(at, to):
+    s = A(at)
+    s.push(['r4']); s.h(0x4C02)          # ldr r4, [pc, #8]
+    s.movh('r12', 'r4'); s.pop(['r4']); s.bx('r12'); s.h(0x46C0); s.word(to | 1)
+    b = s.build(); assert len(b) == 16, len(b)
+    return b
+
+
 def site(at, to, reg='r0'):
     s = A(at)
     s.ldr_lit(reg, to | 1); s.bx(reg); s.pool()
@@ -486,10 +554,13 @@ if __name__ == '__main__':
     s4, o4 = site(CB_SITE, a.labels['cb'], 'r3'), R[CB_SITE - 0x08000000:][:8]
     s5, o5 = site(PE_SITE, a.labels['pe']), R[PE_SITE - 0x08000000:][:8]
     s6, o6 = site(SEG_SITE, a.labels['cbseg'], 'r3'), R[SEG_SITE - 0x08000000:][:8]
+    s7, o7 = site_r12(COL_SITE, a.labels['col']), R[COL_SITE - 0x08000000:][:16]
+    assert o7 == COL_ORIG, o7.hex()
     print('    [0x%X, "%s", "%s"],   // Acro Bike: pulinho com a roda levantada sobe em pedra/cerca; fonte: hack-fonte/nuvem/acro/acro.py' % (HOP_SITE - 0x08000000, o1.hex(), s1.hex()))
     print('    [0x%X, "%s", "%s"],   // Acro Bike: pulo de lado sobe em pedra/cerca' % (SIDE_SITE - 0x08000000, o2.hex(), s2.hex()))
     print('    [0x%X, "%s", "%s"],   // Acro Bike: em cima da pedra/cerca fica a altura do chão (mar continua bloqueado)' % (ELEV_SITE - 0x08000000, o3.hex(), s3.hex()))
     print('    [0x%X, "%s", "%s"],   // Acro Bike: em cima da pedra do mar o desenho fica no centro dela' % (CB_SITE - 0x08000000, o4.hex(), s4.hex()))
     print('    [0x%X, "%s", "%s"],   // a pé: virado para a pedra/cerca, X dá o pulinho para cima dela' % (PE_SITE - 0x08000000, o5.hex(), s5.hex()))
     print('    [0x%X, "%s", "%s"],   // o Pokémon que segue some na água enquanto o jogador está nas pedras' % (SEG_SITE - 0x08000000, o6.hex(), s6.hex()))
+    print('    [0x%X, "%s", "%s"],   // em cima da cerca/pedra anda por cima e só desce com X' % (COL_SITE - 0x08000000, o7.hex(), s7.hex()))
     print('    [0x%X, "%s"],   // Acro Bike sobe em pedras e cercas' % (CODE - 0x08000000, data.hex()))
