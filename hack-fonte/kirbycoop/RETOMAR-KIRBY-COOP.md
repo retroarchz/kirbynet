@@ -103,15 +103,17 @@ na fase, ou fazer o menu também pelo site.
 
 ## Pendente (nesta ordem sugerida)
 
-1. ~~Boca cheia e cuspir a estrela~~ FEITO (item 5 acima). Próximo: copiar habilidade (engolir inimigo com poder),
-   golpes da habilidade e soltar a habilidade (estrela de habilidade, OBJ_ABILITY_STAR) — a regra das teclas com 5
-   quadros deve cobrir os golpes; conferir.
-2. Kirbys do computador seguirem o P1 (hoje cada aparelho calcula os seus).
+(atualizado 02/11, 3ª conversa)
+1. Habilidades: ~~boca cheia/cuspir~~ FEITO; ~~soltar a habilidade e o amigo comer a estrela~~ FEITO (seção no fim).
+   FALTA: copiar habilidade engolindo inimigo com poder e os golpes de cada habilidade (fogo, espada...) aparecerem e
+   acertarem certo nas duas telas — a regra das teclas com 5 quadros deve cobrir; conferir uma por uma.
+2. Kirbys do computador seguirem o P1 (hoje cada aparelho calcula os seus: ficam em lugares diferentes em cada tela).
 3. Chefes (vida pelo aviso já deve funcionar; conferir barra de vida e fases).
-4. Portas/troca de sala/espelhos e Kirbys em salas diferentes.
-5. Comida sumida por aviso: conferir se volta a aparecer quando a tela rola (o molde do teste reaparecia nos dois).
-6. Entrar juntos no multiplayer pelo site; depois integrar (engine-worker/linkhle-like para o Kirby, rede pela
-   sala do site), log de atraso, e testar com o usuário (ele usa Firefox, abas no mesmo PC).
+4. Trocas de sala: ~~espelho/porta comum~~ FEITO. FALTA conferir estrela de warp, portas grandes, cair do mapa, espelho
+   do chefe, e os dois em salas diferentes por muito tempo.
+5. Comida sumida por aviso: conferir se volta a aparecer quando a tela rola.
+6. ~~Integrar no site~~ FEITO. FALTA: sair da fase / voltar ao menu depois da troca; 3-4 jogadores (não testado);
+   lentidão do P2 (o GBA dele ainda roda os dois; ver "LENTIDÃO" acima).
 
 ## Pokémon (mesma conversa, já publicado)
 
