@@ -250,3 +250,10 @@ botão "📋 Log do coop", Pokémon do meio alinhado, 3 contra 1 sem reiniciar. 
      uma sequência do chefe daqui; com a cópia do P1 por cima o Kirby ficava preso para sempre.
 - Resultado: luta de 8000 quadros, P1 tira 30 e P2 dá o golpe final: chefe some nas duas telas e os dois seguem;
   agarrões terminam; 0 travamentos; testes antigos iguais.
+
+## Próximo teste sugerido pelo usuário (02/11)
+
+- "Tem um portal do Dark Meta Knight aberto ali no começo: só entrar e batalhar com ele." Com os saves reais (sala 801,
+  a do espelho grande), achar esse portal e testar a luta nos mundos separados: Dark Meta Knight é tipo 0x4E (dentro da
+  faixa de chefes 0x38-0x52, então já vai pelo retrato de chefe). Conferir: posição igual nas duas telas, dano somado,
+  agarrões/golpes especiais dele, morte nas duas telas, troca de sala do portal (estados de porta).
