@@ -388,7 +388,7 @@ function renderGame(m, fresh) {
   $("btn-all").classList.toggle("hidden", m.mode === "local" || SYS.oneScreen || !!m.free);
   $("btn-ff").classList.toggle("hidden", m.mode !== "local");   // acelerar: só sozinho / "Mesmo PC"
   $("btn-ffx").classList.toggle("hidden", m.mode !== "local");
-  $("btn-cabolog").classList.toggle("hidden", !m.cabo);   // log de atraso do coop pelo cabo
+  $("btn-cabolog").classList.toggle("hidden", !m.cabo && !m.kc);   // log de atraso do coop pelo cabo
   updateTurboButton();
   $("desync").classList.toggle("hidden", m.desync == null);
   if (m.desync != null) $("desync").textContent = `⚠️ Os PCs dessincronizaram no frame ${m.desync}. Saiam e recomecem.`;
@@ -421,6 +421,7 @@ function showStatus(st) {
   if (Play.run && Play.run.cabo) t += Play.run.auto ? " · " + AutoCoop.texto(st.coop) : " · 🔗 cabo: " + (Play.run.names || []).map((n, i) => n != null ? `P${i + 1} ${n}` : null).filter(Boolean).join(", ");
   // rollback: quantas vezes no último segundo o jogo voltou para corrigir botões que chegaram atrasados
   if (st.rb && st.rb.count) t += ` · ↺ ${st.rb.count}`;
+  if (st.kc && Play.run) { KcLog.anota(st, Play.run); t += KcLog.curto(st); }   // Kirby: mundos separados
   if (st.waiting && st.waiting.length) {
     // a partir de 5 s mostra o tempo: aos 30 s a partida para com aviso (WAIT_MAX_MS)
     const s = Math.floor((st.waitMs || 0) / 1000);
@@ -558,7 +559,7 @@ const goFull = () => {
   (el.requestFullscreen || el.webkitRequestFullscreen || (() => {})).call(el);
 };
 $("btn-sound").onclick = () => Sound.toggle();
-$("btn-cabolog").onclick = (e) => { e.currentTarget.blur(); CaboLog.baixa(); };
+$("btn-cabolog").onclick = (e) => { e.currentTarget.blur(); if (Play.run && Play.run.kcOn) KcLog.baixa(); else CaboLog.baixa(); };
 $("btn-touch").onclick = () => toggleTouch();
 $("btn-full").onclick = goFull;
 $("btn-fit").onclick = () => Fit.cycle();

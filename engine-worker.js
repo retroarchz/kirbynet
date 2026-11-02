@@ -9,7 +9,7 @@ const V = (location.search.match(/[?&]v=(\w+)/) || [])[1] || "";   // mesma vers
 const NO_RB = /[?&]rb=0\b/.test(location.search);   // página aberta com ?semrollback
 // SNES: também o Mundo livre (fantasma dos outros e inimigos compartilhados, do snesnet v1.6)
 // GBA: o cabo link pela internet (linkhle.js) para o coop do Pokémon Quetzal
-importScripts(...(SNES ? ["sncore.js", "ghost-core.js", "objlayout.js", "coop-sync.js"] : ["kncore.js", "linkhle.js", "dianoite.js"]).map(f => f + "?v=" + V));
+importScripts(...(SNES ? ["sncore.js", "ghost-core.js", "objlayout.js", "coop-sync.js"] : ["kncore.js", "linkhle.js", "dianoite.js", "kirbycoop.js"]).map(f => f + "?v=" + V));
 const Core = SNES ? SnCore : KnCore;
 
 const W = Core.W, H = Core.H, FRAME_BYTES = W * H * 4;
@@ -235,6 +235,20 @@ function coopBefore(s, snaps) {
 
 function sendNet(kind, bytes) { postMessage({ t: "net", kind, bytes }, [bytes.buffer]); }
 
+// Kirby & The Amazing Mirror em sala (kirbycoop.js): o menu vai do jeito de sempre (todos os GBAs aqui, rollback).
+// Na fase, este aparelho passa a seguir só o próprio GBA ("mundos separados", sem esperar ninguém). Troca quando vê a
+// fase num quadro já confirmado (igual em todos) ou quando chega a 1ª mensagem de quem já trocou.
+function kcLiga() {
+  const m = run.s.ram(run.slot);
+  if (!m) return;   // memória do GBA ainda não achada: tenta no próximo quadro
+  run.kc = KirbyCoop.create({ m, me: run.slot, n: run.n, romWrite: (o, b) => run.s.romWrite(o, b),
+    send: (b, conf) => postMessage({ t: "kc", bytes: b, conf: !!conf }, [b.buffer]) });
+  run.kc.liga();
+  run.rb = null; run.waitSince = null; run.book.clear();
+  for (const b of run.kcEarly.splice(0)) run.kc.recv(b);
+  postMessage({ t: "kcOn", frame: run.frames });
+}
+
 // Acelerando, o som de TODOS os quadros da rodada é comprimido no tempo real que passou (como no mGBA e no
 // My Boy: a música fica mais rápida e mais aguda, na velocidade que o aparelho conseguiu de verdade).
 // Cada amostra de saída é a média do trecho que ela cobre (sem isso, comprimir 8x vira chiado).
@@ -283,7 +297,15 @@ function tick() {
     while (run.frames < due && ran < cap && (speed === 1 || ran === 0 || performance.now() < budget)) {
       const tf = performance.now();
       let spec = false;   // quadro rodado com botões supostos (ainda pode ser desfeito)
-      if (run.net) {
+      if (run.kcPossivel && !run.kc && (run.kcPede || (run.frames % 30 === 0 && (!run.rb || run.frames === run.confirmed)
+          && KirbyCoop.naFase(run.s.ram(run.slot))))) kcLiga();
+      if (run.kc) {   // mundos separados: só o meu GBA recebe botões; os dos outros chegam pelo kirbycoop
+        const k = new Array(run.n).fill(0);
+        k[run.slot] = keys[0] & 0x3FF;
+        run.kc.pre();
+        run.s.runFrame(k);
+        run.kc.post(k[run.slot]);
+      } else if (run.net) {
         const held = keys[0] | 0;
         while (run.sent <= run.frames + run.delay) {
           bookPut(run.slot, run.sent, held);
@@ -395,7 +417,7 @@ function tick() {
       // 1,5 ms por quadro (9% mais devagar) a reserva de som esvaziava e o som picotava (convidado).
       if (run.slew > 0) { const d = Math.min(run.slew, 0.1); run.t0 += d; run.slew -= d; }
       // conferência de sincronia entre os aparelhos: só de quadros com os botões de verdade de todos
-      if (run.net && !spec && run.frames % HASH_EVERY === 0) sendHash();
+      if (run.net && !run.kc && !spec && run.frames % HASH_EVERY === 0) sendHash();
     }
   } catch (err) {
     clearInterval(iv); iv = null;
@@ -427,7 +449,7 @@ function tick() {
     const load = run.busyN ? Math.round(run.busy / run.busyN / (1000 / FPS) * 100) : null;
     postMessage({ t: "status", fps: run.fpsN / ((now - run.fpsT) / 1000), frame: run.frames, waiting, waitMs,
                   delay: run.net ? run.delay : null, load, marg: run.marg, coop: run.hle ? run.hle.resumo : null,
-                  cabo: run.hle && run.hle.medidas ? run.hle.medidas() : null,
+                  cabo: run.hle && run.hle.medidas ? run.hle.medidas() : null, kc: run.kc ? run.kc.medidas() : null,
                   rb: run.rb ? { count: run.rb.count, resim: run.rb.resim, limit: predLimit() } : null });
     run.fpsT = now; run.fpsN = 0; run.busy = 0; run.busyN = 0; run.marg = {};
     if (run.rb) {
@@ -438,7 +460,7 @@ function tick() {
       run.rb.spare.length = Math.min(run.rb.spare.length, RB_MAX + 1);
     }
   }
-  if (run.net) autoDelay(now);
+  if (run.net && !run.kc) autoDelay(now);
   // save para guardar: só sem quadros supostos (um save "do futuro suposto" poderia estar errado)
   if (now - run.snapT >= SNAP_MS && (!run.rb || run.confirmed === run.frames)) snapshot();
 }
@@ -464,7 +486,10 @@ onmessage = async (ev) => {
               // GBA: cabo link pela internet (só nos jogos que o linkhle.js conhece)
               cabo: m.free && !SNES ? m.cabo || null : null, hle: null, caboEarly: [], caboAuto: !!m.auto, meNovo: null,
               especial: !m.net && !SNES && m.especial ? m.especial : 0,
-              rb: m.net && s.canSnapshot && !NO_RB ? { snaps: new Map(), spare: [], count: 0, resim: 0 } : null };
+              rb: m.net && s.canSnapshot && !NO_RB ? { snaps: new Map(), spare: [], count: 0, resim: 0 } : null,
+              // Kirby AM em sala: pode trocar para mundos separados na fase (kirbycoop.js)
+              kcPossivel: !!m.net && !SNES && m.n >= 2 && !!s.romWrite && typeof KirbyCoop !== "undefined" && KirbyCoop.supports(rom0),
+              kc: null, kcPede: false, kcEarly: [] };
       run.snapT = performance.now();
       try { run.snapSig = sigOf(grabSaves()); } catch (e) { run.snapSig = null; }
       if (run.net) for (let f = 0; f < run.delay; f++) run.book.set(f, new Array(run.n).fill(0));
@@ -476,7 +501,7 @@ onmessage = async (ev) => {
       postMessage({ t: "started" });
     } catch (err) { postMessage({ t: "err", msg: String(err && err.message || err) }); }
   }
-  else if (m.t === "input") { if (run) bookPut(m.slot, m.frame, m.keys); else (pending = pending || []).push([m.slot, m.frame, m.keys]); }
+  else if (m.t === "input") { if (run && run.kc) return; if (run) bookPut(m.slot, m.frame, m.keys); else (pending = pending || []).push([m.slot, m.frame, m.keys]); }
   else if (m.t === "keys") keys = m.keys;
   else if (m.t === "speed") {   // acelerar: só fora da rede (em sala, todos andam no mesmo passo)
     if (run && !run.net && m.speed !== (run.speed || 1)) {
@@ -530,6 +555,10 @@ onmessage = async (ev) => {
   else if (m.t === "caboLeft") { if (run && run.cabo) { if (run.hle) run.hle.left(m.from); else run.caboEarly.push({ left: m.from }); } }
   else if (m.t === "caboMe") { if (run && run.cabo) run.meNovo = m.me; }      // coop automático: vaga na sala nova
   else if (m.t === "caboFim") { if (run && run.hle) run.hle.soltaTodos(); }   // coop automático: a sala acabou
+  else if (m.t === "kc") {   // retrato/aviso de outro jogador (Kirby, mundos separados): quem ainda não trocou, troca já
+    if (run && run.kc) run.kc.recv(new Uint8Array(m.bytes));
+    else if (run && run.kcPossivel) { if (run.kcEarly.length < 600) run.kcEarly.push(new Uint8Array(m.bytes)); run.kcPede = true; }
+  }
   else if (m.t === "bufs") { for (const b of m.bufs) if (b.byteLength === FRAME_BYTES && pool.length < 48) pool.push(b); }
   else if (m.t === "vs") { if (run && iv) tick(); }   // a tela atualizou: roda o quadro que já está na hora
   else if (m.t === "aport") audioPort = m.port;

@@ -118,3 +118,26 @@ na fase, ou fazer o menu também pelo site.
 Commit e9ce96c (02/11): cabo do Quetzal sem atraso acumulado (fila do jogo <= 2, BEBE velhos descartados),
 botão "📋 Log do coop", Pokémon do meio alinhado, 3 contra 1 sem reiniciar. Detalhes em
 `memory/atraso-tela-coop3.md`. O usuário testou e aprovou ("melhorou muito").
+
+## Integração no site (FEITA 02/11, 2ª conversa) — esperando o teste do usuário no Firefox
+
+- `kirbycoop.js` (raiz do site) = a lógica do inimigo.js organizada: `naFase`, `create({m, me, n, romWrite, send})` com
+  `liga/pre/post/recv/medidas`. Patches embutidos por `hack-fonte/kirbycoop/embute.py` (RODAR depois de mudar cabo.py
+  ou fantasma.py).
+- Fluxo: sala normal (todos os GBAs, rollback) no menu. No engine-worker, `kcPossivel` (ROM B8KE, sala, n >= 2); a cada
+  30 quadros confirmados confere `naFase` (multi=1, D+4 bit 8, sala do P1 != 0, quadro do multi >= 120) e chama
+  `kcLiga`: aplica patches, desliga rollback/lockstep/hash/atraso automático, só o meu GBA recebe botões (os outros
+  GBAs do motor viram enfeite e mostram "Communication Error", ninguém vê). Quem recebe a 1ª mensagem "kc" troca na
+  hora (ninguém fica esperando botões).
+- Rede: mensagem "M" da sala (host repassa em sitenet.js) e canal rápido tag 77. Retrato pelo canal rápido; avisos
+  de inimigo (confiáveis) sempre pela sala. Página: game.js `net.kc`, `onKc`, `kcOn` (toast, ignora "D" dessincronia).
+- Log: `KcLog` (sitenet.js), botão "📋 Log do coop": por segundo, retratos/s de cada um (normal 60), pulados, estado
+  [stateFn, anim, x, teclas] de cada Kirby na MINHA tela, sala de cada um, avisos.
+- Testes: `teste/modulo.js` (fluxo do site no Node: menu em lockstep, troca, cenários BATE/GOLPE, SUGA/CUSPE, MISTURA,
+  ATRASO/VAR/ATRASO_B). E2E com 2 Chromes: scratchpad 70b25a82…/e2e/kirby_sala.js usando o helper e2e.js e o
+  servidor https de scratchpad e3b5f5db…/web (node server.js 8443). Resultado: troca nos dois, 60 fps, 60 retratos/s,
+  estados iguais nos dois aparelhos.
+- NÃO é defeito: o "cone" colorido na borda da tela é a seta do jogo apontando amigo fora da tela.
+- Limitações conhecidas (não feitas): sair da fase / voltar ao menu depois da troca (cabo trocado: deve dar erro de
+  comunicação), Kirbys do computador diferentes em cada tela, portas/salas diferentes, habilidades, chefes, 3-4 jogadores
+  (código genérico, não testado).

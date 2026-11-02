@@ -280,6 +280,41 @@ const CaboLog = {
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   },
 };
+// Log do Kirby em mundos separados (kirbycoop.js): uma linha por segundo com quantos retratos de cada um chegaram
+// (o normal é ~60), quantos foram pulados por chegarem juntos, avisos de inimigo mandados/recebidos e a sala de cada
+// Kirby na MINHA tela. Mesmo botão "📋 Log do coop". No console: KcLog.texto().
+const KcLog = {
+  linhas: [],
+  liga(run, frame) { this.linhas.push(`${CaboLog.hora()} === mundos separados ligados no quadro ${frame} (eu sou P${(run.slot | 0) + 1})`); },
+  anota(st, run) {
+    const k = st.kc, net = run && run.net;
+    if (!k) return;
+    const q = (net && net.q) || {};
+    const partes = Object.entries(k.peers).map(([s, p]) => {
+      const pq = q[s] || {};
+      return `${CaboLog.nome(run, s)}: ${p.chegou} retratos/s` + (p.chegou < 50 ? " ⚠️" : "") + (p.pulos ? `, ${p.pulos} pulados` : "") +
+             `, fila ${p.fila}, ping ${pq.med ?? "?"}/${pq.max ?? "?"} ms` + (pq.via ? " " + pq.via : "");
+    });
+    this.linhas.push(`${CaboLog.hora()} ${st.fps.toFixed(1)} fps` + (st.fps < 55 ? " ⚠️ jogo lento" : "") +
+                     ` · kirbys ${JSON.stringify(k.kirbys)} · eu=P${k.local + 1} x=${k.x} band=${(k.bandeiras >>> 0).toString(16)} · salas ${k.salas.map((r, i) => "P" + (i + 1) + "=" + r).join(" ")}` +
+                     (k.avisosM || k.avisosR ? ` · avisos de inimigo: mandei ${k.avisosM}, recebi ${k.avisosR}` : "") +
+                     (k.estrelas ? ` · ${k.estrelas} estrela(s) criada(s) pela rede de segurança` : "") + " | " + partes.join(" | "));
+    if (this.linhas.length > 3600) this.linhas.splice(0, this.linhas.length - 3600);
+  },
+  curto(st) {
+    const k = st.kc; if (!k) return "";
+    const ruim = Object.values(k.peers).some(p => p.chegou < 50);
+    return " · 🌍 mundos separados" + (ruim ? " ⚠️ retratos faltando" : "");
+  },
+  texto() { return "Log do Kirby (mundos separados) — " + new Date().toLocaleString("pt-BR") + "\n\n" + this.linhas.join("\n") + "\n"; },
+  baixa() {
+    const url = URL.createObjectURL(new Blob([this.texto()], { type: "text/plain" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = "log-kirby-" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-") + ".txt";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  },
+};
 const SALA_FECHOU = "A sala fechou.", AUTO_SEM_RESPOSTA = 6000;
 function autoCoopServe(sha1) {
   return typeof SITE !== "undefined" && SITE && typeof Peer !== "undefined" && SYS.id === "gba" && typeof LinkHLE !== "undefined" && LinkHLE.supports(sha1);
@@ -515,6 +550,7 @@ const SiteRoom = {
         this.lobby();
       }
     } else if (kind === "I" && this.running) this.broadcast("I", data, c);
+    else if (kind === "M" && this.running) this.broadcast("M", data, c);   // Kirby, mundos separados (kirbycoop.js)
     // Mundo livre: fantasma (G), desenho dele (F), abates (K), inimigos (O), golpes (A) e o cabo link (C) vão para os outros
     else if ("GFKOAC".includes(kind) && this.running && this.free) this.broadcast(kind, data, c);
     else if (kind === "P") c.send("P", data);

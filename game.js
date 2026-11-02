@@ -474,6 +474,9 @@ function netJoin(url, hello, cb) {
     net.send("G", body);
   };
   // inimigos dos quais eu sou o dono: pelo canal rápido (todo quadro), pela sala 1 em cada 2 se falta canal
+  // Kirby (mundos separados): retrato do meu Kirby a cada quadro pelo canal rápido (perder um não faz mal); avisos de
+  // inimigo (conf) e quem ainda não tem canal com todos: pela sala, que entrega tudo e em ordem
+  net.kc = (body, conf) => { if (!conf && fast(77, body)) return; net.send("M", body); };
   let objN = 0;
   net.objs = (body) => {
     if (fast(79, body) ? ++objN % 30 : ++objN % 2) return;
@@ -521,6 +524,8 @@ function netJoin(url, hello, cb) {
     } else if (u8[0] === 71) {   // "G": fantasma de outro jogador (Mundo livre)
       dcAt[71][from] = performance.now();
       if (net.onGhost) net.onGhost(u8.subarray(1));
+    } else if (u8[0] === 77) {   // "M": Kirby de outro jogador (mundos separados)
+      if (net.onKc) net.onKc(u8.subarray(1));
     } else if (u8[0] === 80) {   // "P": ping -> devolve como "p"
       const b = u8.slice(); b[0] = 112;
       const p = net.peers[from];
@@ -659,6 +664,7 @@ function netJoin(url, hello, cb) {
     else if (kind === "K") { if (net.onKill) try { net.onKill(json(data)); } catch (e) {} }
     else if (kind === "O") { if (net.onObjSnap && !dcFresh(79, data[0])) net.onObjSnap(data); }
     else if (kind === "C") { if (net.onCabo) net.onCabo(data); }   // cabo link pela internet (GBA)
+    else if (kind === "M") { if (net.onKc) net.onKc(data); }   // Kirby, mundos separados (kirbycoop.js)
     else if (kind === "A") { if (net.onHit) net.onHit(data); }
     else if (kind === "I") {
       // sempre entrega (mesmo se o canal rápido já trouxe): é a reserva para quando ele perde vários
@@ -675,7 +681,7 @@ function netJoin(url, hello, cb) {
       const mine = q.slot !== net.slot && q.marg && q.marg[net.slot];
       if (mine && net.onMarg) net.onMarg({ ...mine, from: q.slot, delay: q.delay });
     }
-    else if (kind === "D") { if (Play.run) { Play.run.desync = dv.getUint32(0, true); S.desync = Play.run.desync; renderGame(S, false); } }
+    else if (kind === "D") { if (Play.run && !Play.run.kcOn) { Play.run.desync = dv.getUint32(0, true); S.desync = Play.run.desync; renderGame(S, false); } }
     else if (kind === "E") { net.gotError = true; cb.onError(json(data).msg); net.close(); }
   };
   ws.onclose = (ev) => {
@@ -751,6 +757,7 @@ function startRun(opts) {
   if (run.net && !run.free) {
     run.net.sink = (slot, frame, keys) => worker.postMessage({ t: "input", slot, frame, keys });
     run.net.onMarg = (r) => worker.postMessage({ t: "pm", ...r });
+    run.net.onKc = (u8) => { const b = u8.slice(); worker.postMessage({ t: "kc", bytes: b.buffer }, [b.buffer]); };
     for (const it of run.net.early) run.net.sink(...it);
     run.net.early = [];
   }
@@ -1459,6 +1466,11 @@ function onWorker(run, m) {
     drawDue(run, performance.now() + run.vsync * 0.5);   // já pronto? desenha agora (entra no próximo vsync)
   }
   else if (m.t === "net") { if (run.net) run.net.send(m.kind, m.bytes); }
+  else if (m.t === "kc") { if (run.net && run.net.kc) run.net.kc(new Uint8Array(m.bytes), m.conf); }   // Kirby, mundos separados
+  else if (m.t === "kcOn") {
+    run.kcOn = true; run.desync = null; S.desync = null; S.kc = true; KcLog.liga(run, m.frame);
+    if (Play.run === run) { renderGame(S, false); toast("🌍 Mundos separados: cada um roda o próprio GBA, sem esperar ninguém."); }
+  }
   else if (m.t === "cabo") { const n = run.net || run.link; if (n) n.send("C", new Uint8Array(m.bytes)); }   // cabo pela internet
   // Mundo livre: inimigos dos quais sou dono, golpes nos dos outros, abates e o desenho do meu boneco
   else if (m.t === "osnap") { if (run.net && run.net.objs) run.net.objs(new Uint8Array(m.bytes)); }
