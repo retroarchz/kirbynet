@@ -227,4 +227,4 @@ botão "📋 Log do coop", Pokémon do meio alinhado, 3 contra 1 sem reiniciar. 
   com o Kirby certo.
 - Resultado: CPU a 2,6 px (90% 5,3), sala diferente 0,1% (só o instante da porta); com atraso 3 + variação 4: 3,9 px;
   atraso 10 + variação 6: 13,5 px (humanos 14,1). Testes antigos iguais.
-- Custo: ~1,4 KB por Kirby do computador por quadro saindo do P1 (canal rápido, pode se perder).
+- Custo: 676 bytes por Kirby do computador por quadro saindo do P1 (~40 KB/s cada; canal rápido, pode se perder).
