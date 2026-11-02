@@ -107,7 +107,7 @@ na fase, ou fazer o menu também pelo site.
 1. Habilidades: ~~boca cheia/cuspir~~ FEITO; ~~soltar a habilidade e o amigo comer a estrela~~ FEITO (seção no fim).
    FALTA: copiar habilidade engolindo inimigo com poder e os golpes de cada habilidade (fogo, espada...) aparecerem e
    acertarem certo nas duas telas — a regra das teclas com 5 quadros deve cobrir; conferir uma por uma.
-2. Kirbys do computador seguirem o P1 (hoje cada aparelho calcula os seus: ficam em lugares diferentes em cada tela).
+2. ~~Kirbys do computador seguirem o P1~~ FEITO (seção no fim).
 3. Chefes (vida pelo aviso já deve funcionar; conferir barra de vida e fases).
 4. Trocas de sala: ~~espelho/porta comum~~ FEITO. FALTA conferir estrela de warp, portas grandes, cair do mapa, espelho
    do chefe, e os dois em salas diferentes por muito tempo.
@@ -214,3 +214,17 @@ botão "📋 Log do coop", Pokémon do meio alinhado, 3 contra 1 sem reiniciar. 
   isso é avisado ao P2 — certo, mas é o item 2 (Kirbys do computador diferentes em cada tela).
 - Não testado ainda: copiar habilidade engolindo um inimigo com poder (deve funcionar: engolir já funciona e a
   habilidade vem pelo espelho), chefes com habilidade.
+
+## Kirbys do computador seguem o P1 (FEITO 02/11, 3ª conversa)
+
+- Antes (teste/cpu.js: saves reais, sala 801, P1 e P2 fazendo de tudo 1 min): CPU a 62,6 px de uma tela para a outra
+  (90% 181), 36% do tempo em salas diferentes; às vezes um CPU matava um inimigo só no mundo de um.
+- Agora: o P1 manda por quadro, para cada Kirby do computador (ids gNumHumanPlayers..gNumKirbys-1, gNumKirbys em
+  0x0203AD44), a mensagem tipo 3 {seq, id, Kirby 0x1A8, cérebro gUnk_02038590[id] 0xF4 bytes}. Quem não é o P1 aplica
+  com a mesma fila curta e a mesma proteção de porta dos humanos: espelho do Kirby + cópia do cérebro (menos os
+  ponteiros para objetos: +0x48 e os +4 de cada unk4C[k]). O cérebro daqui continua de onde o do P1 parou.
+- Aviso de inimigo agora diz QUEM bateu: o Kirby em +0x6C do inimigo (pode ser um do computador); quem recebe puxa/derrota
+  com o Kirby certo.
+- Resultado: CPU a 2,6 px (90% 5,3), sala diferente 0,1% (só o instante da porta); com atraso 3 + variação 4: 3,9 px;
+  atraso 10 + variação 6: 13,5 px (humanos 14,1). Testes antigos iguais.
+- Custo: ~1,4 KB por Kirby do computador por quadro saindo do P1 (canal rápido, pode se perder).

@@ -14,6 +14,10 @@
   const D = 0x020382D0, RECV = 0x03002490, BLK = 0x14, SIOFLAGS = 0x03002554, MULTI = 0x03002558;
   const KIRBYS = 0x02020EE0, KSZ = 0x1A8, TASKS = 0x030019F0;
   const LAG = 5, MAXFILA = 2, ESTRELA = 0x080725E0, ESTRELA_MAIN = 0x080728B1;
+  // Kirbys do computador (ids gNumHumanPlayers..gNumKirbys-1) são do P1: o aparelho dele manda o Kirby e o "cérebro"
+  // (gUnk_02038590[id], 0xF4 bytes: estado da IA que decide os botões dele); os outros copiam os dois
+  const NKIRBYS = 0x0203AD44, IA = 0x02038590, IASZ = 0xF4;
+  const ia = (i) => IA + i * IASZ;
   const PORTA = new Set([0x08055C15, 0x08055D9D]);   // estados do Kirby entrando numa porta (sub_08055C14, sub_08055D9C)
   // gerado por hack-fonte/kirbycoop/embute.py a partir de cabo.json e fantasma.json (não editar à mão)
   const P = /*PATCHES*/{"golpes":33813504,"caixa":33814656,"bandeiras":33814720,"max":8,"chamadas":33814736,"maxch":4,"patches":[[16253440,[240,181,30,72,30,73,1,128,30,76,37,120,8,45,0,217,8,37,0,32,32,112,0,38,174,66,20,210,176,0,0,25,71,104,0,47,13,208,56,120,1,40,10,209,0,32,128,33,120,82,240,1,20,73,64,24,248,102,56,28,19,75,0,240,27,248,1,54,232,231,18,76,37,120,4,45,0,217,4,37,0,32,32,112,0,38,174,66,9,210,240,0,0,25,67,104,128,104,0,43,1,208,0,240,7,248,1,54,243,231,9,72,0,104,240,188,2,188,8,71,24,71,192,70,52,1,0,4,0,128,0,0,128,248,3,2,0,244,3,2,229,177,9,8,208,248,3,2,192,248,3,2]],[1405704,[0,75,24,71,1,2,248,8]]],"fantasma":[[16252928,[0,40,37,208,1,120,0,41,20,208,130,33,65,92,163,41,30,208,164,41,28,208,3,34,0,111,0,40,24,208,1,14,2,41,21,211,3,41,19,216,1,120,0,41,2,208,1,58,242,209,13,224,86,33,65,92,6,74,18,120,145,66,7,208,0,42,3,209,4,74,18,120,145,66,1,210,1,32,112,71,0,32,112,71,60,173,3,2,48,173,3,2,30,181,12,28,255,247,206,255,0,40,2,209,32,28,255,247,201,255,30,188,8,188,24,71,8,188,7,181,255,247,240,255,0,40,7,188,156,70,8,188,158,70,99,70,1,208,0,32,112,71,240,181,7,28,13,28,174,104,128,33,137,0,1,180,1,72,132,70,1,188,96,71,241,100,3,8,8,188,7,181,255,247,214,255,0,40,7,188,156,70,8,188,158,70,99,70,1,208,0,32,112,71,240,181,79,70,70,70,192,180,7,28,13,28,1,180,1,72,132,70,1,188,96,71,213,101,3,8,8,188,7,181,255,247,188,255,0,40,7,188,156,70,8,188,158,70,99,70,1,208,0,32,112,71,240,181,71,70,128,180,4,28,15,28,32,120,1,180,1,72,132,70,1,188,96,71,169,105,3,8]],[222436,[8,180,1,75,24,71,192,70,117,0,248,8]],[222664,[8,180,1,75,24,71,192,70,169,0,248,8]],[223644,[8,180,1,75,24,71,192,70,221,0,248,8]]]}/*FIM*/;
@@ -87,6 +91,20 @@
     for (let j = 0; j < KSZ; j++) b[8 + j] = m.r8(kb + j);
     return b;
   }
+  // retrato de um Kirby do computador: {seq, id, Kirby, cérebro}
+  function encCpu(me, seq, id, m) {
+    const b = new Uint8Array(8 + KSZ + IASZ), dv = new DataView(b.buffer);
+    b[0] = 3; b[1] = me; dv.setUint32(2, seq, true); b[6] = id;
+    const kb = kirby(id), a = ia(id);
+    for (let j = 0; j < KSZ; j++) b[8 + j] = m.r8(kb + j);
+    for (let j = 0; j < IASZ; j++) b[8 + KSZ + j] = m.r8(a + j);
+    return b;
+  }
+  // o cérebro copiado, menos os ponteiros para objetos (o mesmo inimigo pode estar em outro endereço aqui)
+  function copiaIA(m, id, c) {
+    const a = ia(id), fora = (j) => (j >= 0x48 && j < 0x4C) || (j >= 0x4C && j < 0x7C && ((j - 0x4C) % 0xC) >= 4 && ((j - 0x4C) % 0xC) < 8);
+    for (let j = 0; j < IASZ; j++) if (!fora(j)) m.w8(a + j, c[j]);
+  }
   function encEv(me, id, ev) {
     const b = new Uint8Array(14), dv = new DataView(b.buffer);
     b[0] = 1; b[1] = me; dv.setUint32(2, id, true); dv.setUint32(6, ev.tpl, true); dv.setInt16(10, ev.hp, true); b[12] = ev.atk; b[13] = ev.eng ? 1 : 0;
@@ -97,6 +115,7 @@
     if (!b || b.length < 2) return null;
     const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
     if (b[0] === 0 && b.length >= 8 + KSZ) return { t: 0, from: b[1], seq: dv.getUint32(2, true), k: dv.getUint16(6, true), kb: b.slice(8, 8 + KSZ) };
+    if (b[0] === 3 && b.length >= 8 + KSZ + IASZ) return { t: 3, from: b[1], seq: dv.getUint32(2, true), id: b[6], kb: b.slice(8, 8 + KSZ), ia: b.slice(8 + KSZ, 8 + KSZ + IASZ) };
     if (b[0] === 2 && b.length >= 7) return { t: 2, from: b[1], id: dv.getUint32(2, true), dono: b[6] };
     if (b[0] === 1 && b.length >= 14) return { t: 1, from: b[1], id: dv.getUint32(2, true), tpl: dv.getUint32(6, true), hp: dv.getInt16(10, true), atk: b[12], eng: !!b[13] };
     return null;
@@ -108,11 +127,12 @@
     const { m, me, n, romWrite, send } = o;
     const peer = [];
     for (let i = 0; i < n; i++) peer.push({ fila: [], soube: null, ultimo: -1, visto: null, vistoSeq: -9, chegou: 0, pulos: 0 });
+    const cpu = [0, 1, 2, 3].map(() => ({ fila: [], ultimo: -1 }));   // retratos dos Kirbys do computador (só quem não é o P1)
     const hist = [], ant = new Map(), porAviso = new Set(), eventos = [], vistos = new Set();
     let estAnt = new Map();   // estrelas de habilidade vistas no fim do quadro anterior (struct -> quem soltou)
     const estApagadas = new Set();   // apagadas por aviso: não reavisar
     let q = 0, evId = 0, puxa = [];
-    const est = { mandados: 0, recebidos: 0, avisosM: 0, avisosR: 0, estrelas: 0, pulos: 0, teclas: 0, portas: 0 };
+    const est = { mandados: 0, recebidos: 0, avisosM: 0, avisosR: 0, estrelas: 0, pulos: 0, teclas: 0, portas: 0, cpu: 0 };
 
     function liga() {
       for (const [off, bytes] of P.patches) romWrite(off, new Uint8Array(bytes));
@@ -139,6 +159,14 @@
     function recv(bytes) {
       const d = decode(bytes);
       if (!d || d.from === me || d.from >= n) return;
+      if (d.t === 3) {   // Kirby do computador (vem do P1)
+        if (me === 0 || d.from !== 0 || d.id < n || d.id > 3) return;
+        const c = cpu[d.id];
+        if (d.seq <= c.ultimo || c.fila.some(x => x.seq === d.seq)) return;
+        c.fila.push(d); c.fila.sort((a, b) => a.seq - b.seq);
+        if (c.fila.length > 60) c.fila.splice(0, c.fila.length - 60);
+        return;
+      }
       const p = peer[d.from];
       if (d.t === 0) {
         if (d.seq <= p.ultimo || p.fila.some(x => x.seq === d.seq)) return;   // velho ou repetido (veio pelos dois canais)
@@ -208,6 +236,16 @@
         const k = p.soube ? p.soube.k : 0;
         pacote(k, quadro, u6).forEach((x, j) => m.w16(RECV + i * BLK + 2 * j, x));
       }
+      // Kirbys do computador: o retrato e o cérebro do P1 (o cérebro daqui continua de onde o dele parou)
+      if (me !== 0) for (let id = n; id < Math.min(4, m.r8(NKIRBYS)); id++) {
+        const c = cpu[id];
+        if (!c.fila.length) continue;
+        while (c.fila.length > MAXFILA) c.fila.shift();
+        const d = c.fila.shift(); c.ultimo = d.seq;
+        const kb = kirby(id), stB = (d.kb[0x78] | d.kb[0x79] << 8 | d.kb[0x7A] << 16 | d.kb[0x7B] << 24) >>> 0;
+        if (PORTA.has(m.r32(kb + 0x78)) || PORTA.has(stB)) { est.portas++; continue; }
+        espelho(m, kb, d.kb); copiaIA(m, id, d.ia); est.cpu++;
+      }
     }
     // depois de cada quadro: meu retrato e os inimigos que eu acertei
     function post(minhas) {
@@ -215,12 +253,14 @@
       if (hist[q]) est.teclas++;   // quadros em que o meu GBA recebeu algum botão (para o log)
       delete hist[q - 16];
       send(encSnap(me, q, hist[q + 1 - LAG] || 0, m), false);
+      if (me === 0) for (let id = n; id < Math.min(4, m.r8(NKIRBYS)); id++) send(encCpu(me, q, id, m), false);
       est.mandados++;
       const agora = objs(m);
       for (const [s, ob] of agora) {
         const a0 = ant.get(s);
         if (a0 && a0.tpl === ob.tpl && ob.hp < a0.hp && a0.hp > 0 && !porAviso.has(s)) {
-          send(encEv(me, ++evId, { tpl: ob.tpl, hp: ob.hp, atk: me, eng: ob.hp <= 0 && !!(ob.fl & 0x40000) && !(ob.fl & 0x01000000) }), true);
+          const h = m.r32(s + 0x6C), quem = h >= KIRBYS && h < KIRBYS + 4 * KSZ && (h - KIRBYS) % KSZ === 0 ? (h - KIRBYS) / KSZ : me;
+          send(encEv(me, ++evId, { tpl: ob.tpl, hp: ob.hp, atk: quem, eng: ob.hp <= 0 && !!(ob.fl & 0x40000) && !(ob.fl & 0x01000000) }), true);
           est.avisosM++;
         }
       }
