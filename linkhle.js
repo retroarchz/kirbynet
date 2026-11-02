@@ -67,7 +67,7 @@ const LinkHLE = (() => {
   const AUTO = { cb1: 0x03002660, cb2: 0x03002664, field: 0x080C2965, over: 0x080C28E1, coop: 0x080C5761,
                  tasks: 0x03005640, objetos: 0x02038D10, lock: 0x03000FDC, ctx: 0x03000EE8, ctxLivre: 2, fade: 0x02039AC3, avatar: 0x02039070,
                  linkType: 0x020229C6, tipo: 2, abre: 0x0825FD45, passo: 0x0825FD8D, mestre: 0x0825FEB1, escravo: 0x0825FFA1 };
-  const AUTO_B = 2, AUTO_AVISO = 30, AUTO_VALE = 1500, AUTO_PEDIDO = 4000, AUTO_LIMITE = 8000, AUTO_FORA = 30000, AUTO_REVE = 1500, AUTO_CALMA = 1000, AUTO_ASSENTA = 30, AUTO_CAPACETE = 120, MOTO_DONO = 10657;
+  const AUTO_B = 2, AUTO_AVISO = 30, AUTO_VALE = 1500, AUTO_PEDIDO = 4000, AUTO_LIMITE = 8000, AUTO_FORA = 30000, AUTO_REVE = 1500, AUTO_CALMA = 1000, AUTO_ASSENTA = 30, AUTO_CAPACETE = 120, AUTO_LIMITE_NIVEL = 3000, MOTO_DONO = 10657;
 
   const DEAD_MS = 15000;   // ligado comigo e sem dar notícia há tanto tempo: caiu (o jogo recebe o "desconectar")
 
@@ -91,7 +91,7 @@ const LinkHLE = (() => {
     // mestre: vaga que comanda o cabo (muda numa dupla sem o host). semHost: a dupla segue sozinha e o automático religa todos
     // depois. Vale para toda dupla do coop automático: quem ficava no cabo antigo durante a luta voltava ouvindo os outros, mas
     // o jogo dele quase não transmitia mais (os outros o viam parado)
-    let mestre = 0, semHost = false, zArmado = false, zAntes = false;
+    let mestre = 0, semHost = false, zArmado = false, zAntes = false, liberar = null;
     // quem voltou de uma dupla sem mim: ao reabrir o cabo o mestre pede os dados de cada jogador
     // (LINKCMD_SEND_LINK_TYPE 0x2222, com o tipo de cabo). O meu jogo, no mapa, responde com o gLinkType
     // dele, que não é o do pedido: antes de o jogo ver o pedido, o gLinkType vira o pedido.
@@ -327,13 +327,26 @@ const LinkHLE = (() => {
       ask = { t: 2, ids: list, ok: new Set([me]), at: now() };
       send({ k: "ask", t: 2, ids: list });
     }
+    // 0x030045A0[i] é o limite de nível do jogador i (0 = ainda não chegou), e a batalha coop nivela todos pelo menor deles
+    // (0x08261A90). Quem falou por último com o treinador manda o dele junto com a largada: começar antes de chegar zerava o
+    // nível de todos os Pokémon de quem já esperava. A largada espera o limite de todos; se não vier, usa o meu no lugar.
+    function liberaQuandoPronto() {
+      if (!liberar) return;
+      if (!waiting()) { liberar = null; return; }
+      const n = cur().length, eu = cur().indexOf(me), falta = [];
+      for (let i = 0; i < n; i++) if (!ram.r8(C.waitArr + i)) falta.push(i);
+      if (falta.length && now() - liberar.t < AUTO_LIMITE_NIVEL) return;
+      for (const i of falta) ram.w8(C.waitArr + i, ram.r8(C.waitArr + eu));
+      ram.w8(C.mail + 1, 1);
+      liberar = null;
+    }
     function release(list, t) {
       if (t === 2) {
         if (duo) return;   // os dois apertaram Z ao mesmo tempo
         ask = null; duo = list.slice(); duoBattle = false; mestre = list[0]; semHost = auto || !list.includes(ids[0]);
         duoSaved(list); enterSub(list);
       }
-      ram.w8(C.mail + 1, 1);
+      liberar = { t: now() };
     }
 
     return {
@@ -439,8 +452,9 @@ const LinkHLE = (() => {
         }
         if (C && st === ST_CONN && ids) {
           zNaEspera();
+          liberaQuandoPronto();
           // a ROM gasta a liberação de uma vez; se a tabela do parceiro ainda não chegou, ela se perderia e ele ficaria na espera
-          if (duo && sub && waiting()) ram.w8(C.mail + 1, 1);
+          if (!liberar && duo && sub && waiting()) ram.w8(C.mail + 1, 1);
           const req = ram.r8(C.mail);
           if (req) {
             ram.w8(C.mail, 0);

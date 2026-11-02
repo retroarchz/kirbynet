@@ -13,6 +13,8 @@ module.exports = (W) => {
   W.play([[600]]); resumo('equipe'); W.shot('z-equipe.png');
   for (const i of par) { const f = require(Q + '/escolhe3.js')(W, i); W.play([...f('A'), [200]]); }
   resumo('equipes escolhidas');
+  W.players.forEach((p, i) => { const m = p.g.ram(0), n = []; for (let s = 0; s < 6; s++) n.push(m.r8(0x020235CC + s * 0x68 + 0x58)); console.log('NIVEIS', 'P' + (i + 1), n.join(',')); });
+  par.sort((x, y) => x - y);   // botões da batalha: a posição é a da ordem do cabo, não a de quem falou primeiro
   W.fotoN = 0; let viu = false; const turno = [0, 0], noMenu = [false, false];
   const tecla = (p, j, k) => {
     const m = p.g.ram(0), c = 2 * j, ctrl = m.r32(0x0203FA00 + 4 * c);
