@@ -18,6 +18,9 @@
   // (gUnk_02038590[id], 0xF4 bytes: estado da IA que decide os botões dele); os outros copiam os dois
   const NKIRBYS = 0x0203AD44, IA = 0x02038590, IASZ = 0xF4;
   const ia = (i) => IA + i * IASZ;
+  // chefes e mini-chefes (tipos 0x38-0x52) também são do P1: ele manda o objeto inteiro (0xB4 bytes) a cada quadro
+  const AGARRADO = 0x0804E60D;   // estado do Kirby preso por um inimigo (sub_0804E60C)
+  const OSZ = 0xB4, eChefe = (tipo) => tipo >= 0x38 && tipo <= 0x52;
   const PORTA = new Set([0x08055C15, 0x08055D9D]);   // estados do Kirby entrando numa porta (sub_08055C14, sub_08055D9C)
   // gerado por hack-fonte/kirbycoop/embute.py a partir de cabo.json e fantasma.json (não editar à mão)
   const P = /*PATCHES*/{"golpes":33813504,"caixa":33814656,"bandeiras":33814720,"max":8,"chamadas":33814736,"maxch":4,"patches":[[16253440,[240,181,30,72,30,73,1,128,30,76,37,120,8,45,0,217,8,37,0,32,32,112,0,38,174,66,20,210,176,0,0,25,71,104,0,47,13,208,56,120,1,40,10,209,0,32,128,33,120,82,240,1,20,73,64,24,248,102,56,28,19,75,0,240,27,248,1,54,232,231,18,76,37,120,4,45,0,217,4,37,0,32,32,112,0,38,174,66,9,210,240,0,0,25,67,104,128,104,0,43,1,208,0,240,7,248,1,54,243,231,9,72,0,104,240,188,2,188,8,71,24,71,192,70,52,1,0,4,0,128,0,0,128,248,3,2,0,244,3,2,229,177,9,8,208,248,3,2,192,248,3,2]],[1405704,[0,75,24,71,1,2,248,8]]],"fantasma":[[16252928,[0,40,37,208,1,120,0,41,20,208,130,33,65,92,163,41,30,208,164,41,28,208,3,34,0,111,0,40,24,208,1,14,2,41,21,211,3,41,19,216,1,120,0,41,2,208,1,58,242,209,13,224,86,33,65,92,6,74,18,120,145,66,7,208,0,42,3,209,4,74,18,120,145,66,1,210,1,32,112,71,0,32,112,71,60,173,3,2,48,173,3,2,30,181,12,28,255,247,206,255,0,40,2,209,32,28,255,247,201,255,30,188,8,188,24,71,8,188,7,181,255,247,240,255,0,40,7,188,156,70,8,188,158,70,99,70,1,208,0,32,112,71,240,181,7,28,13,28,174,104,128,33,137,0,1,180,1,72,132,70,1,188,96,71,241,100,3,8,8,188,7,181,255,247,214,255,0,40,7,188,156,70,8,188,158,70,99,70,1,208,0,32,112,71,240,181,79,70,70,70,192,180,7,28,13,28,1,180,1,72,132,70,1,188,96,71,213,101,3,8,8,188,7,181,255,247,188,255,0,40,7,188,156,70,8,188,158,70,99,70,1,208,0,32,112,71,240,181,71,70,128,180,4,28,15,28,32,120,1,180,1,72,132,70,1,188,96,71,169,105,3,8]],[222436,[8,180,1,75,24,71,192,70,117,0,248,8]],[222664,[8,180,1,75,24,71,192,70,169,0,248,8]],[223644,[8,180,1,75,24,71,192,70,221,0,248,8]]]}/*FIM*/;
@@ -84,21 +87,56 @@
   }
 
   // mensagens: 0 = retrato {seq, teclas do próximo quadro, Kirby}; 1 = aviso de inimigo
+  // +0x6C do Kirby: quem está mexendo com ele (ex. o inimigo que o agarrou, sub_0804E60C). O ponteiro é deste aparelho;
+  // vai como [1, endereço] se for um Kirby (igual em todos), [2, molde] se for um objeto, [3, 0] se não dá para achar
+  function ref6C(m, kb) {
+    const p = m.r32(kb + 0x6C);
+    if (!p) return [0, 0];
+    if (p >= KIRBYS && p < KIRBYS + 4 * KSZ) return [1, p];
+    if (p >= 0x02000000 && p < 0x04000000 && m.r8(p) === 1) { const tpl = m.r32(p + 0xB0); if (tpl >= 0x08000000 && tpl < 0x0A000000) return [2, tpl]; }
+    return [3, 0];
+  }
+  // aponta o +0x6C para o equivalente daqui (sem equivalente: 0, e o jogo solta o Kirby em vez de ler lixo e travar)
+  function poe6C(m, kb, r) {
+    let v = 0;
+    if (r[0] === 1) v = r[1];
+    else if (r[0] === 2) for (const [s, ob] of objs(m)) if (ob.tpl === r[1]) { v = s; break; }
+    if (r[0] === 0 || m.r32(kb + 0x6C) !== v) w32(m, kb + 0x6C, v);
+  }
   function encSnap(me, seq, k, m) {
-    const b = new Uint8Array(8 + KSZ), dv = new DataView(b.buffer);
+    const b = new Uint8Array(8 + KSZ + 8), dv = new DataView(b.buffer);
     b[0] = 0; b[1] = me; dv.setUint32(2, seq, true); dv.setUint16(6, k, true);
     const kb = kirby(me);
     for (let j = 0; j < KSZ; j++) b[8 + j] = m.r8(kb + j);
+    const r = ref6C(m, kb); dv.setUint32(8 + KSZ, r[0], true); dv.setUint32(12 + KSZ, r[1], true);
     return b;
   }
   // retrato de um Kirby do computador: {seq, id, Kirby, cérebro}
   function encCpu(me, seq, id, m) {
-    const b = new Uint8Array(8 + KSZ + IASZ), dv = new DataView(b.buffer);
+    const b = new Uint8Array(8 + KSZ + IASZ + 8), dv = new DataView(b.buffer);
     b[0] = 3; b[1] = me; dv.setUint32(2, seq, true); b[6] = id;
     const kb = kirby(id), a = ia(id);
     for (let j = 0; j < KSZ; j++) b[8 + j] = m.r8(kb + j);
     for (let j = 0; j < IASZ; j++) b[8 + KSZ + j] = m.r8(a + j);
+    const r = ref6C(m, kb); dv.setUint32(8 + KSZ + IASZ, r[0], true); dv.setUint32(12 + KSZ + IASZ, r[1], true);
     return b;
+  }
+  // chefes: {seq, quantos, [molde, objeto 0xB4]...}
+  function encChefes(me, seq, lista, m) {
+    const b = new Uint8Array(8 + lista.length * (4 + OSZ)), dv = new DataView(b.buffer);
+    b[0] = 4; b[1] = me; dv.setUint32(2, seq, true); b[6] = lista.length;
+    lista.forEach(([s, tpl], k) => { const o = 8 + k * (4 + OSZ); dv.setUint32(o, tpl, true); for (let j = 0; j < OSZ; j++) b[o + 4 + j] = m.r8(s + j); });
+    return b;
+  }
+  // copia o chefe do P1, menos: vida (+0x80: vai pelos avisos de quem bate, senão o golpe contaria duas vezes), tipo,
+  // ponteiros para coisas deste aparelho (+0x6C, +0x70, +0x74 e qualquer outro que não aponte para a ROM ou um Kirby) e
+  // o desenho na VRAM. As funções de comportamento (+0x78, +0x7C) apontam para a ROM: vão junto
+  function copiaChefe(m, s, c) {
+    const cp = (a, z) => { for (let j = a; j < z; j++) m.w8(s + j, c[j]); };
+    const ptr = (a) => { const v = (c[a] | c[a + 1] << 8 | c[a + 2] << 16 | c[a + 3] << 24) >>> 0;
+      if (!v || (v >= 0x08000000 && v < 0x0A000000) || (v >= KIRBYS && v < KIRBYS + 4 * KSZ)) cp(a, a + 4); };
+    cp(0x04, 0x10); cp(0x1C, 0x1E); cp(0x2A, 0x2B); cp(0x38, 0x6C);
+    ptr(0x78); ptr(0x7C); cp(0x83, 0x8C); ptr(0x8C); cp(0x90, 0xAC); ptr(0xAC);
   }
   // o cérebro copiado, menos os ponteiros para objetos (o mesmo inimigo pode estar em outro endereço aqui)
   function copiaIA(m, id, c) {
@@ -106,18 +144,21 @@
     for (let j = 0; j < IASZ; j++) if (!fora(j)) m.w8(a + j, c[j]);
   }
   function encEv(me, id, ev) {
-    const b = new Uint8Array(14), dv = new DataView(b.buffer);
+    const b = new Uint8Array(16), dv = new DataView(b.buffer);
     b[0] = 1; b[1] = me; dv.setUint32(2, id, true); dv.setUint32(6, ev.tpl, true); dv.setInt16(10, ev.hp, true); b[12] = ev.atk; b[13] = ev.eng ? 1 : 0;
+    dv.setInt16(14, ev.dano, true);   // quanto tirou: quem recebe subtrai da vida que tem (dois batendo juntos somam)
     return b;
   }
   function encHab(me, id, dono) { const b = new Uint8Array(7); b[0] = 2; b[1] = me; new DataView(b.buffer).setUint32(2, id, true); b[6] = dono; return b; }
   function decode(b) {
     if (!b || b.length < 2) return null;
     const dv = new DataView(b.buffer, b.byteOffset, b.byteLength);
-    if (b[0] === 0 && b.length >= 8 + KSZ) return { t: 0, from: b[1], seq: dv.getUint32(2, true), k: dv.getUint16(6, true), kb: b.slice(8, 8 + KSZ) };
-    if (b[0] === 3 && b.length >= 8 + KSZ + IASZ) return { t: 3, from: b[1], seq: dv.getUint32(2, true), id: b[6], kb: b.slice(8, 8 + KSZ), ia: b.slice(8 + KSZ, 8 + KSZ + IASZ) };
+    const r6 = (o) => b.length >= o + 8 ? [dv.getUint32(o, true), dv.getUint32(o + 4, true)] : null;
+    if (b[0] === 0 && b.length >= 8 + KSZ) return { t: 0, from: b[1], seq: dv.getUint32(2, true), k: dv.getUint16(6, true), kb: b.slice(8, 8 + KSZ), r6: r6(8 + KSZ) };
+    if (b[0] === 4 && b.length >= 8) { const lista = []; for (let k = 0; k < b[6] && 8 + (k + 1) * (4 + OSZ) <= b.length; k++) { const o = 8 + k * (4 + OSZ); lista.push([dv.getUint32(o, true), b.slice(o + 4, o + 4 + OSZ)]); } return { t: 4, from: b[1], seq: dv.getUint32(2, true), lista }; }
+    if (b[0] === 3 && b.length >= 8 + KSZ + IASZ) return { t: 3, from: b[1], seq: dv.getUint32(2, true), id: b[6], kb: b.slice(8, 8 + KSZ), ia: b.slice(8 + KSZ, 8 + KSZ + IASZ), r6: r6(8 + KSZ + IASZ) };
     if (b[0] === 2 && b.length >= 7) return { t: 2, from: b[1], id: dv.getUint32(2, true), dono: b[6] };
-    if (b[0] === 1 && b.length >= 14) return { t: 1, from: b[1], id: dv.getUint32(2, true), tpl: dv.getUint32(6, true), hp: dv.getInt16(10, true), atk: b[12], eng: !!b[13] };
+    if (b[0] === 1 && b.length >= 14) return { t: 1, from: b[1], id: dv.getUint32(2, true), tpl: dv.getUint32(6, true), hp: dv.getInt16(10, true), atk: b[12], eng: !!b[13], dano: b.length >= 16 ? dv.getInt16(14, true) : null };
     return null;
   }
 
@@ -127,12 +168,13 @@
     const { m, me, n, romWrite, send } = o;
     const peer = [];
     for (let i = 0; i < n; i++) peer.push({ fila: [], soube: null, ultimo: -1, visto: null, vistoSeq: -9, chegou: 0, pulos: 0 });
-    const cpu = [0, 1, 2, 3].map(() => ({ fila: [], ultimo: -1 }));   // retratos dos Kirbys do computador (só quem não é o P1)
+    const cpu = [0, 1, 2, 3].map(() => ({ fila: [], ultimo: -1 }));
+    const chefes = { fila: [], ultimo: -1 };   // retratos dos chefes (só quem não é o P1)   // retratos dos Kirbys do computador (só quem não é o P1)
     const hist = [], ant = new Map(), porAviso = new Set(), eventos = [], vistos = new Set();
     let estAnt = new Map();   // estrelas de habilidade vistas no fim do quadro anterior (struct -> quem soltou)
     const estApagadas = new Set();   // apagadas por aviso: não reavisar
     let q = 0, evId = 0, puxa = [];
-    const est = { mandados: 0, recebidos: 0, avisosM: 0, avisosR: 0, estrelas: 0, pulos: 0, teclas: 0, portas: 0, cpu: 0 };
+    const est = { mandados: 0, recebidos: 0, avisosM: 0, avisosR: 0, estrelas: 0, pulos: 0, teclas: 0, portas: 0, cpu: 0, chefes: 0 };
 
     function liga() {
       for (const [off, bytes] of P.patches) romWrite(off, new Uint8Array(bytes));
@@ -159,6 +201,12 @@
     function recv(bytes) {
       const d = decode(bytes);
       if (!d || d.from === me || d.from >= n) return;
+      if (d.t === 4) {   // chefes (vêm do P1)
+        if (me === 0 || d.from !== 0 || d.seq <= chefes.ultimo) return;
+        chefes.fila.push(d); chefes.fila.sort((a, b) => a.seq - b.seq);
+        if (chefes.fila.length > 60) chefes.fila.splice(0, chefes.fila.length - 60);
+        return;
+      }
       if (d.t === 3) {   // Kirby do computador (vem do P1)
         if (me === 0 || d.from !== 0 || d.id < n || d.id > 3) return;
         const c = cpu[d.id];
@@ -192,11 +240,16 @@
       for (const ev of eventos.splice(0)) {
         let ob = null, s = 0;
         for (const [ss, x] of agora) if (x.tpl === ev.tpl) { ob = x; s = ss; break; }
-        if (!ob || !(ev.hp < ob.hp)) continue;
+        if (!ob || ob.hp <= 0) continue;
+        const nv = ev.dano != null && ev.hp > 0 ? ob.hp - ev.dano : ev.hp;   // golpe que matou: morre aqui também
+        if (!(nv < ob.hp)) continue;
         est.avisosR++;
-        porAviso.add(s); ob.hp = ev.hp;
-        if (ev.hp > 0) m.w16(s + 0x80, ev.hp & 0xFFFF);
-        else if (ob.tipo >= 0x5E && ob.tipo <= 0x6C) { m.w16(s + 0x80, 0); w32(m, s + 8, ob.fl | 0x1000); }   // comida/item: só some
+        ob.hp = nv; ev.hp = nv;
+        // dano que não mata: só a vida; a referência do quadro anterior acompanha (senão viraria eco) e os MEUS golpes
+        // seguintes nesse inimigo continuam sendo avisados (antes ele ficava marcado e um chefe perdia golpes)
+        if (ev.hp > 0) { m.w16(s + 0x80, ev.hp & 0xFFFF); const a0 = ant.get(s); if (a0 && a0.tpl === ob.tpl) a0.hp = Math.min(a0.hp, ev.hp); continue; }
+        porAviso.add(s);
+        if (ob.tipo >= 0x5E && ob.tipo <= 0x6C) { m.w16(s + 0x80, 0); w32(m, s + 8, ob.fl | 0x1000); }   // comida/item: só some
         else if (ev.eng) puxa.push({ s, atk: ev.atk, n: 0 });
         else mata(s, ev.atk);
       }
@@ -225,7 +278,7 @@
           // este GBA preso carregando uma sala que não existe: o amigo de quem recebe congelava
           const stB = (b[0x78] | b[0x79] << 8 | b[0x7A] << 16 | b[0x7B] << 24) >>> 0;
           if (PORTA.has(m.r32(kb + 0x78)) || PORTA.has(stB)) est.portas++;
-          else espelho(m, kb, b);
+          else { espelho(m, kb, b); if (p.soube.r6) poe6C(m, kb, p.soube.r6); }
           // cuspiu num retrato que se perdeu: o jogo daqui não refez o passo, então a estrela é pedida ao jogo
           if (a && p.soube.seq > p.vistoSeq + 1 && (a[8] & 0x80) && !(b[8] & 0x80) && [38, 73].includes(b[0xD4] | b[0xD5] << 8) && !temEstrela(m, kb)) {
             m.w8(kb + 0xDD, a[0xDD]);
@@ -244,7 +297,17 @@
         const d = c.fila.shift(); c.ultimo = d.seq;
         const kb = kirby(id), stB = (d.kb[0x78] | d.kb[0x79] << 8 | d.kb[0x7A] << 16 | d.kb[0x7B] << 24) >>> 0;
         if (PORTA.has(m.r32(kb + 0x78)) || PORTA.has(stB)) { est.portas++; continue; }
-        espelho(m, kb, d.kb); copiaIA(m, id, d.ia); est.cpu++;
+        espelho(m, kb, d.kb); if (d.r6) poe6C(m, kb, d.r6); copiaIA(m, id, d.ia); est.cpu++;
+      }
+      // chefes: o objeto do P1 por cima do daqui (achado pelo molde, igual nos dois)
+      if (me !== 0 && chefes.fila.length) {
+        while (chefes.fila.length > MAXFILA) chefes.fila.shift();
+        const d = chefes.fila.shift(); chefes.ultimo = d.seq;
+        const aqui = objs(m);
+        // chefe agarrando o MEU Kirby (sub_0804E60C, +0x6C = o chefe): o agarrão é uma sequência do chefe; deixa o daqui
+        // terminar (a cópia do P1, que não está agarrando ninguém, o prendia para sempre) e volta a copiar depois
+        const agarra = m.r32(kirby(me) + 0x78) === AGARRADO ? m.r32(kirby(me) + 0x6C) : 0;
+        for (const [tpl, c] of d.lista) for (const [s, ob] of aqui) if (ob.tpl === tpl && eChefe(ob.tipo) && !(ob.fl & 0x1000)) { if (s !== agarra) { copiaChefe(m, s, c); est.chefes++; } break; }
       }
     }
     // depois de cada quadro: meu retrato e os inimigos que eu acertei
@@ -254,13 +317,14 @@
       delete hist[q - 16];
       send(encSnap(me, q, hist[q + 1 - LAG] || 0, m), false);
       if (me === 0) for (let id = n; id < Math.min(4, m.r8(NKIRBYS)); id++) send(encCpu(me, q, id, m), false);
-      est.mandados++;
       const agora = objs(m);
+      if (me === 0) { const lista = []; for (const [s, ob] of agora) if (eChefe(ob.tipo) && !(ob.fl & 0x1000)) lista.push([s, ob.tpl]); if (lista.length) send(encChefes(me, q, lista.slice(0, 6), m), false); }
+      est.mandados++;
       for (const [s, ob] of agora) {
         const a0 = ant.get(s);
         if (a0 && a0.tpl === ob.tpl && ob.hp < a0.hp && a0.hp > 0 && !porAviso.has(s)) {
           const h = m.r32(s + 0x6C), quem = h >= KIRBYS && h < KIRBYS + 4 * KSZ && (h - KIRBYS) % KSZ === 0 ? (h - KIRBYS) / KSZ : me;
-          send(encEv(me, ++evId, { tpl: ob.tpl, hp: ob.hp, atk: quem, eng: ob.hp <= 0 && !!(ob.fl & 0x40000) && !(ob.fl & 0x01000000) }), true);
+          send(encEv(me, ++evId, { tpl: ob.tpl, hp: ob.hp, dano: a0.hp - ob.hp, atk: quem, eng: ob.hp <= 0 && !!(ob.fl & 0x40000) && !(ob.fl & 0x01000000) }), true);
           est.avisosM++;
         }
       }

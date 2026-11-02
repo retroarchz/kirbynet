@@ -108,7 +108,8 @@ na fase, ou fazer o menu também pelo site.
    FALTA: copiar habilidade engolindo inimigo com poder e os golpes de cada habilidade (fogo, espada...) aparecerem e
    acertarem certo nas duas telas — a regra das teclas com 5 quadros deve cobrir; conferir uma por uma.
 2. ~~Kirbys do computador seguirem o P1~~ FEITO (seção no fim).
-3. Chefes (vida pelo aviso já deve funcionar; conferir barra de vida e fases).
+3. ~~Chefes~~ FEITO com mini-chefe no teste (seção no fim). FALTA conferir chefes de área de verdade (várias partes,
+   ex. Mega Titan, Crazy Hand + Master Hand) e a barra de vida na tela.
 4. Trocas de sala: ~~espelho/porta comum~~ FEITO. FALTA conferir estrela de warp, portas grandes, cair do mapa, espelho
    do chefe, e os dois em salas diferentes por muito tempo.
 5. Comida sumida por aviso: conferir se volta a aparecer quando a tela rola.
@@ -228,3 +229,24 @@ botão "📋 Log do coop", Pokémon do meio alinhado, 3 contra 1 sem reiniciar. 
 - Resultado: CPU a 2,6 px (90% 5,3), sala diferente 0,1% (só o instante da porta); com atraso 3 + variação 4: 3,9 px;
   atraso 10 + variação 6: 13,5 px (humanos 14,1). Testes antigos iguais.
 - Custo: 676 bytes por Kirby do computador por quadro saindo do P1 (~40 KB/s cada; canal rápido, pode se perder).
+
+## Chefes (02/11, 3ª conversa)
+
+- Teste `teste/chefe.js`: save novo, sala 803; o 1º Waddle Dee (molde 0x88B4DCC) vira CHEFE (padrão Mr. Frosty 0x38) e
+  ganha o retângulo de gatilho (+0x1A: -300, -120, 400, 200; mini-chefes de verdade têm algo como -200,-104,240,176;
+  sem isso o chefe fica parado). ORIG=1 = jogo original; Q, ATRASO; PILHA/AMOSTRA = depuração.
+- Antes: cada aparelho calculava o chefe: 31 px de diferença (até 78).
+- Feito em kirbycoop.js:
+  1. Chefes (tipos 0x38-0x52) são do P1: mensagem tipo 4 com o objeto inteiro (0xB4) de cada chefe por quadro; quem
+     recebe copia (copiaChefe) MENOS a vida (+0x80, vai pelos avisos), o tipo, e ponteiros que não sejam ROM/Kirby
+     (+0x6C, +0x70, +0x74...). Resultado: 0-1 px; cubos de gelo do chefe nascem iguais nas duas telas.
+  2. Aviso de dano leva o DANO (bytes 14-15) e quem recebe subtrai da vida que tem (dois batendo juntos somam). E dano
+     que não mata não marca mais o inimigo em porAviso para sempre (antes os golpes seguintes de quem recebeu um aviso
+     nunca eram avisados: no chefe a vida terminava 20 numa tela e 10 na outra).
+  3. Retrato do Kirby (tipos 0 e 3) leva o +0x6C traduzido (ref6C/poe6C): Kirby -> endereço, objeto -> molde; quem
+     recebe aponta para o equivalente daqui (ou 0). Sem isso, o Kirby do amigo AGARRADO pelo chefe (sub_0804E60C) lia
+     um ponteiro inválido e o GBA de quem recebia TRAVAVA (laço principal parado).
+  4. Enquanto o chefe agarra o MEU Kirby (estado 0x0804E60D com +0x6C = o chefe), não copio aquele chefe: o agarrão é
+     uma sequência do chefe daqui; com a cópia do P1 por cima o Kirby ficava preso para sempre.
+- Resultado: luta de 8000 quadros, P1 tira 30 e P2 dá o golpe final: chefe some nas duas telas e os dois seguem;
+  agarrões terminam; 0 travamentos; testes antigos iguais.
