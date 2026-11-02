@@ -39,7 +39,9 @@ const LinkHLE = (() => {
   // original do jogo) até voltarem ao mapa; o terceiro não recebe nada deles nesse tempo.
   const COOP3 = { mail: 0x0203FE80, tasks: 0x03005640, waitTask: 0x081077F5, myid: 0x030055F0, count: 0x030055F4,
                   players: 0x020229F0, playerSize: 0x24, cb2: 0x03002664, field: 0x080C2965, battle: 0x0803F431,
-                  saved: 0x02022AA4, savedCount: 0x030034A0, linkType: 0x020229C6 };
+                  saved: 0x02022AA4, savedCount: 0x030034A0, linkType: 0x020229C6,
+                  held: 0x0300268C, waitArr: 0x030045A0, theirTr: 0x03004590, myTr: 0x03004570, myTr2: 0x0203A6D6,
+                  tabelas: [[0x030045A0, 1], [0x03004578, 1], [0x03004588, 1], [0x03004590, 2], [0x030045A8, 1], [0x03004540, 2], [0x03004550, 2]] };
   // teste anterior (29/10, sem a espera do host): cabo comum. Teste atual: com a espera decidida pelo host.
   GAMES.b3121dfb3be248bcd51cf83815c463a72e2781e1 = GAMES.c4091f572d52436c86ceaa0c5718cfb22dc2d59d;
   GAMES.a9162e75a98631c4d31541bf1168fcee62770ec9 = { ...GAMES.c4091f572d52436c86ceaa0c5718cfb22dc2d59d, coop: COOP3 };
@@ -86,6 +88,8 @@ const LinkHLE = (() => {
     // duo: vagas da dupla em andamento (da liberação até voltar ao mapa depois da batalha). O jogo fecha e
     // reabre o cabo para a batalha: nesse handshake só entram os dois. sub vale enquanto o cabo é o de todos.
     let sub = null, subSave = null, ask = null, duo = null, duoBattle = false;
+    // mestre: vaga que comanda o cabo (muda numa dupla sem o host). semHost: a dupla segue sozinha e o automático religa todos depois
+    let mestre = 0, semHost = false, zArmado = false, zAntes = false;
     // quem voltou de uma dupla sem mim: ao reabrir o cabo o mestre pede os dados de cada jogador
     // (LINKCMD_SEND_LINK_TYPE 0x2222, com o tipo de cabo). O meu jogo, no mapa, responde com o gLinkType
     // dele, que não é o do pedido: antes de o jogo ver o pedido, o gLinkType vira o pedido.
@@ -153,6 +157,14 @@ const LinkHLE = (() => {
       for (let t = 0; t < 16; t++) if (ram.r8(C.tasks + 40 * t + 4) && ram.r32(C.tasks + 40 * t) === C.waitTask) return true;
       return false;
     }
+    // além da lista de jogadores, as tabelas por jogador da espera do treinador: sem elas, quem muda de posição procura o
+    // parceiro na posição antiga e fica esperando para sempre
+    function swapTabelas(a, b) {
+      for (const [base, n] of C.tabelas) for (let j = 0; j < n; j++) {
+        const pa = base + a * n + j, pb = base + b * n + j, x = ram.r8(pa);
+        ram.w8(pa, ram.r8(pb)); ram.w8(pb, x);
+      }
+    }
     function swapPlayers(a, b) {
       for (let j = 0; j < C.playerSize; j++) {
         const pa = C.players + a * C.playerSize + j, pb = C.players + b * C.playerSize + j, x = ram.r8(pa);
@@ -162,17 +174,18 @@ const LinkHLE = (() => {
     // dupla: o jogo passa a ver só [host, parceiro] (ids 0 e 1), como no coop de 2 original
     function enterSub(list) {
       sub = list.slice();
-      const p = ids.indexOf(sub[1]), id = sub.indexOf(me);
-      subSave = { myid: ram.r8(C.myid), count: ram.r8(C.count), swap: p !== 1 ? p : 0 };
-      if (subSave.swap) swapPlayers(1, p);
+      const id = sub.indexOf(me), ordem = ids.slice(), trocas = [];
+      // põe os dois nas posições 0 e 1 da lista do jogo (o primeiro pode não ser o host)
+      sub.forEach((s, k) => { const q = ordem.indexOf(s); if (q !== k) { trocas.push([k, q]); [ordem[k], ordem[q]] = [ordem[q], ordem[k]]; swapPlayers(k, q); swapTabelas(k, q); } });
+      subSave = { myid: ram.r8(C.myid), count: ram.r8(C.count), trocas, mestre: r8(IS_MASTER) };
       ram.w8(C.myid, id); ram.w8(C.count, sub.length);
-      w8(COUNT, sub.length); w8(LOCAL_ID, id); setSio(id, sub.length);
+      w8(COUNT, sub.length); w8(LOCAL_ID, id); w8(IS_MASTER, id === 0 ? MASTER : 0); setSio(id, sub.length);
       for (const s of ids) if (!sub.includes(s) && inbox.has(s)) inbox.get(s).length = 0;
       send({ k: "sub", ids: sub });
     }
     function exitSub(tell = true) {
-      if (subSave.swap) swapPlayers(1, subSave.swap);
-      ram.w8(C.myid, subSave.myid); ram.w8(C.count, subSave.count);
+      for (const [a, b] of subSave.trocas.slice().reverse()) { swapPlayers(a, b); swapTabelas(a, b); }
+      ram.w8(C.myid, subSave.myid); ram.w8(C.count, subSave.count); w8(IS_MASTER, subSave.mestre);
       sub = null; subSave = null;
       if (ids && tell) { const id = ids.indexOf(me); w8(COUNT, ids.length); w8(LOCAL_ID, id); setSio(id, ids.length); }
     }
@@ -245,6 +258,7 @@ const LinkHLE = (() => {
         if (++avisos % AUTO_AVISO === 0) send({ k: "au", n });
         if (avisos % AUTO_CAPACETE === 0 && avisados.size && souDono()) send({ k: "cap", v: cap });   // quem chegou depois também vê
         if (pedido && t - pedido.t > AUTO_PEDIDO) pedido = null;
+        if (n === 1) mestre = 0;
         if (n === 1 && entrePassos()) {
           if (pedido) { const l = pedido.ids; pedido = null; conecta(l); }
           else if (t > pausa) {
@@ -267,7 +281,7 @@ const LinkHLE = (() => {
           fase = 2; faseT = t; assenta = 0;
         }
       } else if (fase === 2) {
-        if (ram.r32(AUTO.cb1) === AUTO.coop) { fase = 0; lista = null; avisados.clear(); }
+        if (ram.r32(AUTO.cb1) === AUTO.coop) { mestre = lista[0]; fase = 0; lista = null; avisados.clear(); }
         else if (t - faseT > AUTO_LIMITE && ram.r32(AUTO.cb2) === AUTO.field) {
           // não ligou: quem comanda deixa de fora quem não abriu o cabo (ou o último a chegar) e tenta sem ele daqui a pouco
           if (lista[0] === me) {
@@ -278,8 +292,36 @@ const LinkHLE = (() => {
         }
       } else if (fase === 4) { fase = 0; lista = null; }
     }
+    // convidado esperando o treinador: quem mais espera o mesmo? (a mesma conta que a ROM faz para o host)
+    function parceiroEsperando() {
+      const eu = ids.indexOf(me), mine = ram.r16(C.myTr), mine2 = ram.r16(C.myTr2);
+      for (let i = 0; i < ids.length; i++) {
+        if (i === eu || !ram.r8(C.waitArr + i)) continue;
+        const dele = ram.r16(C.theirTr + 2 * i);
+        if (dele === mine || (mine2 && dele === mine2)) return ids[i];
+      }
+      return null;
+    }
+    // Z (A) na espera: vale para qualquer um que esteja esperando. O do host a ROM já trata. Só vale apertar de novo depois de
+    // soltar: o A que fechou o diálogo do treinador não conta
+    function zNaEspera() {
+      const preso = (ram.r16(C.held) & 1) !== 0, esperando = waiting();
+      if (!esperando) zArmado = false; else if (!preso) zArmado = true;
+      const novo = preso && !zAntes;
+      zAntes = preso;
+      if (!esperando || !zArmado || !novo || me === ids[0] || ask || sub || duo) return;
+      const outro = parceiroEsperando();
+      if (outro == null || busy.has(outro)) return;
+      const list = [me, outro].sort((a, b) => ids.indexOf(a) - ids.indexOf(b));
+      ask = { t: 2, ids: list, ok: new Set([me]), at: now() };
+      send({ k: "ask", t: 2, ids: list });
+    }
     function release(list, t) {
-      if (t === 2) { duo = list.slice(); duoBattle = false; duoSaved(list); enterSub(list); }
+      if (t === 2) {
+        if (duo) return;   // os dois apertaram Z ao mesmo tempo
+        ask = null; duo = list.slice(); duoBattle = false; mestre = list[0]; semHost = !list.includes(ids[0]);
+        duoSaved(list); enterSub(list);
+      }
       ram.w8(C.mail + 1, 1);
     }
 
@@ -314,7 +356,13 @@ const LinkHLE = (() => {
           // (entre a escolha de equipe e a batalha o jogo também passa pelo mapa)
           const cb = ram.r32(C.cb2);
           if (cb === C.battle) duoBattle = true;
-          else if (duoBattle && cb === C.field) { duo = null; duoBattle = false; if (sub) exitSub(); restoreSaved(); send({ k: "full" }); }
+          else if (duoBattle && cb === C.field) {
+            duo = null; duoBattle = false;
+            if (sub) exitSub();
+            if (semHost) savedBackup = null; else restoreSaved();   // sem o host, o cabo continua sendo só dos dois até o automático religar
+            semHost = false;
+            send({ k: "full" });
+          }
         }
         if (r8(STATE) === ST_CONN && ids) {
           // ligado comigo e calado há muito tempo (fechou a página, caiu): o jogo recebe o "desconectar" dele
@@ -338,7 +386,7 @@ const LinkHLE = (() => {
         const nowOpen = st >= ST_HANDSHAKE;
         if (nowOpen !== open) {
           open = nowOpen;
-          role = open ? (me === (fase ? lista[0] : 0) ? "m" : "s") : null;
+          role = open ? (me === (fase ? lista[0] : mestre) ? "m" : "s") : null;
           if (open) { if (!fase) desligou = false; saindo = expulso = meuBye = false; }   // abriu pelo menu: volta a valer o automático
           else {
             // só conta como escolha do jogador se o jogo dele mandou o "desconectar" por conta própria: uma queda não
@@ -379,6 +427,9 @@ const LinkHLE = (() => {
           if (cnt) { w8(SQ_POS, (pos + cnt) % CAP); w8(SQ_CNT, 0); }
         }
         if (C && st === ST_CONN && ids) {
+          zNaEspera();
+          // a ROM gasta a liberação de uma vez; se a tabela do parceiro ainda não chegou, ela se perderia e ele ficaria na espera
+          if (duo && sub && waiting()) ram.w8(C.mail + 1, 1);
           const req = ram.r8(C.mail);
           if (req) {
             ram.w8(C.mail, 0);
@@ -406,7 +457,7 @@ const LinkHLE = (() => {
       // entrou em outra sala: nova vaga. Só com o cabo fechado (quem estava no coop sai antes)
       troca(novo) {
         if (open || fase) return false;
-        me = novo; go = null; pedido = null;
+        me = novo; go = null; pedido = null; mestre = 0;
         peers.clear(); avisados.clear(); inbox.clear(); lastCmd.clear(); dead.clear();
         return true;
       },
@@ -445,7 +496,8 @@ const LinkHLE = (() => {
           if (r8(STATE) === ST_HANDSHAKE && m.ids.includes(me)) go = m.ids;
         } else if (C && m.k === "ask") {
           // só vale pedido do host, para quem está na lista e ainda esperando o treinador
-          if (!ids || from !== ids[0] || !Array.isArray(m.ids) || !m.ids.includes(me) || sub) return;
+          // dupla: pedido de qualquer um dos dois. Todos: só do host
+          if (!ids || !Array.isArray(m.ids) || !m.ids.includes(me) || !m.ids.includes(from) || (m.t !== 2 && from !== ids[0]) || sub || duo) return;
           if (waiting() && !m.ids.some(s => s !== me && busy.has(s))) { release(m.ids, m.t); send({ k: "ok" }); }
           else send({ k: "no" });
         } else if (C && (m.k === "ok" || m.k === "no")) {
@@ -454,7 +506,11 @@ const LinkHLE = (() => {
           ask.ok.add(from);
           if (ask.ids.every(s => ask.ok.has(s))) { const a = ask; ask = null; if (waiting()) release(a.ids, a.t); }
         } else if (C && m.k === "sub") {
-          if (Array.isArray(m.ids) && !m.ids.includes(me)) for (const s of m.ids) { busy.add(s); if (inbox.has(s)) inbox.get(s).length = 0; }
+          if (Array.isArray(m.ids) && !m.ids.includes(me)) {
+            // dupla sem o host: ele sai do cabo e segue jogando. Ao voltarem ao mapa, o automático liga todos de novo
+            if (auto && ids && !m.ids.includes(ids[0])) solta();
+            else for (const s of m.ids) { busy.add(s); if (inbox.has(s)) inbox.get(s).length = 0; }
+          }
         } else if (C && m.k === "full") {
           if (busy.has(from) && ids && r8(STATE) === ST_CONN) rejoin.add(from);
           busy.delete(from);
