@@ -257,3 +257,14 @@ botão "📋 Log do coop", Pokémon do meio alinhado, 3 contra 1 sem reiniciar. 
   a do espelho grande), achar esse portal e testar a luta nos mundos separados: Dark Meta Knight é tipo 0x4E (dentro da
   faixa de chefes 0x38-0x52, então já vai pelo retrato de chefe). Conferir: posição igual nas duas telas, dano somado,
   agarrões/golpes especiais dele, morte nas duas telas, troca de sala do portal (estados de porta).
+
+## Dark Meta Knight testado (02/11, fim da 3ª conversa)
+
+- Portal: na sala 801 (saves reais), voar até o espelho grande do alto (x≈248, y≈176-190: A para subir, depois cima);
+  os 4 Kirbys vão juntos para a sala 909 (arena). Teste `teste/dmk.js` (saves em Downloads/saves-kirby-teste;
+  GRAVA=1 grava as duas telas a cada 150 quadros em teste/porta/).
+- Resultado nos mundos separados (6000 quadros, os dois lutando a esmo): os dois entram juntos na arena; vida do DMK
+  igual nas duas telas o tempo todo (64->54->44->34 pelo P1, 34->24 pelo P2); posição mediana 0 px, 90% 5 px (um pico
+  de 398 px, provavelmente teletransporte dele); barra de vida igual; 0 travamentos. Gravação em
+  Downloads/gravacao-dark-meta-knight (dmk_luta.png = resumo).
+- Não chegou a matar (Kirbys de teste perdem vidas). Falta: ver a morte dele nas duas telas e o pico de 398 px.
