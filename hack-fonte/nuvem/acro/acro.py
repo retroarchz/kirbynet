@@ -68,7 +68,16 @@ POEIRA = 0x0203FF3D
 # Leste = fileira 1, oeste = fileira 1 espelhada, norte/sul = fileira 2. pula marca a direção em GIRO_DIR; o callback,
 # depois da atualização do jogo (o passo 0 do pulo já rodou), troca images/anims do sprite e guarda os do jogo em
 # GIRO_SV; depois de 32 quadros devolve e põe a animação de olhar para a direção (0 S, 1 N, 2 O, 3 L).
-GIRO_DIR, GIRO_N, GIRO_SV = 0x0203FF3C, 0x0203FF3E, 0x0203FF50
+GIRO_DIR, GIRO_N, GIRO_SV = 0x0203FF3C, 0x0203FF3E, 0x0203FF50   # SV: images +0, anims +4 (0x0203FF58 é o relógio!)
+# Fluidez (03/11): no pulo de 3 os 16 px a mais são espalhados pelo pulo todo (V e P andam 1 px a cada 2 quadros,
+# trava PLENTO alterna 1/2) em vez de 2 px/quadro na 1ª metade e 1 na 2ª. Quadros do giro com tempos diferentes
+# (decolagem rápida, bola no alto, pouso segura) e o último fica GIRO_FIM - 32 quadros depois de pousar.
+PLENTO = 0x0203FF3B
+GIRO_T = [2, 3, 4, 5, 5, 5, 4, 4]          # quadros de tela de cada quadro do giro (soma 32 = tempo do pulo)
+GIRO_FIM = 36
+# altura do pulo a cada quadro (o pulo do jogo só muda o y a cada 2 quadros e sobe 12 px): parábola de 16 px
+GIRO_ALT = 16
+GIRO_Y = [0] + [-round(4 * GIRO_ALT * (c / 32) * (1 - c / 32)) for c in range(1, 33)]   # c = 32: no chão
 GIRO = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'giro.bin'), 'rb').read()
 HOP1 = 0x080CC43C            # pulinho de 1 casa com a roda levantada (o do jogo quando está livre)
 HOP2 = 0x080CC460            # pulo de 2 casas com a roda levantada (barranco)
@@ -285,7 +294,7 @@ def code():
     a.label('tbok'); a.strb_i('r1', 'r2', 0)
     a.ldr_lit('r7', DESL)
     a.ldr_i('r0', 'r7', 0); a.mov('r1', 0); a.alu('cmp', 'r6', 'r1'); a.bc('ne', 'clento')
-    a.cmpi('r0', 0); a.bc('eq', 'crapido')                                    # nada a fazer (rápido)
+    a.cmpi('r0', 0); a.bfar('eq', 'crapido')                                    # nada a fazer (rápido)
     a.label('clento')
     # jogo reposicionou o sprite? (pulo > 6 px em x ou y desde o último quadro) ou estado vazio: zera e pega a base nova
     a.cmpi('r0', 0); a.bc('eq', 'czera')
@@ -303,9 +312,13 @@ def code():
         a.ldrh_i('r0', 'r4', so); a.ldrh_i('r1', 'r7', lw); a.alu('cmp', 'r0', 'r1'); a.bc('eq', 'cb%d' % so)
         a.strh_i('r0', 'r7', lb)
         a.label('cb%d' % so)
+    a.ldr_lit('r2', PLENTO); a.ldrb_i('r0', 'r2', 0); a.cmpi('r0', 0); a.bc('eq', 'plt0')
+    a.mov('r1', 3); a.alu('eor', 'r0', 'r1'); a.strb_i('r0', 'r2', 0)
+    a.label('plt0')
     for eixo, (so, so2, lw, lb) in enumerate(((0x20, 0x24, 8, 12), (0x22, 0x26, 10, 14))):
         n = str(eixo)
-        # P: o x/y do sprite anda 1 px para o lugar certo
+        # P: o x/y do sprite anda 1 px para o lugar certo (no pulo de 3, só nos quadros pares: PLENTO = 2 pula)
+        a.ldr_lit('r2', PLENTO); a.ldrb_i('r1', 'r2', 0); a.cmpi('r1', 2); a.bc('eq', 'pp' + n)
         a.mov('r1', 2 + eixo); a.ldrsb_r('r0', 'r7', 'r1')
         a.cmpi('r0', 0); a.bc('eq', 'pp' + n)
         a.ldrh_i('r2', 'r4', so); a.bc('lt', 'pneg' + n)
@@ -313,7 +326,8 @@ def code():
         a.label('pneg' + n); a.addi('r0', 1); a.subi('r2', 1)
         a.label('pg' + n); a.strh_i('r2', 'r4', so); a.mov('r1', 2 + eixo); a.strb_r('r0', 'r7', 'r1')
         a.label('pp' + n)
-        # V: a imagem anda 1 px na direção do centro da pedra (ou de 0)
+        # V: a imagem anda 1 px na direção do centro da pedra (ou de 0); no pulo de 3 junto com o P
+        a.ldr_lit('r2', PLENTO); a.ldrb_i('r1', 'r2', 0); a.cmpi('r1', 2); a.bc('eq', 'vv' + n)
         a.mov('r1', eixo); a.ldrsb_r('r0', 'r7', 'r1')
         a.lsl('r1', 'r6', 24 - 8 * eixo); a.asr('r1', 'r1', 24)
         a.alu('cmp', 'r0', 'r1'); a.bc('eq', 'vv' + n); a.bc('lt', 'vmais' + n)
@@ -325,6 +339,7 @@ def code():
         a.mov('r1', eixo); a.ldrsb_r('r0', 'r7', 'r1'); a.mov('r1', 2 + eixo); a.ldrsb_r('r1', 'r7', 'r1'); a.add_r('r0', 'r0', 'r1')
         a.ldrh_i('r1', 'r7', lb); a.add_r('r0', 'r0', 'r1'); a.strh_i('r0', 'r4', so2); a.strh_i('r0', 'r7', lw)
     a.ldrh_i('r0', 'r4', 0x20); a.strh_i('r0', 'r7', 4); a.ldrh_i('r0', 'r4', 0x22); a.strh_i('r0', 'r7', 6)
+    a.ldrh_i('r0', 'r7', 2); a.cmpi('r0', 0); a.bc('ne', 'cfim'); a.ldr_lit('r2', PLENTO); a.strb_i('r0', 'r2', 0)
     a.b('cfim')
     a.label('crapido')
     a.label('cfim')
@@ -334,19 +349,26 @@ def code():
     a.label('giro')
     a.ldr_lit('r3', GIRO_N); a.ldrb_i('r0', 'r3', 0); a.cmpi('r0', 0); a.bc('ne', 'gcont')
     a.ldr_lit('r2', GIRO_DIR); a.ldrb_i('r1', 'r2', 0); a.cmpi('r1', 0); a.bc('eq', 'gsai')
-    a.mov('r0', 0); a.strb_i('r0', 'r2', 0)
-    a.ldr_lit('r0', AVATAR); a.ldrb_i('r0', 'r0', 0); a.mov('r2', 1); a.alu('tst', 'r0', 'r2'); a.bc('eq', 'gsai')   # só a pé
+    a.ldr_lit('r0', AVATAR); a.ldrb_i('r0', 'r0', 0); a.mov('r3', 1); a.alu('tst', 'r0', 'r3'); a.bc('ne', 'gape')   # só a pé
+    a.mov('r0', 0); a.strb_i('r0', 'r2', 0); a.b('gsai')
+    a.label('gape'); a.ldr_lit('r3', GIRO_N)
     a.ldr_lit('r2', GIRO_SV); a.ldr_i('r0', 'r4', 0xC); a.str_i('r0', 'r2', 0); a.ldr_i('r0', 'r4', 8); a.str_i('r0', 'r2', 4)
-    a.strb_i('r1', 'r2', 8)                                                  # direção (para olhar ao pousar)
     a.ldr_lit('r0', 'giro_tab'); a.str_i('r0', 'r4', 0xC)
     a.subi('r1', 1); a.lsl('r1', 'r1', 2); a.ldr_lit('r0', 'giro_dirs'); a.ldr_r('r0', 'r0', 'r1'); a.str_i('r0', 'r4', 8)
-    a.mov('r0', 0); a.mov('r1', 1); a.strb_i('r1', 'r3', 0)                 # contador = 1
-    a.b('ganim')
+    a.mov('r1', 1); a.strb_i('r1', 'r3', 0)                                 # contador = 1
+    a.ldr_lit('r2', 'giro_y'); a.ldrsb_r('r0', 'r2', 'r1'); a.strh_i('r0', 'r4', 0x26)   # altura do 1º quadro
+    a.mov('r0', 0); a.b('ganim')
     a.label('gcont')
-    a.addi('r0', 1); a.strb_i('r0', 'r3', 0); a.cmpi('r0', 33); a.bc('lo', 'gsai')
+    a.addi('r0', 1); a.strb_i('r0', 'r3', 0)
+    a.cmpi('r0', 32); a.bc('hi', 'gny'); a.ldr_lit('r1', 'giro_y'); a.ldrsb_r('r2', 'r1', 'r0'); a.strh_i('r2', 'r4', 0x26)
+    a.label('gny')
+    a.cmpi('r0', GIRO_FIM); a.bc('lo', 'gsai')
     a.mov('r0', 0); a.strb_i('r0', 'r3', 0)
     a.ldr_lit('r2', GIRO_SV); a.ldr_i('r0', 'r2', 0); a.str_i('r0', 'r4', 0xC); a.ldr_i('r0', 'r2', 4); a.str_i('r0', 'r4', 8)
-    a.ldrb_i('r0', 'r2', 8); a.subi('r0', 1); a.mov('r1', 3); a.alu('and_', 'r0', 'r1')
+    a.ldr_lit('r1', GIRO_DIR); a.ldrb_i('r0', 'r1', 0); a.mov('r2', 0); a.strb_i('r2', 'r1', 0)
+    a.subi('r0', 1); a.mov('r1', 3); a.alu('and_', 'r0', 'r1')
+    # se o jogo já começou outra animação (andou logo depois de pousar), fica a dele
+    a.mov('r1', 0x2A); a.ldrb_r('r2', 'r4', 'r1'); a.cmpi('r2', 0); a.bc('eq', 'ganim'); a.movh('r0', 'r2')
     a.label('ganim')   # r0 = animação: começa do 1º passo, sem pausa
     a.mov('r1', 0x2A); a.strb_r('r0', 'r4', 'r1'); a.mov('r0', 0); a.mov('r1', 0x2B); a.strb_r('r0', 'r4', 'r1')
     a.mov('r1', 0x2C); a.ldrb_r('r0', 'r4', 'r1'); a.mov('r2', 0x80); a.alu('and_', 'r0', 'r2'); a.strb_r('r0', 'r4', 'r1')
@@ -599,6 +621,7 @@ def code():
 
     # ---------- chao(r0 = valor) -> 1 se é chão comum (sem bloqueio, altura de chão) ----------
     a.label('giromarca')   # pulo de 3 a pé (r8 = 2): o callback troca para o salto giratório (r4 = direção)
+    a.ldr_lit('r1', PLENTO); a.mov('r0', 1); a.strb_i('r0', 'r1', 0)
     a.movh('r0', 'r8'); a.cmpi('r0', 2); a.bc('ne', 'gmsai'); a.ldr_lit('r1', GIRO_DIR); a.strb_i('r4', 'r1', 0)
     a.label('gmsai'); a.bx('lr')
     a.label('chao')
@@ -619,19 +642,22 @@ def code():
     for i, dx, dy in OFFS: a.h(i); a.h((dx & 0xFF) | (dy & 0xFF) << 8)
     a.h(0); a.h(0)
     a.label('giro_cmdE')
-    for i in range(8): a.word(i | 4 << 16)
+    for i in range(8): a.word(i | GIRO_T[i] << 16)
     a.word(0xFFFF)
     a.label('giro_cmdW')
-    for i in range(8): a.word(i | 4 << 16 | 1 << 22)
+    for i in range(8): a.word(i | GIRO_T[i] << 16 | 1 << 22)
     a.word(0xFFFF)
     a.label('giro_cmdV')
-    for i in range(8): a.word(8 + i | 4 << 16)
+    for i in range(8): a.word(8 + i | GIRO_T[i] << 16)
     a.word(0xFFFF)
     for v in 'EWV':
         a.label('giro_an' + v)
         for _ in range(32): a.word('giro_cmd' + v)
     a.label('giro_dirs')
     for v in 'VVWE': a.word('giro_an' + v)                                  # sul, norte, oeste, leste
+    a.label('giro_y')
+    ys = [v & 0xFF for v in GIRO_Y] + [0] * (36 - len(GIRO_Y))
+    for k in range(0, 36, 2): a.h(ys[k] | ys[k + 1] << 8)
     a.label('giro_tab')
     for i in range(16): a.word('giro_q%d' % i); a.word(0x100)
     for i in range(16):
