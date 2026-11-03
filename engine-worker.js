@@ -289,6 +289,7 @@ function relogio() {
     const r = run.s.ram(0);
     if (r) { run.dn = DiaNoite.create(r, run.dnPed.modo, run.dnPed.min); run.dnJogo = run.dnPed.modo === "jogo"; run.dnPed = null; }
   }
+  if (run.quetzal && run.frames >= 120) LinkHLE.semRocket(run.s.ram(0));   // sem trapaça, a Equipe Rocket não aparece (linkhle.js)
   if (!run.dn) return;
   run.dn.quadro();
   if (run.dnJogo && run.frames % 1800 === 0) postMessage({ t: "relogio", min: run.dn.minuto() });

@@ -679,28 +679,41 @@ const LinkHLE = (() => {
   // Sem trapaça, os personagens de fim de jogo também somem: eles entregariam a visita à Fronteira de Batalha.
   // É ele que a troca compara. Só vale para quem começou com cheats: save+0x2CE fica marcado, mesmo com o valor em 0.
   const MODO = { save: 0x030055C0, mapa: 0x030055BC, players: 0x020229F0, size: 0x24, cheat: 0x1F };
-  function trocaModo(ram) {
+  // valor de trapaça do save (0 ou 1), ou null se o save não é de quem começou com cheats
+  function lerModo(ram) {
     if (!ram) return null;
     const sb = ram.r32(MODO.save);
     if (sb < 0x02000000 || sb >= 0x02040000 - 0x1000) return null;
     if (!(ram.r8(sb + 0x2CE) & 0x80) || !(ram.r8(sb + 0x2C7) & 0x20)) return null;
     const chave = (ram.r8(sb + 0xC) | ram.r8(sb + 0xA) << 8 | ram.r8(sb + 0xD) << 16 | ram.r8(sb + 0xB) << 24) >>> 0;
     const v = (ram.r32(sb + 0x2C8) ^ chave) >>> 0;
-    if (v > 1) return null;
-    const novo = v ^ 1, c = (chave ^ novo) >>> 0;
-    ram.w16(sb + 0x2C8, c & 0xFFFF); ram.w16(sb + 0x2CA, c >>> 16);
+    return v > 1 ? null : { sb, chave, v };
+  }
+  function trocaModo(ram) {
+    const m = lerModo(ram);
+    if (!m) return null;
+    const novo = m.v ^ 1, c = (m.chave ^ novo) >>> 0;
+    ram.w16(m.sb + 0x2C8, c & 0xFFFF); ram.w16(m.sb + 0x2CA, c >>> 16);
     // junto, os personagens de fim de jogo (marca 0x4E8, ligada = escondidos): só somem ou voltam ao carregar o próximo mapa
     const s1 = ram.r32(MODO.mapa);
-    if (s1 >= 0x02000000 && s1 < 0x02040000 - 0x1000) {
-      ram.w8(s1 + 0x9D, novo ? ram.r8(s1 + 0x9D) & ~1 : ram.r8(s1 + 0x9D) | 1);
-      // Equipe Rocket (Jessie e James, em todas as cidades): marca 0xC6C = escondida, o jogo só liga ao vencer a dupla.
-      // Sem trapaça o Alt liga a 0xC6C e lembra disso na 0xCAF (livre: nenhum script, objeto ou código usa); com trapaça
-      // só desliga se foi o Alt que ligou, para não trazer de volta uma Rocket já vencida.
-      const rk = s1 + (0xC6C >> 3), rb = 1 << (0xC6C & 7), mk = s1 + (0xCAF >> 3), mb = 1 << (0xCAF & 7);
-      if (!novo) { if (!(ram.r8(rk) & rb)) { ram.w8(rk, ram.r8(rk) | rb); ram.w8(mk, ram.r8(mk) | mb); } }
-      else if (ram.r8(mk) & mb) { ram.w8(rk, ram.r8(rk) & ~rb); ram.w8(mk, ram.r8(mk) & ~mb); }
-    }
+    if (s1 >= 0x02000000 && s1 < 0x02040000 - 0x1000) ram.w8(s1 + 0x9D, novo ? ram.r8(s1 + 0x9D) & ~1 : ram.r8(s1 + 0x9D) | 1);
+    semRocket(ram);
     return novo;
+  }
+  // Equipe Rocket (Jessie e James): a marca 0xC68 = "Rocket ativa" e a variável 0x40DB = cidade sorteada. Ao carregar
+  // cada cidade o jogo (0x081BA9E8) liga a 0xC6C (escondida) e só desliga se a 0xC68 está ligada e é a cidade sorteada;
+  // vencer a dupla desliga a 0xC68. Sem trapaça, depois de cada quadro: 0xC68 ligada -> desliga e anota na 0xCAF
+  // (livre: nenhum script, objeto ou código usa). Com trapaça e 0xCAF anotada: devolve a 0xC68.
+  const RK_ATIVA = 0xC68, RK_NOTA = 0xCAF;
+  function semRocket(ram) {
+    const m = lerModo(ram);
+    if (!m) return;
+    const s1 = ram.r32(MODO.mapa);
+    if (s1 < 0x02000000 || s1 >= 0x02040000 - 0x1000) return;
+    const ak = s1 + (RK_ATIVA >> 3), ab = 1 << (RK_ATIVA & 7), nk = s1 + (RK_NOTA >> 3), nb = 1 << (RK_NOTA & 7);
+    const a = ram.r8(ak);
+    if (m.v === 0) { if (a & ab) { ram.w8(ak, a & ~ab); ram.w8(nk, ram.r8(nk) | nb); } }
+    else if (ram.r8(nk) & nb) { ram.w8(ak, a | ab); ram.w8(nk, ram.r8(nk) & ~nb); }
   }
   function encode(from, m) {
     if (m.k === "c") {
@@ -743,6 +756,6 @@ const LinkHLE = (() => {
     if (b[1] === 14 && b.length >= 8) return { from, m: { k: "esc", v: Array.from(b.subarray(2, 8)) } };
     return null;
   }
-  return { supports, create, encode, decode, trocaModo, GAMES };
+  return { supports, create, encode, decode, trocaModo, semRocket, GAMES };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = LinkHLE;
