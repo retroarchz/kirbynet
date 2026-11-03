@@ -691,7 +691,15 @@ const LinkHLE = (() => {
     ram.w16(sb + 0x2C8, c & 0xFFFF); ram.w16(sb + 0x2CA, c >>> 16);
     // junto, os personagens de fim de jogo (marca 0x4E8, ligada = escondidos): só somem ou voltam ao carregar o próximo mapa
     const s1 = ram.r32(MODO.mapa);
-    if (s1 >= 0x02000000 && s1 < 0x02040000 - 0x1000) ram.w8(s1 + 0x9D, novo ? ram.r8(s1 + 0x9D) & ~1 : ram.r8(s1 + 0x9D) | 1);
+    if (s1 >= 0x02000000 && s1 < 0x02040000 - 0x1000) {
+      ram.w8(s1 + 0x9D, novo ? ram.r8(s1 + 0x9D) & ~1 : ram.r8(s1 + 0x9D) | 1);
+      // Equipe Rocket (Jessie e James, em todas as cidades): marca 0xC6C = escondida, o jogo só liga ao vencer a dupla.
+      // Sem trapaça o Alt liga a 0xC6C e lembra disso na 0xCAF (livre: nenhum script, objeto ou código usa); com trapaça
+      // só desliga se foi o Alt que ligou, para não trazer de volta uma Rocket já vencida.
+      const rk = s1 + (0xC6C >> 3), rb = 1 << (0xC6C & 7), mk = s1 + (0xCAF >> 3), mb = 1 << (0xCAF & 7);
+      if (!novo) { if (!(ram.r8(rk) & rb)) { ram.w8(rk, ram.r8(rk) | rb); ram.w8(mk, ram.r8(mk) | mb); } }
+      else if (ram.r8(mk) & mb) { ram.w8(rk, ram.r8(rk) & ~rb); ram.w8(mk, ram.r8(mk) & ~mb); }
+    }
     return novo;
   }
   function encode(from, m) {
