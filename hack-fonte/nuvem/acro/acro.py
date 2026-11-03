@@ -73,6 +73,11 @@ GIRO_DIR, GIRO_N, GIRO_SV = 0x0203FF3C, 0x0203FF3E, 0x0203FF50   # SV: images +0
 # trava PLENTO alterna 1/2) em vez de 2 px/quadro na 1ª metade e 1 na 2ª. Quadros do giro com tempos diferentes
 # (decolagem rápida, bola no alto, pouso segura) e o último fica GIRO_FIM - 32 quadros depois de pousar.
 PLENTO = 0x0203FF3B
+# Pose na pedra pontuda (pedido 03/11, print do quadro 10 do 657 a pé = de costas): em cima de 0x175/176/17D/17E, a pé
+# e com os quadros do 657 (images 0x090603DC, igual nas 2 ROMs; no coop os outros personagens não mudam), o sprite usa
+# anims com só o quadro 10, para qualquer direção. Sai da pedra: devolve as anims do jogo (guardadas em POSE_SV) e
+# olha para a direção do objeto. Não mexe enquanto o giro está ativo (o giro guarda/devolve as anims dele).
+POSE, POSE_SV, IMG657, POSE_Q = 0x0203FF3A, 0x0203FF34, 0x090603DC, 10
 GIRO_T = [2, 3, 4, 5, 5, 5, 4, 4]          # quadros de tela de cada quadro do giro (soma 32 = tempo do pulo)
 GIRO_FIM = 36
 # altura do pulo a cada quadro (o pulo do jogo só muda o y a cada 2 quadros e sobe 12 px): parábola de 16 px
@@ -263,6 +268,7 @@ def code():
     a.mov('r1', 0x2E); a.ldrsh_r('r2', 'r4', 'r1')
     a.mov('r1', 0x24); a.alu('mul', 'r2', 'r1'); a.ldr_lit('r1', OBJS); a.add_r('r5', 'r2', 'r1')   # r5 = objeto
     a.movh('r0', 'r5'); a.movh('r1', 'r4'); a.ldr_lit('r2', CB_ARG); a.ldr_lit('r3', CB_MOVE | 1); a.bl('callr3c')
+    a.bl('pose')
     a.bl('giro')
     a.ldr_lit('r2', POEIRA); a.ldrb_i('r0', 'r2', 0); a.cmpi('r0', 0); a.bc('eq', 'cpo')
     a.ldrb_i('r0', 'r5', 0); a.mov('r1', 0x80); a.alu('tst', 'r0', 'r1'); a.bc('eq', 'cpo')   # heldMovementFinished
@@ -345,6 +351,34 @@ def code():
     a.label('cfim')
     a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r0']); a.bx('r0')
     a.label('callr3c'); a.bx('r3')
+    # ---------- pose na pedra pontuda (r4 = sprite, r5 = objeto do jogador) ----------
+    a.label('pose')
+    a.push([], lr=True)
+    a.ldr_lit('r0', GIRO_N); a.ldrb_i('r0', 'r0', 0); a.cmpi('r0', 0); a.bfar('ne', 'pose_sai')
+    a.ldrh_i('r0', 'r5', 0x10); a.ldrh_i('r1', 'r5', 0x12); a.bl('tile')
+    a.lsl('r0', 'r0', 22); a.lsr('r0', 'r0', 22); a.ldr_lit('r1', 0x175); a.sub_r('r0', 'r0', 'r1')
+    a.cmpi('r0', 9); a.bfar('hi', 'pose_nao')
+    a.mov('r1', 1); a.h(0x4000 | 2 << 6 | 0 << 3 | 1)                       # lsl r1, r0
+    a.ldr_lit('r2', 0x303); a.alu('tst', 'r1', 'r2'); a.bfar('eq', 'pose_nao')   # 0x175 + 0, 1, 8, 9
+    a.ldr_lit('r0', AVATAR); a.ldrb_i('r0', 'r0', 0); a.mov('r1', 1); a.alu('tst', 'r0', 'r1'); a.bfar('eq', 'pose_nao')
+    a.ldr_i('r0', 'r4', 0xC); a.ldr_lit('r1', IMG657); a.alu('cmp', 'r0', 'r1'); a.bfar('ne', 'pose_nao')
+    a.ldr_lit('r3', POSE); a.ldrb_i('r0', 'r3', 0); a.cmpi('r0', 0); a.bfar('ne', 'pose_sai')
+    a.mov('r0', 1); a.strb_i('r0', 'r3', 0)
+    a.ldr_lit('r2', POSE_SV); a.ldr_i('r0', 'r4', 8); a.str_i('r0', 'r2', 0)
+    a.ldr_lit('r0', 'pose_an'); a.str_i('r0', 'r4', 8)
+    a.mov('r0', 0); a.b('pose_anim')
+    a.label('pose_nao')
+    a.ldr_lit('r3', POSE); a.ldrb_i('r0', 'r3', 0); a.cmpi('r0', 0); a.bfar('eq', 'pose_sai')
+    a.mov('r0', 0); a.strb_i('r0', 'r3', 0)
+    a.ldr_lit('r2', POSE_SV); a.ldr_i('r0', 'r2', 0); a.str_i('r0', 'r4', 8)
+    a.ldrb_i('r0', 'r5', 0x18); a.mov('r1', 0xF); a.alu('and_', 'r0', 'r1'); a.subi('r0', 1); a.mov('r1', 3); a.alu('and_', 'r0', 'r1')
+    a.label('pose_anim')
+    a.mov('r1', 0x2A); a.strb_r('r0', 'r4', 'r1'); a.mov('r0', 0); a.mov('r1', 0x2B); a.strb_r('r0', 'r4', 'r1')
+    a.mov('r1', 0x2C); a.ldrb_r('r0', 'r4', 'r1'); a.mov('r2', 0x80); a.alu('and_', 'r0', 'r2'); a.strb_r('r0', 'r4', 'r1')
+    a.mov('r1', 0x3F); a.ldrb_r('r0', 'r4', 'r1'); a.mov('r2', 0x10); a.alu('bic', 'r0', 'r2'); a.mov('r2', 4); a.alu('orr', 'r0', 'r2')
+    a.strb_r('r0', 'r4', 'r1')
+    a.label('pose_sai'); a.pop([], pc=True)
+    a.pool()
     # ---------- salto giratório (r4 = sprite do jogador; não mexe em r4..r7) ----------
     a.label('giro')
     a.ldr_lit('r3', GIRO_N); a.ldrb_i('r0', 'r3', 0); a.cmpi('r0', 0); a.bc('ne', 'gcont')
@@ -653,6 +687,9 @@ def code():
     for v in 'EWV':
         a.label('giro_an' + v)
         for _ in range(32): a.word('giro_cmd' + v)
+    a.label('pose_cmd'); a.word(POSE_Q | 1 << 16); a.word(0xFFFF)
+    a.label('pose_an')
+    for _ in range(32): a.word('pose_cmd')
     a.label('giro_dirs')
     for v in 'VVWE': a.word('giro_an' + v)                                  # sul, norte, oeste, leste
     a.label('giro_y')
