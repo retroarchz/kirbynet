@@ -15,6 +15,7 @@ DEBUG = bool(os.environ.get('DEBUG'))
 CODE = 0x09FF4000            # livre nas duas ROMs do Quetzal mesmo com todos os mods do site
 AVATAR = 0x02039070          # gPlayerAvatar (+5: objectEventId)
 OBJS = 0x02038D10            # gObjectEvents (0x24 cada, 16)
+SPRITES = 0x02020630         # gSprites (0x44 cada); gPlayerAvatar +4 = spriteId do jogador
 LAYOUT = 0x03005600          # gBackupMapLayout {largura, altura, mapa}: coordenadas do objeto direto (com o +7)
 MAPHDR = 0x02038CB0          # gMapHeader.mapLayout -> +16 tileset primário, +20 secundário
 
@@ -38,7 +39,8 @@ CB_SITE, CB_MOVE, CB_ARG = 0x080CAD60, 0x080D7168, 0x080CAD85
 DESL = 0x0203FF40
 OFFS = [(0x150, 8, 8), (0x152, 8, 8), (0x154, 8, 8), (0x151, -8, 8), (0x153, -8, 8),
         (0x158, 8, -8), (0x15C, 8, -8), (0x159, -8, -8),
-        (0x164, 8, 8), (0x16C, 8, -8), (0x15A, 8, -8), (0x15B, -8, -8)]   # quadrado do bloco -> onde fica o centro da pedra (px)
+        (0x164, 8, 8), (0x16C, 8, -8), (0x15A, 8, -8), (0x15B, -8, -8),
+        (0x175, 8, 8), (0x176, -8, 8), (0x17D, 8, -8), (0x17E, -8, -8)]   # quadrado do bloco -> onde fica o centro da pedra (px)
 # A pé (pedido 02/11; 03/11 trocado de X para Z): virado para a pedra/cerca, apertando Z (= A do GBA) ele dá o pulinho do barranco para cima dela.
 # PlayerNotOnBikeMoving (0x080CB538, r5 = direção, r6 = teclas seguradas): no "bate na parede" (0x080CB58C) desvia.
 # Enquanto ele bate na parede o jogo não lê teclas, então o aperto do B fica guardado por 40 quadros (TRAVA_B, contado
@@ -71,6 +73,7 @@ PLAT = [
     (PRIM, [0x080, 0x081, 0x082, 0x088, 0x071, 0x08A, 0x090, 0x079, 0x092]),   # pedra grande marrom (3x3)
     (PRIM, [0x150, 0x151, 0x152, 0x153, 0x154, 0x158, 0x159, 0x15C]),    # pedras cinza do mar
     (PRIM, [0x164, 0x16C, 0x15A, 0x15B]),                                # pedras do mar encostadas na margem (print 02/11 20:14)
+    (PRIM, [0x175, 0x176, 0x17D, 0x17E]),                                # pedra pontuda do mar 2x2 (print 03/11 20:21, mapa 0.21)
     (PRIM, [0x172, 0x174, 0x17A, 0x17B, 0x17C, 0x182, 0x184, 0x0B4, 0x089]),   # pedra grande do mar (o meio é 0x071/0x079)
     (SEC, [0x280, 0x282, 0x288, 0x28A, 0x291, 0x292]),                   # cerca de troncos
 ]
@@ -261,9 +264,9 @@ def code():
     a.mov('r2', 2); a.alu('orr', 'r0', 'r2'); a.strb_r('r0', 'r4', 'r1')      # tabela de pedaços 2 = prioridade 1
     a.label('cfrn')
     a.movh('r0', 'r7')
-    # rápido (roda todo quadro): só procura na lista se o quadrado for 0x150..0x16C; sem alvo e sem deslocamento: nada
+    # rápido (roda todo quadro): só procura na lista se o quadrado for 0x150..0x17E; sem alvo e sem deslocamento: nada
     a.lsl('r1', 'r0', 22); a.lsr('r1', 'r1', 22); a.mov('r2', 0xA8); a.lsl('r2', 'r2', 1); a.sub_r('r1', 'r1', 'r2')
-    a.mov('r6', 0); a.cmpi('r1', 0x1C); a.bc('hi', 'csem')
+    a.mov('r6', 0); a.cmpi('r1', 0x2E); a.bc('hi', 'csem')
     a.bl('desloc'); a.movh('r6', 'r0')                                     # alvo
     a.label('csem')
     a.ldr_lit('r2', MAIN_NEW); a.ldrh_i('r0', 'r2', 0); a.ldr_lit('r2', TRAVA_B); a.ldrb_i('r1', 'r2', 0)
@@ -397,20 +400,48 @@ def code():
     a.bl('plat'); a.pop(['r1'])
     a.cmpi('r0', 0); a.bc('ne', 'dois_livre')
     # em cima de uma pedra/cerca: chão comum a 2 casas também serve (bloqueio 0, altura de chão: não água)
-    a.movh('r0', 'r9'); a.cmpi('r0', 0); a.bc('eq', 'nada')
-    a.mov('r0', 0); a.mvn('r0', 'r0'); a.alu('cmp', 'r1', 'r0'); a.bc('eq', 'nada')
-    a.lsr('r0', 'r1', 10); a.mov('r2', 3); a.alu('tst', 'r0', 'r2'); a.bc('ne', 'nada')
-    a.lsr('r0', 'r1', 12); a.cmpi('r0', 2); a.bc('lo', 'nada'); a.cmpi('r0', 15); a.bc('eq', 'nada')
+    a.movh('r0', 'r9'); a.cmpi('r0', 0); a.bc('eq', 'tres')
+    a.mov('r0', 0); a.mvn('r0', 'r0'); a.alu('cmp', 'r1', 'r0'); a.bc('eq', 'tres')
+    a.lsr('r0', 'r1', 10); a.mov('r2', 3); a.alu('tst', 'r0', 'r2'); a.bc('ne', 'tres')
+    a.lsr('r0', 'r1', 12); a.cmpi('r0', 2); a.bc('lo', 'tres'); a.cmpi('r0', 15); a.bc('eq', 'tres')
     a.label('dois_livre')
     a.movh('r0', 'r10'); a.add_r('r0', 'r0', 'r6'); a.add_r('r0', 'r0', 'r6')
     a.movh('r1', 'r11'); a.add_r('r1', 'r1', 'r7'); a.add_r('r1', 'r1', 'r7')
-    a.bl('livre'); a.cmpi('r0', 0); a.bc('eq', 'nada')
+    a.bl('livre'); a.cmpi('r0', 0); a.bc('eq', 'tres')
     a.movh('r0', 'r8'); a.cmpi('r0', 0); a.bc('eq', 'dois_hop')
     a.cmpi('r0', 2); a.bc('ne', 'dois_np'); a.bl('jogador'); a.bl('poeira')
     a.label('dois_np')
     a.movh('r0', 'r4'); a.ldr_lit('r3', JUMP2 | 1); a.bl('callr3b'); a.mov('r0', 1); a.b('fim')
     a.label('dois_hop')
     a.movh('r0', 'r4'); a.ldr_lit('r3', HOP2 | 1); a.bl('callr3b'); a.mov('r0', 1); a.b('fim')
+    # 3 casas (pedido 03/11: pedra pontuda a 3 casas da areia). O jogo só pula 2: o jogador passa para o quadrado da
+    # frente sem mexer no desenho (mesma troca de quadrado da pedra do mar, em 'pachou') e dá o pulo de 2 casas dali; o
+    # desenho anda os 16 px que faltam 1 px por quadro (V vai a 0). Estado novo em DESL: o callback estava no caminho
+    # rápido e não tinha x/y nem base guardados.
+    a.label('tres')
+    a.movh('r0', 'r10'); a.add_r('r0', 'r0', 'r6'); a.add_r('r0', 'r0', 'r6'); a.add_r('r0', 'r0', 'r6')
+    a.movh('r1', 'r11'); a.add_r('r1', 'r1', 'r7'); a.add_r('r1', 'r1', 'r7'); a.add_r('r1', 'r1', 'r7')
+    a.bl('tile'); a.push(['r0'])
+    a.bl('plat'); a.pop(['r1'])
+    a.cmpi('r0', 0); a.bc('ne', 'tres_ok')
+    a.movh('r0', 'r9'); a.cmpi('r0', 0); a.bc('eq', 'nada')               # chão a 3 casas só saindo de pedra/cerca
+    a.movh('r0', 'r1'); a.bl('chao'); a.cmpi('r0', 0); a.bc('eq', 'nada')
+    a.label('tres_ok')
+    a.movh('r0', 'r10'); a.add_r('r0', 'r0', 'r6'); a.add_r('r0', 'r0', 'r6'); a.add_r('r0', 'r0', 'r6')
+    a.movh('r1', 'r11'); a.add_r('r1', 'r1', 'r7'); a.add_r('r1', 'r1', 'r7'); a.add_r('r1', 'r1', 'r7')
+    a.bl('livre'); a.cmpi('r0', 0); a.bc('eq', 'nada')
+    a.bl('jogador')
+    a.ldr_lit('r0', AVATAR); a.ldrb_i('r0', 'r0', 4); a.mov('r1', 0x44); a.alu('mul', 'r0', 'r1')
+    a.ldr_lit('r1', SPRITES); a.add_r('r2', 'r0', 'r1')
+    a.ldr_lit('r3', DESL); a.mov('r0', 0); a.str_i('r0', 'r3', 0)
+    a.ldrh_i('r0', 'r2', 0x20); a.strh_i('r0', 'r3', 4); a.ldrh_i('r0', 'r2', 0x22); a.strh_i('r0', 'r3', 6)
+    a.ldrh_i('r0', 'r2', 0x24); a.strh_i('r0', 'r3', 8); a.strh_i('r0', 'r3', 12)
+    a.ldrh_i('r0', 'r2', 0x26); a.strh_i('r0', 'r3', 10); a.strh_i('r0', 'r3', 14)
+    a.subsp(40)
+    a.movh('r0', 'r10'); a.add_r('r0', 'r0', 'r6'); a.str_sp('r0', 28)
+    a.movh('r0', 'r11'); a.add_r('r0', 'r0', 'r7'); a.str_sp('r0', 32)
+    a.mov('r0', 2); a.str_sp('r0', 36); a.b('pachou')
+    a.pool()
     a.label('nada'); a.mov('r0', 0)
     a.label('fim')
     a.pop(['r2', 'r3']); a.movh('r10', 'r2'); a.movh('r11', 'r3')
@@ -496,6 +527,21 @@ def code():
     a.ldr_sp('r0', 20); a.str_sp('r0', 28); a.ldr_sp('r0', 24); a.str_sp('r0', 32); a.mov('r0', 2); a.str_sp('r0', 36)
     a.b('pachou')
     a.label('pn2_20')
+    # 3 casas: escolhe o quadrado da frente da pedra (água) e pula 2 de lá (o desenho compensa, como em 'tres')
+    for sx, sy in ((12, 16), (20, 24)):
+        n = '%d' % sx
+        a.ldr_sp('r0', sx); a.ldr_sp('r1', sy)
+        for _ in range(3): a.add_r('r0', 'r0', 'r6'); a.add_r('r1', 'r1', 'r7')
+        a.bl('tile'); a.str_sp('r0', 36); a.bl('plat'); a.cmpi('r0', 0); a.bc('ne', 'pc3_' + n)
+        a.ldr_sp('r0', 36); a.bl('chao'); a.cmpi('r0', 0); a.bc('eq', 'pn3_' + n)
+        a.label('pc3_' + n)
+        a.ldr_sp('r0', sx); a.ldr_sp('r1', sy)
+        for _ in range(3): a.add_r('r0', 'r0', 'r6'); a.add_r('r1', 'r1', 'r7')
+        a.bl('livre'); a.cmpi('r0', 0); a.bc('eq', 'pn3_' + n)
+        a.ldr_sp('r0', sx); a.add_r('r0', 'r0', 'r6'); a.str_sp('r0', 28)
+        a.ldr_sp('r0', sy); a.add_r('r0', 'r0', 'r7'); a.str_sp('r0', 32); a.mov('r0', 2); a.str_sp('r0', 36)
+        a.b('pachou')
+        a.label('pn3_' + n)
     a.addsp(40); a.b('nada')
     a.label('pachou')
     # troca o quadrado do jogador dentro da pedra (se precisar) sem mexer no desenho
