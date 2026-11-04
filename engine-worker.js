@@ -483,7 +483,7 @@ function tick() {
 // ---------- editor de eventos do Pokémon Quetzal (editorqz.js; a tela fica no editor.js) ----------
 // Nunca na sala por rollback (lá todos rodam a mesma ROM). Os eventos são escritas na ROM da partida (romWrite), refeitas
 // do zero a cada aplicação: desfaz as anteriores (cabeçalhos originais + faixas livres de volta a 0xFF) e monta de novo.
-let edPend = null, edOrig = null, edOrigScr = null, edVig = [];
+let edPend = null, edOrig = null, edOrigScr = null, edVig = [], edVigVoo = false;
 const edPode = () => run && run.quetzal && !run.rb && !SNES && run.s.romWrite;
 function edBus() {
   const s = run.s, r16 = (a) => s.read16(0, a) & 0xFFFF;
@@ -525,7 +525,7 @@ function edAplica(m) {
 // usa a NOSSA lista (ponteiro de eventos do gMapHeader 0x02038CB4 dentro das faixas do editor) e a cópia está diferente,
 // copia a lista certa. O jogo cria quem faltar quando a câmera anda (TrySpawnObjectEvents lê essa cópia).
 function edVigia() {
-  if (edVig.length && run.frames % 8 === 0 && edPode()) { const r = run.s.ram(0); if (r) EditorQZ.vigiaVoo(r, edVig); }   // voar no fim do "anda junto"
+  if (edVig.length && (edVigVoo || run.frames % 8 === 0) && edPode()) { const r = run.s.ram(0); if (r) edVigVoo = EditorQZ.vigiaVoo(r, edVig); }   // voar no fim do "anda junto" (a cada quadro durante o voo)
   if (!edOrig || run.frames % 30 || !edPode()) return;
   const ram = run.s.ram(0); if (!ram) return;
   const ev = ram.r32(0x02038CB4);

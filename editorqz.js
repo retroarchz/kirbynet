@@ -372,7 +372,7 @@ const EditorQZ = (() => {
               escritas.push([aa, au.c]); autos.push([v, 0, aa]);
               if (au.voaFim) {   // modo solto + voar: quando ele chega no fim, o site (worker) põe a var em 2 e esta parte roda
                 const ml = [0x25, 0xFE], ma = aloca(ml.length), c2 = [0x69, 0x4F, ...u16(id), ...u32(ma || 0), 0x51, 0x00, 0x00,
-                  0x28, 0x32, 0x00, 0x9D, 0x00, 0x01, 0x00, 0x9C, 0x1E, 0x00, 0x28, 0x0F, 0x00, 0x53, ...u16(id), 0x9E, 0x1E, 0x00,
+                  0x28, 0x1E, 0x00, 0x9D, 0x00, 0x01, 0x00, 0x9C, 0x1E, 0x00, 0x9E, 0x1E, 0x00, 0x53, ...u16(id),   // o pássaro leva (vigiaVoo) e só então some
                   0x16, ...u16(v), 0x03, 0x00, 0x6B, 0x02];
                 const a2 = aloca(c2.length);
                 if (!ma || !a2) avisos.push("acabou o espaço livre da ROM");
@@ -470,22 +470,49 @@ const EditorQZ = (() => {
   }
   // modo "você anda junto" + voar no fim: quando o personagem chegou no ponto final e parou, põe a var da cena em 2
   // (a tabela ON_FRAME do mapa roda então a 2ª parte: pulinho e o pássaro do Fly). Vars temporárias: SaveBlock1 + 0x1D4.
+  // O pássaro do Fly (FLDEFF_NPCFLY_OUT) nasce em (120,0) da tela e faz um meio arco que passa pelo MEIO (onde fica o
+  // jogador): bom nas cenas do jogo, feio com o personagem longe (relato 04/11). Aqui o arco é deslocado para passar
+  // por cima dele e, no ponto mais baixo, liga o "carregar" que o próprio efeito tem (data[0]=1, data[1]=sprite).
+  // gSprites 0x020206B8 (0x44 cada; +0x20 x, +0x22 y, +0x2E data[], +0x3E bit0 em uso); data[0] do sprite de um objeto
+  // = índice do objeto. Roda a cada quadro enquanto um voo está acontecendo.
+  const SPRS = 0x020206B8;
   function vigiaVoo(ram, vigias) {
-    if (!vigias || !vigias.length) return;
+    if (!vigias || !vigias.length) return false;
     const s1 = ram.r32(0x030055BC);
-    if (s1 < 0x02000000 || s1 >= 0x02040000 - 0x2000) return;
-    const aqui = ram.r8(s1 + 0x474) + "." + ram.r8(s1 + 0x475);
+    if (s1 < 0x02000000 || s1 >= 0x02040000 - 0x2000) return false;
+    const aqui = ram.r8(s1 + 0x474) + "." + ram.r8(s1 + 0x475), s16 = (a) => (ram.r16(a) << 16) >> 16;
+    const w16 = (a, v) => ram.w16(a, v & 0xFFFF);
+    let ativo = false;
     for (const g of vigias) {
-      if (g.mapa !== aqui) continue;
+      if (g.mapa !== aqui) { g.fase = 0; continue; }
       const va = s1 + 0x1D4 + (g.v - 0x4000) * 2;
-      if (ram.r16(va) !== 1) continue;
-      for (let i = 0; i < 16; i++) {
-        const o = 0x02038D10 + 0x24 * i;
-        if (!(ram.r8(o) & 1) || ram.r8(o + 8) !== g.id) continue;
-        if (ram.r16(o + 0x10) - 7 === g.x && ram.r16(o + 0x12) - 7 === g.y && !(ram.r8(o) & 2)) ram.w16(va, 2);
-        break;
+      let oi = -1;
+      for (let i = 0; i < 16; i++) { const o = OBJS + 0x24 * i; if ((ram.r8(o) & 1) && ram.r8(o + 8) === g.id) { oi = i; break; } }
+      if (!g.fase) {
+        if (ram.r16(va) !== 1 || oi < 0) continue;
+        const o = OBJS + 0x24 * oi;
+        if (ram.r16(o + 0x10) - 7 === g.x && ram.r16(o + 0x12) - 7 === g.y && !(ram.r8(o) & 2)) { w16(va, 2); g.fase = 1; g.t = 0; }
+        continue;
       }
+      ativo = true; g.t++;
+      if (g.t > 240) { g.fase = 0; continue; }   // segurança
+      if (g.fase === 1) {   // espera o pássaro nascer e desloca o arco
+        let ave = -1;
+        for (let i = 0; i < 64; i++) { const b = SPRS + 0x44 * i; if ((ram.r16(b + 0x3E) & 1) && s16(b + 0x20) === 120 && s16(b + 0x22) === 0 && ram.r16(b + 0x30) === 1 && ram.r16(b + 0x32) <= 8) { ave = i; break; } }
+        if (ave < 0 || oi < 0) continue;
+        let sw = -1;
+        for (let i = 0; i < 64; i++) { const b = SPRS + 0x44 * i; if (i !== ave && (ram.r16(b + 0x3E) & 1) && ram.r16(b + 0x2E) === oi) { sw = i; break; } }
+        if (sw < 0) { g.fase = 0; continue; }
+        const o = OBJS + 0x24 * oi, dx = (ram.r16(o + 0x10) - ram.r16(OBJS + 0x10)) * 16, dy = (ram.r16(o + 0x12) - ram.r16(OBJS + 0x12)) * 16;
+        const b = SPRS + 0x44 * ave; w16(b + 0x20, 120 + dx); w16(b + 0x22, dy);
+        g.ave = ave; g.sw = sw; g.fase = 2;
+      } else if (g.fase === 2) {   // no ponto mais baixo do arco: o pássaro pega ele
+        const b = SPRS + 0x44 * g.ave;
+        if (!(ram.r16(b + 0x3E) & 1)) { g.fase = 0; continue; }
+        if (ram.r16(b + 0x32) >= 64) { w16(b + 0x30, g.sw); w16(b + 0x2E, 1); g.fase = 3; }
+      } else if (!(ram.r16(SPRS + 0x44 * g.ave + 0x3E) & 1)) g.fase = 0;   // o pássaro saiu: acabou
     }
+    return ativo;
   }
   return { local, cabecalho, desenhaMapa, objetos, trajeto, dadosMapa, desenhaSprite, infoSprite, catalogo, treinadores, itens, texto, montar, vigiaVoo, desfazer, MOV, LIVRE, MARCAS };
 })();
