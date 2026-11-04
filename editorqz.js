@@ -256,6 +256,11 @@ const EditorQZ = (() => {
               movs.push([s.length + 3, ml]); s.push(0x4F, ...u16(id), 0, 0, 0, 0, 0x51, 0x00, 0x00);   // applymovement id, lista; waitmovement 0
             }
             else if (p.t === "esperar") s.push(0x28, ...u16(Math.max(1, Math.min(600, (p.n | 0) * 60))));   // delay em quadros (n segundos)
+            else if (p.t === "voar") {   // sai voando como nas cenas do jogo (0x082C72D2): pulinho, o pássaro passa e leva
+              movs.push([s.length + 3, [0x25, 0xFE]]); s.push(0x4F, ...u16(id), 0, 0, 0, 0, 0x51, 0x00, 0x00);   // pulo no lugar
+              s.push(0x28, 0x32, 0x00, 0x9D, 0x00, 0x01, 0x00, 0x9C, 0x1E, 0x00, 0x28, 0x0F, 0x00);           // delay 50, efeito 30
+              s.push(0x53, ...u16(id), 0x9E, 0x1E, 0x00);                                                  // removeobject, waitfieldeffect
+            }
           }
           if (e.fim === "uma") s.push(0x29, ...u16(e.marca));
           if (e.fim === "some") s.push(0x29, ...u16(e.marca), 0x53, ...u16(id));   // setflag, removeobject id

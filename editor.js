@@ -20,7 +20,7 @@ const Editor = {
   },
   ACOES: { falar: "💬 Falar", item: "🎁 Dar item (uma vez)", chao: "📦 Item no chão", lutar: "⚔️ Lutar", teleporte: "🌀 Teleporte",
            sequencia: "📜 Sequência (falar, dar item, andar…)" },
-  PASSOS: { falar: "💬 Falar", item: "🎁 Dar item", andar: "🚶 Andar", virar: "↪️ Virar", esperar: "⏳ Esperar" },
+  PASSOS: { falar: "💬 Falar", item: "🎁 Dar item", andar: "🚶 Andar", virar: "↪️ Virar", esperar: "⏳ Esperar", voar: "🕊️ Sair voando" },
   DIRS: { baixo: "para baixo", cima: "para cima", esq: "para a esquerda", dir: "para a direita" },
   // marcas que o jogo liga: insígnia N = 0xA7F + N - 1 (achado nos scripts dos ginásios), treinador vencido = 0x500 + id
   INSIGNIAS: ["ganhar a 1ª insígnia (Roxanne, Rustboro)", "ganhar a 2ª insígnia (Brawly, Dewford)", "ganhar a 3ª insígnia (Wattson, Mauville — Raio)",
@@ -336,6 +336,7 @@ const Editor = {
         if (p.t === "andar") campo = `<div class="linha"><select data-i="${i}" data-k="dir">${op(this.DIRS, p.dir || "baixo")}</select><input data-i="${i}" data-k="n" type="number" min="1" max="30" value="${p.n || 1}" title="quantos quadrados"><span class="dica" style="flex:0">quadrados</span></div>`;
         if (p.t === "virar") campo = `<select data-i="${i}" data-k="dir">${op(this.DIRS, p.dir || "baixo")}</select>`;
         if (p.t === "esperar") campo = `<div class="linha"><input data-i="${i}" data-k="n" type="number" min="1" max="10" value="${p.n || 1}"><span class="dica" style="flex:0">segundo(s)</span></div>`;
+        if (p.t === "voar") campo = `<div class="dica">Pulinho e um Pokémon voador passa e leva ele (como nas cenas do jogo). Use "Some e não volta mais" no fim para ele não voltar.</div>`;
         return `<div style="border:1px solid #2a2e38;border-radius:8px;padding:6px;margin:6px 0"><div class="linha"><b style="flex:3">${i + 1}. ${this.PASSOS[p.t]}</b>
           <button class="ghost" data-mv="${i}" data-d="-1" title="subir">↑</button><button class="ghost" data-mv="${i}" data-d="1" title="descer">↓</button><button class="ghost perigo" data-rm="${i}" title="tirar">✕</button></div>${campo}</div>`;
       }).join("") + `</div><div class="linha" style="flex-wrap:wrap">${Object.entries(this.PASSOS).map(([k, n]) => `<button class="ghost" data-add="${k}">+ ${n}</button>`).join("")}</div>
@@ -369,7 +370,7 @@ const Editor = {
       p.querySelectorAll("[data-add]").forEach((b) => b.onclick = () => {
         const t = b.dataset.add, novo = { t };
         if (t === "falar") novo.texto = "…"; if (t === "item") { novo.item = 1; novo.qtd = 1; } if (t === "andar") { novo.dir = "baixo"; novo.n = 2; } if (t === "virar") novo.dir = "baixo"; if (t === "esperar") novo.n = 1;
-        s.passos.push(novo); this.mudou = true; this.desenhaPainel();
+        s.passos.push(novo); if (t === "voar" && (s.fim || "repete") === "repete") s.fim = "some"; this.mudou = true; this.desenhaPainel();
       });
     }
     const filtra = (bid, sid) => { const b = $(bid), sel = $(sid); if (!b) return; b.oninput = () => { const t = b.value.toLowerCase(); for (const o of sel.options) o.hidden = t && !o.text.toLowerCase().includes(t); }; };
