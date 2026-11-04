@@ -20,7 +20,7 @@ const Editor = {
   },
   ACOES: { falar: "💬 Falar", item: "🎁 Dar item (uma vez)", chao: "📦 Item no chão", lutar: "⚔️ Lutar", teleporte: "🌀 Teleporte",
            sequencia: "📜 Sequência (falar, dar item, andar…)" },
-  PASSOS: { falar: "💬 Falar", item: "🎁 Dar item", andar: "🚶 Andar", virar: "↪️ Virar", esperar: "⏳ Esperar", voar: "🕊️ Sair voando", sumir: "🚪 Entrar e sumir" },
+  PASSOS: { falar: "💬 Falar", item: "🎁 Dar item", pedir: "🤲 Pedir item", andar: "🚶 Andar", virar: "↪️ Virar", esperar: "⏳ Esperar", voar: "🕊️ Sair voando", sumir: "🚪 Entrar e sumir" },
   DIRS: { baixo: "para baixo", cima: "para cima", esq: "para a esquerda", dir: "para a direita" },
   // marcas que o jogo liga: insígnia N = 0xA7F + N - 1 (achado nos scripts dos ginásios), treinador vencido = 0x500 + id
   INSIGNIAS: ["ganhar a 1ª insígnia (Roxanne, Rustboro)", "ganhar a 2ª insígnia (Brawly, Dewford)", "ganhar a 3ª insígnia (Wattson, Mauville — Raio)",
@@ -361,6 +361,10 @@ const Editor = {
         if (p.t === "andar") campo = `<div class="linha"><select data-i="${i}" data-k="dir">${op(this.DIRS, p.dir || "baixo")}</select><input data-i="${i}" data-k="n" type="number" min="1" max="30" value="${p.n || 1}" title="quantos quadrados"><span class="dica" style="flex:0 0 auto;margin:0">quadrados</span></div>`;
         if (p.t === "virar") campo = `<select data-i="${i}" data-k="dir">${op(this.DIRS, p.dir || "baixo")}</select>`;
         if (p.t === "esperar") campo = `<div class="linha"><input data-i="${i}" data-k="n" type="number" min="1" max="10" value="${p.n || 1}"><span class="dica" style="flex:0 0 auto;margin:0">segundo(s)</span></div>`;
+        if (p.t === "pedir") campo = `<div class="linha"><select data-i="${i}" data-k="item" style="flex:3">${opItem(p.item)}</select><input data-i="${i}" data-k="qtd" type="number" min="1" max="99" value="${p.qtd || 1}"></div>
+          <label>Se você ainda não tem (ele para aqui)</label><textarea data-i="${i}" data-k="texto">${esc(p.texto)}</textarea>
+          <label>Quando você entrega (opcional)</label><textarea data-i="${i}" data-k="texto2">${esc(p.texto2 || "")}</textarea>
+          <div class="dica">Com o item na mochila, ele tira o item e segue para os próximos passos.</div>`;
         if (p.t === "sumir") campo = `<div class="dica">Som de porta e ele desaparece, como se entrasse. Use depois de "Andar" até uma porta de enfeite, cortina, caverna…</div>`;
         if (p.t === "voar") campo = `<div class="dica">Pulinho e um Pokémon voador passa e leva ele (como nas cenas do jogo). Use "Some e não volta mais" no fim para ele não voltar.</div>`;
         return `<div class="passo"><div class="passo-cab"><span class="num">${i + 1}</span><span class="tipo">${this.PASSOS[p.t]}</span>
@@ -397,7 +401,7 @@ const Editor = {
       });
       p.querySelectorAll("[data-add]").forEach((b) => b.onclick = () => {
         const t = b.dataset.add, novo = { t };
-        if (t === "falar") novo.texto = "…"; if (t === "item") { novo.item = 1; novo.qtd = 1; } if (t === "andar") { novo.dir = "baixo"; novo.n = 2; } if (t === "virar") novo.dir = "baixo"; if (t === "esperar") novo.n = 1;
+        if (t === "falar") novo.texto = "…"; if (t === "pedir") { novo.item = 1; novo.qtd = 1; novo.texto = "Preciso de um item. Me traz?"; novo.texto2 = "Obrigado!"; } if (t === "item") { novo.item = 1; novo.qtd = 1; } if (t === "andar") { novo.dir = "baixo"; novo.n = 2; } if (t === "virar") novo.dir = "baixo"; if (t === "esperar") novo.n = 1;
         s.passos.push(novo); if ((t === "voar" || t === "sumir") && (s.fim || "repete") === "repete") s.fim = "some"; this.mudou = true; zera(); this.desenhaPainel(); this.desenha();
       });
     }

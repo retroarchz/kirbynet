@@ -285,7 +285,7 @@ const EditorQZ = (() => {
           s.push(0x6A, 0x5A);                                          // lock, faceplayer
           let desvio = -1;
           if (e.fim === "uma") { s.push(0x2B, ...u16(e.marca)); desvio = s.length; s.push(0x06, 0x01, 0, 0, 0, 0); }
-          const movs = [], tr = trajeto(mapaD, e, lista);
+          const movs = [], tr = trajeto(mapaD, e, lista), faltas = [];
           // (sem aviso de 'andou menos': o editor já desenha o caminho com ✖ onde ele para; o usuário pediu sem esse pop-up)
           for (const p of tr.passos) {
             if (p.t === "falar") { const a = poeTexto(p.texto || "…"); s.push(0x0F, 0x00, ...u32(a), 0x09, 0x04); }
@@ -299,6 +299,13 @@ const EditorQZ = (() => {
               if (p.porta) s.push(0x2F, 0x09, 0x00, 0x53, ...u16(id));   // pisou na porta: som de saída (playse 9) e some
             }
             else if (p.t === "esperar") s.push(0x28, ...u16(Math.max(1, Math.min(600, (p.n | 0) * 60))));   // delay em quadros (n segundos)
+            else if (p.t === "pedir") {   // missão: confere a mochila; sem o item diz o pedido e para; com o item, tira e segue
+              const it = p.item | 0, q = Math.max(1, Math.min(99, p.qtd | 0));
+              s.push(0x47, ...u16(it), ...u16(q), 0x21, 0x0D, 0x80, 0x00, 0x00);   // checkitem; compare VAR_RESULT, 0
+              faltas.push([s.length + 2, p.texto || "Preciso de um item… volte quando tiver!"]); s.push(0x06, 0x01, 0, 0, 0, 0);   // goto_if_eq -> pedido
+              s.push(0x45, ...u16(it), ...u16(q));                                // removeitem
+              if (p.texto2) { const a = poeTexto(p.texto2); s.push(0x0F, 0x00, ...u32(a), 0x09, 0x04); }
+            }
             else if (p.t === "sumir") s.push(0x2F, 0x09, 0x00, 0x53, ...u16(id));   // "entra" (porta de enfeite, caverna…): som de porta e some
             else if (p.t === "voar") {   // sai voando como nas cenas do jogo (0x082C72D2): pulinho, o pássaro passa e leva
               movs.push([s.length + 3, [0x25, 0xFE]]); s.push(0x4F, ...u16(id), 0, 0, 0, 0, 0x51, 0x00, 0x00);   // pulo no lugar
@@ -309,11 +316,13 @@ const EditorQZ = (() => {
           if (e.fim === "uma") s.push(0x29, ...u16(e.marca));
           if (e.fim === "some") s.push(0x29, ...u16(e.marca), 0x53, ...u16(id));   // setflag, removeobject id
           s.push(0x6C, 0x02);
+          s.__fix = [];
           if (e.fim === "uma") {
             const ja = s.length, a2 = poeTexto(e.texto2 || "Boa sorte na sua jornada!");
             s.push(0x0F, 0x00, ...u32(a2), 0x09, 0x04, 0x6C, 0x02);
-            s.__fix = [[desvio + 2, ja]];
+            s.__fix.push([desvio + 2, ja]);
           }
+          for (const [k, t] of faltas) { s.__fix.push([k, s.length]); const a = poeTexto(t); s.push(0x0F, 0x00, ...u32(a), 0x09, 0x04, 0x6C, 0x02); }
           for (const [k, ml] of movs) { const a = aloca(ml.length); if (!a) { avisos.push("acabou o espaço livre da ROM"); break; } escritas.push([a, ml]); const v = u32(a); for (let j = 0; j < 4; j++) s[k + j] = v[j]; }
         }
         else if (e.acao === "lutar") {   // treinador existente: luta uma vez (a marca é a do próprio treinador)
