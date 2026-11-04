@@ -491,7 +491,7 @@ const EditorQZ = (() => {
       if (!g.fase) {
         if (ram.r16(va) !== 1 || oi < 0) continue;
         const o = OBJS + 0x24 * oi;
-        if (ram.r16(o + 0x10) - 7 === g.x && ram.r16(o + 0x12) - 7 === g.y && !(ram.r8(o) & 2)) { w16(va, 2); g.fase = 1; g.t = 0; }
+        if (ram.r16(o + 0x10) - 7 === g.x && ram.r16(o + 0x12) - 7 === g.y && !(ram.r8(o) & 2)) { w16(va, 2); g.fase = 1; g.t = 0; g.copia = null; }
         continue;
       }
       ativo = true; g.t++;
@@ -500,17 +500,35 @@ const EditorQZ = (() => {
         let ave = -1;
         for (let i = 0; i < 64; i++) { const b = SPRS + 0x44 * i; if ((ram.r16(b + 0x3E) & 1) && s16(b + 0x20) === 120 && s16(b + 0x22) === 0 && ram.r16(b + 0x30) === 1 && ram.r16(b + 0x32) <= 8) { ave = i; break; } }
         if (ave < 0 || oi < 0) continue;
-        let sw = -1;
-        for (let i = 0; i < 64; i++) { const b = SPRS + 0x44 * i; if (i !== ave && (ram.r16(b + 0x3E) & 1) && ram.r16(b + 0x2E) === oi) { sw = i; break; } }
+        // as figuras com data[0] = índice dele: ele, o reflexo na água (relato 04/11: o pássaro "bateu" e levou o reflexo),
+        // sombra… Ele é a de cima (reflexo e sombra ficam abaixo dos pés).
+        let sw = -1; const outras = [];
+        for (let i = 0; i < 64; i++) {
+          const b = SPRS + 0x44 * i;
+          if (i === ave || !(ram.r16(b + 0x3E) & 1) || ram.r16(b + 0x2E) !== oi) continue;
+          if (sw < 0 || s16(b + 0x22) < s16(SPRS + 0x44 * sw + 0x22)) { if (sw >= 0) outras.push(sw); sw = i; } else outras.push(i);
+        }
         if (sw < 0) { g.fase = 0; continue; }
+        g.outras = outras;
         const o = OBJS + 0x24 * oi, dx = (ram.r16(o + 0x10) - ram.r16(OBJS + 0x10)) * 16, dy = (ram.r16(o + 0x12) - ram.r16(OBJS + 0x12)) * 16;
-        const b = SPRS + 0x44 * ave; w16(b + 0x20, 120 + dx); w16(b + 0x22, dy);
+        const b = SPRS + 0x44 * ave; w16(b + 0x20, 120 + dx - 12); w16(b + 0x22, dy);   // -12: o desenho do pássaro fica à direita do centro
         g.ave = ave; g.sw = sw; g.fase = 2;
-      } else if (g.fase === 2) {   // no ponto mais baixo do arco: o pássaro pega ele
+      } else if (g.fase === 2) {
+        // O "carregar" do próprio efeito não funciona aqui: o jogo devolve x/y da figura dele a cada quadro. Mas o
+        // deslocamento (x2/y2, o mesmo dos pulos) fica: a partir do ponto mais baixo do arco, ele segue o pássaro por aí.
         const b = SPRS + 0x44 * g.ave;
         if (!(ram.r16(b + 0x3E) & 1)) { g.fase = 0; continue; }
-        if (ram.r16(b + 0x32) >= 64) { w16(b + 0x30, g.sw); w16(b + 0x2E, 1); g.fase = 3; }
-      } else if (!(ram.r16(SPRS + 0x44 * g.ave + 0x3E) & 1)) g.fase = 0;   // o pássaro saiu: acabou
+        if (ram.r16(b + 0x32) >= 64) g.fase = 3;
+      }
+      if (g.fase === 3) {
+        const b = SPRS + 0x44 * g.ave, w = SPRS + 0x44 * g.sw;
+        for (const i of g.outras || []) { const f = SPRS + 0x44 * i + 0x3E; if (ram.r16(f) & 1) w16(f, ram.r16(f) | 4); }   // reflexo/sombra escondidos
+        if (!(ram.r16(b + 0x3E) & 1)) { g.fase = 0; continue; }   // o pássaro saiu: o script tira ele
+        // posição do PRÓXIMO quadro (escrevemos depois do quadro): a mesma conta do efeito, Cos(t,140) e Sin(t,72), com
+        // t = data[2] já avançado; no ponto mais baixo (t=64) vale (0, 72), que é onde ele está
+        const t = ram.r16(b + 0x32) & 0xFF, ang = t * Math.PI / 128;
+        if (ram.r16(w + 0x3E) & 1) { w16(w + 0x24, Math.round(140 * Math.cos(ang))); w16(w + 0x26, Math.round(72 * Math.sin(ang)) - 72); }
+      }
     }
     return ativo;
   }
