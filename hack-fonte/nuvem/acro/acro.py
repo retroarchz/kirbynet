@@ -75,6 +75,12 @@ GIRO_DIR, GIRO_N, GIRO_SV = 0x0203FF3C, 0x0203FF3E, 0x0203FF50   # SV: images +0
 # trava PLENTO alterna 1/2) em vez de 2 px/quadro na 1ª metade e 1 na 2ª. Quadros do giro com tempos diferentes
 # (decolagem rápida, bola no alto, pouso segura) e o último fica GIRO_FIM - 32 quadros depois de pousar.
 PLENTO, ALINHA = 0x0203FF3B, 0x0203FF30
+# Pokémon que segue (pedido 03/11: "parou de andar atrás de mim e foi pro lado"): ele não pula nas pedras e ficava preso
+# onde o jogador pulou; ao descer, seguia de longe ou na diagonal. Cada pulo do acro liga SOLTO; no callback dele, com
+# ele parado e o jogador a pé NO MEIO de um passo de 1 quadrado no chão comum (não pedra/cerca; o jogo só guarda o
+# quadrado de onde veio enquanto anda): se o Pokémon não está colado, vai para esse quadrado (coords + sprite andam o
+# mesmo tanto). Colado: SOLTO = 0.
+SOLTO = 0x0203FF32
 # CÂMERA (03/11, o usuário viu o mapa desenhado errado): a câmera só desenha a coluna/fileira nova quando a posição dela
 # cai EXATAMENTE num múltiplo de 16 px; passos 1,2,1,2 pulavam o 32 (31 -> 33) e a câmera ficava 1 quadrado atrás.
 # PLENTO: 0 desligado, 1 quer andar, 2 descansa; no quadro: 5 anda, 3 descansa, 4 adiado (o jogo deixou o sprite na
@@ -439,16 +445,53 @@ def code():
     a.pool()
     # ---------- callback do sprite do Pokémon que segue (r0 = sprite) ----------
     a.label('cbseg')
-    a.push(['r4', 'r5'], lr=True)
+    a.push(['r4', 'r5', 'r6', 'r7'], lr=True)
     a.movh('r4', 'r0')
     a.mov('r1', 0x2E); a.ldrsh_r('r2', 'r4', 'r1')
     a.mov('r1', 0x24); a.alu('mul', 'r2', 'r1'); a.ldr_lit('r1', OBJS); a.add_r('r5', 'r2', 'r1')
     a.movh('r0', 'r5'); a.movh('r1', 'r4'); a.ldr_lit('r2', SEG_ARG); a.ldr_lit('r3', CB_MOVE | 1); a.bl('callr3c')
-    a.ldr_lit('r2', AVATAR); a.ldrb_i('r2', 'r2', 0); a.mov('r3', 8); a.alu('tst', 'r2', 'r3'); a.bc('ne', 'sgfim')   # surfando
+    a.ldr_lit('r2', AVATAR); a.ldrb_i('r2', 'r2', 0); a.mov('r3', 8); a.alu('tst', 'r2', 'r3'); a.bfar('ne', 'sgfim')   # surfando
     a.ldrh_i('r0', 'r5', 0x10); a.ldrh_i('r1', 'r5', 0x12); a.bl('tile'); a.lsr('r0', 'r0', 12)
-    a.cmpi('r0', 1); a.bc('ne', 'sgfim')
+    a.cmpi('r0', 1); a.bc('ne', 'sgvolta')
     a.mov('r1', 0x3E); a.ldrh_r('r0', 'r4', 'r1'); a.mov('r2', 4); a.alu('orr', 'r0', 'r2'); a.strh_r('r0', 'r4', 'r1')
-    a.label('sgfim'); a.pop(['r4', 'r5']); a.pop(['r0']); a.bx('r0')
+    a.label('sgvolta')
+    a.ldr_lit('r0', SOLTO); a.ldrb_i('r0', 'r0', 0); a.cmpi('r0', 0); a.bfar('eq', 'sgfim')
+    a.ldr_lit('r0', AVATAR); a.ldrb_i('r1', 'r0', 0); a.cmpi('r1', 1); a.bfar('ne', 'sgfim')       # só a pé
+    a.ldrb_i('r1', 'r0', 5); a.mov('r2', 0x24); a.alu('mul', 'r1', 'r2'); a.ldr_lit('r2', OBJS); a.add_r('r6', 'r1', 'r2')
+    for k, ob in enumerate(('r6', 'r5')):                                    # os dois parados
+        a.ldrb_i('r0', ob, 0); a.mov('r1', 2); a.alu('tst', 'r0', 'r1'); a.bfar('ne', 'sgfim')
+        a.mov('r1', 0xC0); a.alu('and_', 'r0', 'r1'); a.cmpi('r0', 0x40); a.bfar('eq', 'sgfim')
+    # Pokémon já colado (dist² = 1): pronto
+    a.ldrh_i('r0', 'r5', 0x10); a.ldrh_i('r1', 'r6', 0x10); a.sub_r('r0', 'r0', 'r1'); a.alu('mul', 'r0', 'r0')
+    a.ldrh_i('r1', 'r5', 0x12); a.ldrh_i('r2', 'r6', 0x12); a.sub_r('r1', 'r1', 'r2'); a.alu('mul', 'r1', 'r1'); a.add_r('r0', 'r0', 'r1')
+    a.cmpi('r0', 1); a.bfar('eq', 'sgok')
+    # quadrado atrás do jogador (contrário de para onde olha): r2 = x, r3 = y, guardados em r7 (x | y << 16)
+    a.ldrb_i('r0', 'r6', 0x18); a.mov('r1', 0xF); a.alu('and_', 'r0', 'r1'); a.subi('r0', 1); a.cmpi('r0', 3); a.bfar('hi', 'sgfim')
+    a.lsl('r0', 'r0', 1); a.ldr_lit('r1', 'dxy'); a.add_r('r1', 'r1', 'r0')
+    a.ldrb_i('r2', 'r1', 0); a.lsl('r2', 'r2', 24); a.asr('r2', 'r2', 24); a.ldrh_i('r0', 'r6', 0x10); a.sub_r('r2', 'r0', 'r2')
+    a.ldrb_i('r3', 'r1', 1); a.lsl('r3', 'r3', 24); a.asr('r3', 'r3', 24); a.ldrh_i('r0', 'r6', 0x12); a.sub_r('r3', 'r0', 'r3')
+    a.lsl('r3', 'r3', 16); a.alu('orr', 'r3', 'r2'); a.movh('r7', 'r3')
+    # jogador e quadrado de trás: chão comum (não pedra/cerca, não água) e ninguém lá
+    a.ldrh_i('r0', 'r6', 0x10); a.ldrh_i('r1', 'r6', 0x12); a.bl('sgchao'); a.cmpi('r0', 0); a.bfar('eq', 'sgfim')
+    a.movh('r0', 'r7'); a.lsl('r0', 'r0', 16); a.lsr('r0', 'r0', 16); a.movh('r1', 'r7'); a.lsr('r1', 'r1', 16)
+    a.bl('sgchao'); a.cmpi('r0', 0); a.bfar('eq', 'sgfim')
+    a.movh('r0', 'r7'); a.lsl('r0', 'r0', 16); a.lsr('r0', 'r0', 16); a.movh('r1', 'r7'); a.lsr('r1', 'r1', 16)
+    a.bl('livre'); a.cmpi('r0', 0); a.bfar('eq', 'sgfim')
+    # vai para lá (coords atual e anterior; sprite anda o mesmo tanto)
+    a.movh('r0', 'r7'); a.lsl('r0', 'r0', 16); a.lsr('r0', 'r0', 16); a.ldrh_i('r1', 'r5', 0x10); a.sub_r('r2', 'r0', 'r1')
+    a.strh_i('r0', 'r5', 0x10); a.strh_i('r0', 'r5', 0x14)
+    a.lsl('r2', 'r2', 4); a.ldrh_i('r1', 'r4', 0x20); a.add_r('r1', 'r1', 'r2'); a.strh_i('r1', 'r4', 0x20)
+    a.movh('r0', 'r7'); a.lsr('r0', 'r0', 16); a.ldrh_i('r1', 'r5', 0x12); a.sub_r('r2', 'r0', 'r1')
+    a.strh_i('r0', 'r5', 0x12); a.strh_i('r0', 'r5', 0x16)
+    a.lsl('r2', 'r2', 4); a.ldrh_i('r1', 'r4', 0x22); a.add_r('r1', 'r1', 'r2'); a.strh_i('r1', 'r4', 0x22)
+    a.label('sgok'); a.ldr_lit('r0', SOLTO); a.mov('r1', 0); a.strb_i('r1', 'r0', 0)
+    a.label('sgfim'); a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r0']); a.bx('r0')
+    a.label('sgchao')
+    a.push(['r4'], lr=True)
+    a.bl('tile'); a.movh('r4', 'r0'); a.bl('plat'); a.cmpi('r0', 0); a.bc('ne', 'sgcn')
+    a.movh('r0', 'r4'); a.bl('chao'); a.b('sgcs')
+    a.label('sgcn'); a.mov('r0', 0)
+    a.label('sgcs'); a.pop(['r4']); a.pop(['r1']); a.bx('r1')
     a.pool()
 
     # ---------- pula(r0 = direção, r1 = 0 pulinho / 1 de lado) -> 0 nada, 1 pulou, 2 = pulo de lado do jogo ----------
@@ -559,6 +602,8 @@ def code():
     a.pool()
     a.label('nada'); a.mov('r0', 0)
     a.label('fim')
+    a.cmpi('r0', 0); a.bc('eq', 'fimx'); a.ldr_lit('r1', SOLTO); a.mov('r2', 1); a.strb_i('r2', 'r1', 0)   # pulou: o Pokémon que segue pode ficar para trás
+    a.label('fimx')
     a.pop(['r2', 'r3']); a.movh('r10', 'r2'); a.movh('r11', 'r3')
     a.pop(['r2', 'r3']); a.movh('r8', 'r2'); a.movh('r9', 'r3')
     a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r1']); a.bx('r1')
