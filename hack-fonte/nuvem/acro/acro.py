@@ -72,7 +72,11 @@ GIRO_DIR, GIRO_N, GIRO_SV = 0x0203FF3C, 0x0203FF3E, 0x0203FF50   # SV: images +0
 # Fluidez (03/11): no pulo de 3 os 16 px a mais são espalhados pelo pulo todo (V e P andam 1 px a cada 2 quadros,
 # trava PLENTO alterna 1/2) em vez de 2 px/quadro na 1ª metade e 1 na 2ª. Quadros do giro com tempos diferentes
 # (decolagem rápida, bola no alto, pouso segura) e o último fica GIRO_FIM - 32 quadros depois de pousar.
-PLENTO = 0x0203FF3B
+PLENTO, ALINHA = 0x0203FF3B, 0x0203FF30
+# CÂMERA (03/11, o usuário viu o mapa desenhado errado): a câmera só desenha a coluna/fileira nova quando a posição dela
+# cai EXATAMENTE num múltiplo de 16 px; passos 1,2,1,2 pulavam o 32 (31 -> 33) e a câmera ficava 1 quadrado atrás.
+# PLENTO: 0 desligado, 1 quer andar, 2 descansa; no quadro: 5 anda, 3 descansa, 4 adiado (o jogo deixou o sprite na
+# divisa de 16 px: o passo extra faria pular a divisa). ALINHA (x, y & 15 do sprite no começo do pulo) dá a divisa.
 # Pose na pedra pontuda (pedido 03/11, print do quadro 10 do 657 a pé = de costas): em cima de 0x175/176/17D/17E, a pé
 # e com os quadros do 657 (images 0x090603DC, igual nas 2 ROMs; no coop os outros personagens não mudam), o sprite usa
 # anims com só o quadro 10, para qualquer direção. Sai da pedra: devolve as anims do jogo (guardadas em POSE_SV) e
@@ -319,12 +323,20 @@ def code():
         a.strh_i('r0', 'r7', lb)
         a.label('cb%d' % so)
     a.ldr_lit('r2', PLENTO); a.ldrb_i('r0', 'r2', 0); a.cmpi('r0', 0); a.bc('eq', 'plt0')
-    a.mov('r1', 3); a.alu('eor', 'r0', 'r1'); a.strb_i('r0', 'r2', 0)
+    a.cmpi('r0', 1); a.bc('eq', 'plt_quer'); a.mov('r0', 3); a.b('plt_g')
+    a.label('plt_quer'); a.mov('r0', 5)
+    for k, (so, pofs, lo) in enumerate(((0x20, 2, 4), (0x22, 3, 6))):
+        a.mov('r1', pofs); a.ldrsb_r('r1', 'r7', 'r1'); a.cmpi('r1', 0); a.bc('eq', 'pla%d' % k)
+        a.ldrh_i('r1', 'r4', so); a.ldrh_i('r3', 'r7', lo); a.alu('cmp', 'r1', 'r3'); a.bc('eq', 'pla%d' % k)   # o jogo não mexeu: 1 px nunca pula a divisa
+        a.ldr_lit('r3', ALINHA); a.ldrb_i('r3', 'r3', k); a.sub_r('r1', 'r1', 'r3')
+        a.mov('r3', 15); a.alu('tst', 'r1', 'r3'); a.bc('ne', 'pla%d' % k); a.mov('r0', 4)
+        a.label('pla%d' % k)
+    a.label('plt_g'); a.strb_i('r0', 'r2', 0)
     a.label('plt0')
     for eixo, (so, so2, lw, lb) in enumerate(((0x20, 0x24, 8, 12), (0x22, 0x26, 10, 14))):
         n = str(eixo)
         # P: o x/y do sprite anda 1 px para o lugar certo (no pulo de 3, só nos quadros pares: PLENTO = 2 pula)
-        a.ldr_lit('r2', PLENTO); a.ldrb_i('r1', 'r2', 0); a.cmpi('r1', 2); a.bc('eq', 'pp' + n)
+        a.ldr_lit('r2', PLENTO); a.ldrb_i('r1', 'r2', 0); a.subi('r1', 3); a.cmpi('r1', 1); a.bc('ls', 'pp' + n)   # 3 ou 4: parado
         a.mov('r1', 2 + eixo); a.ldrsb_r('r0', 'r7', 'r1')
         a.cmpi('r0', 0); a.bc('eq', 'pp' + n)
         a.ldrh_i('r2', 'r4', so); a.bc('lt', 'pneg' + n)
@@ -333,7 +345,7 @@ def code():
         a.label('pg' + n); a.strh_i('r2', 'r4', so); a.mov('r1', 2 + eixo); a.strb_r('r0', 'r7', 'r1')
         a.label('pp' + n)
         # V: a imagem anda 1 px na direção do centro da pedra (ou de 0); no pulo de 3 junto com o P
-        a.ldr_lit('r2', PLENTO); a.ldrb_i('r1', 'r2', 0); a.cmpi('r1', 2); a.bc('eq', 'vv' + n)
+        a.ldr_lit('r2', PLENTO); a.ldrb_i('r1', 'r2', 0); a.subi('r1', 3); a.cmpi('r1', 1); a.bc('ls', 'vv' + n)   # 3 ou 4: parado
         a.mov('r1', eixo); a.ldrsb_r('r0', 'r7', 'r1')
         a.lsl('r1', 'r6', 24 - 8 * eixo); a.asr('r1', 'r1', 24)
         a.alu('cmp', 'r0', 'r1'); a.bc('eq', 'vv' + n); a.bc('lt', 'vmais' + n)
@@ -345,7 +357,11 @@ def code():
         a.mov('r1', eixo); a.ldrsb_r('r0', 'r7', 'r1'); a.mov('r1', 2 + eixo); a.ldrsb_r('r1', 'r7', 'r1'); a.add_r('r0', 'r0', 'r1')
         a.ldrh_i('r1', 'r7', lb); a.add_r('r0', 'r0', 'r1'); a.strh_i('r0', 'r4', so2); a.strh_i('r0', 'r7', lw)
     a.ldrh_i('r0', 'r4', 0x20); a.strh_i('r0', 'r7', 4); a.ldrh_i('r0', 'r4', 0x22); a.strh_i('r0', 'r7', 6)
-    a.ldrh_i('r0', 'r7', 2); a.cmpi('r0', 0); a.bc('ne', 'cfim'); a.ldr_lit('r2', PLENTO); a.strb_i('r0', 'r2', 0)
+    a.ldr_lit('r2', PLENTO); a.ldrb_i('r0', 'r2', 0); a.cmpi('r0', 3); a.bc('lo', 'plnx')
+    a.mov('r1', 1); a.cmpi('r0', 5); a.bc('ne', 'plset'); a.mov('r1', 2)
+    a.label('plset'); a.strb_i('r1', 'r2', 0)
+    a.label('plnx')
+    a.ldrh_i('r0', 'r7', 2); a.cmpi('r0', 0); a.bc('ne', 'cfim'); a.strb_i('r0', 'r2', 0)
     a.b('cfim')
     a.label('crapido')
     a.label('cfim')
@@ -656,6 +672,8 @@ def code():
     # ---------- chao(r0 = valor) -> 1 se é chão comum (sem bloqueio, altura de chão) ----------
     a.label('giromarca')   # pulo de 3 a pé (r8 = 2): o callback troca para o salto giratório (r4 = direção)
     a.ldr_lit('r1', PLENTO); a.mov('r0', 1); a.strb_i('r0', 'r1', 0)
+    a.ldr_lit('r0', AVATAR); a.ldrb_i('r0', 'r0', 4); a.mov('r1', 0x44); a.alu('mul', 'r0', 'r1'); a.ldr_lit('r1', SPRITES); a.add_r('r0', 'r0', 'r1')
+    a.ldr_lit('r2', ALINHA); a.ldrh_i('r1', 'r0', 0x20); a.strb_i('r1', 'r2', 0); a.ldrh_i('r1', 'r0', 0x22); a.strb_i('r1', 'r2', 1)
     a.movh('r0', 'r8'); a.cmpi('r0', 2); a.bc('ne', 'gmsai'); a.ldr_lit('r1', GIRO_DIR); a.strb_i('r4', 'r1', 0)
     a.label('gmsai'); a.bx('lr')
     a.label('chao')
