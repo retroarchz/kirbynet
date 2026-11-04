@@ -19,6 +19,10 @@ const Editor = {
     outros: ["Outros", (g) => (g > 1462 && g < 5257) || (g > 6462 && g < 10000) || g >= 15000],
   },
   ACOES: { falar: "💬 Falar", item: "🎁 Dar item (uma vez)", chao: "📦 Item no chão", lutar: "⚔️ Lutar", teleporte: "🌀 Teleporte" },
+  // marcas que o jogo liga: insígnia N = 0xA7F + N - 1 (achado nos scripts dos ginásios), treinador vencido = 0x500 + id
+  INSIGNIAS: ["ganhar a 1ª insígnia (Roxanne, Rustboro)", "ganhar a 2ª insígnia (Brawly, Dewford)", "ganhar a 3ª insígnia (Wattson, Mauville — Raio)",
+    "ganhar a 4ª insígnia (Flannery, Lavaridge)", "ganhar a 5ª insígnia (Norman, Petalburg)", "ganhar a 6ª insígnia (Winona, Fortree)",
+    "ganhar a 7ª insígnia (Tate e Liza, Mossdeep)", "ganhar a 8ª insígnia (Juan, Sootopolis)"],
   OLHAR: { baixo: "Olhando para baixo", cima: "Olhando para cima", esq: "Olhando para a esquerda", dir: "Olhando para a direita",
            anda: "Anda por perto", gira: "Olha em volta" },
 
@@ -35,17 +39,19 @@ const Editor = {
   chave() { return `kirbynet.eventos.${this.who || "-"}.${this.rom}`; },
   lerLocal() { try { const d = JSON.parse(localStorage.getItem(this.chave())); if (d && d.mapas) return d; } catch (e) {} return { mapas: {} }; },
   gravarLocal() { try { localStorage.setItem(this.chave(), JSON.stringify(this.dados)); } catch (e) {} },
+  // As regras do Firebase só aceitam saves/<chave do nome>/<40 letras hex> com {d, t, dev} (a pasta "eventos" é recusada):
+  // os eventos vão em saves/<chave>/<sha1("kirbynet-eventos:" + rom)>.
+  url() { return `${CLOUD_DB}/saves/${Cloud.key(this.who)}/${sha1Hex(enc("kirbynet-eventos:" + this.rom))}.json`; },
   async lerNuvem() {
     if (!this.who || typeof Cloud === "undefined") return null;
-    const r = await fetch(`${CLOUD_DB}/eventos/${Cloud.key(this.who)}/${this.rom}.json`, { cache: "no-store" });
+    const r = await fetch(this.url(), { cache: "no-store" });
     if (!r.ok) return null;
     const j = await r.json(); if (!j || !j.d) return null;
     return { dados: JSON.parse(j.d), t: j.t || 0 };
   },
   async gravarNuvem() {
     if (!this.who || typeof Cloud === "undefined") return false;
-    const r = await fetch(`${CLOUD_DB}/eventos/${Cloud.key(this.who)}/${this.rom}.json`, {
-      method: "PUT", body: JSON.stringify({ d: JSON.stringify(this.dados), t: this.dados.t }) });
+    const r = await fetch(this.url(), { method: "PUT", body: JSON.stringify({ d: JSON.stringify(this.dados), t: this.dados.t, dev: Cloud.dev }) });
     return r.ok;
   },
   total() { return Object.values(this.dados.mapas || {}).reduce((s, l) => s + l.length, 0); },
@@ -57,7 +63,7 @@ const Editor = {
     else if (m.t === "ed-listas") { this.listas = m; this.desenhaCatalogo(); this.desenhaPainel(); }
     else if (m.t === "ed-ok") {
       // as marcas "uma vez só" escolhidas no worker ficam guardadas no evento (senão o item seria dado de novo)
-      if (m.marcas) for (const [k, l] of Object.entries(m.marcas)) (l || []).forEach((e, i) => { const d = (this.dados.mapas[k] || [])[i]; if (d && e.marca && !d.marca) d.marca = e.marca; });
+      if (m.marcas) for (const [k, l] of Object.entries(m.marcas)) (l || []).forEach((e, i) => { const d = (this.dados.mapas[k] || [])[i]; if (d && e.marca && !d.marca) d.marca = e.marca; if (d && e.marcaVis && !d.marcaVis) d.marcaVis = e.marcaVis; });
       this.gravarLocal();
       if (!m.silencioso) this.status(m.avisos && m.avisos.length ? "⚠️ " + m.avisos.join(" · ") : "✅ Salvo! Os eventos aparecem quando você entra no lugar: se já estiver nele, entre numa casa e saia (ou vá a outro mapa e volte).");
       else if (m.avisos && m.avisos.length) toast("Eventos: " + m.avisos.join(" · "));
@@ -287,7 +293,15 @@ const Editor = {
     let h = `<div class="linha"><div id="ed-pv" style="flex:0 0 72px;height:72px;background:#1f2230;border-radius:8px;display:flex;align-items:center;justify-content:center"></div>
       <div><div>Sprite <b>${s.sprite}</b> em <b>${s.x}, ${s.y}</b></div><button id="ed-troca" class="ghost" style="margin-top:6px">Trocar sprite</button></div></div>
       <label>Como fica parado</label><select id="ed-olhar">${op(this.OLHAR, s.olhar || "baixo")}</select>
-      <label>O que ele faz</label><select id="ed-acao">${op(this.ACOES, s.acao)}</select>`;
+      <label>O que ele faz</label><select id="ed-acao">${op(this.ACOES, s.acao)}</select>
+      <label>Quando aparece</label><select id="ed-quando">${op({ sempre: "Sempre", depois: "Só depois de…", antes: "Só antes de…" }, (s.cond && s.cond.quando) || "sempre")}</select>`;
+    if (s.cond && s.cond.quando !== "sempre") {
+      const marcos = [...this.INSIGNIAS.map((n, i) => [0xA7F + i, n]), ...lt.map(([i, n]) => [0x500 + i, `vencer o treinador ${i} · ${n}`])];
+      h += `<input id="ed-marcob" placeholder="Procurar (ex.: Wattson, insígnia, nome do treinador)…" style="margin-top:6px">
+        <select id="ed-marco" size="6">${marcos.map(([f, n]) => `<option value="${f}"${f === s.cond.flag ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>
+        <div class="dica">Vale ao entrar no lugar: o jogo confere na hora se você já tem.</div>`;
+    }
+    h += ``;
     if (s.acao === "falar") h += `<label>O que ele diz</label><textarea id="ed-texto">${esc(s.texto)}</textarea><div class="dica">Linha em branco = caixa de texto nova.</div>`;
     if (s.acao === "item" || s.acao === "chao") {
       h += `<label>Item</label><input id="ed-itemb" placeholder="Procurar item…"><select id="ed-item" size="6">${li.map(([i, n]) => `<option value="${i}"${i === s.item ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>
@@ -317,15 +331,17 @@ const Editor = {
     liga("ed-texto", (el) => s.texto = el.value); liga("ed-texto2", (el) => s.texto2 = el.value); liga("ed-texto3", (el) => s.texto3 = el.value);
     liga("ed-item", (el) => s.item = +el.value, "change"); liga("ed-qtd", (el) => s.qtd = Math.max(1, Math.min(99, +el.value || 1)));
     liga("ed-trein", (el) => s.treinador = +el.value, "change");
+    liga("ed-quando", (el) => { if (el.value === "sempre") delete s.cond; else s.cond = { quando: el.value, flag: (s.cond && s.cond.flag) || 0xA7F + 2 }; this.desenhaPainel(); }, "change");
+    liga("ed-marco", (el) => { s.cond.flag = +el.value; }, "change");
     const filtra = (bid, sid) => { const b = $(bid), sel = $(sid); if (!b) return; b.oninput = () => { const t = b.value.toLowerCase(); for (const o of sel.options) o.hidden = t && !o.text.toLowerCase().includes(t); }; };
-    filtra("ed-itemb", "ed-item"); filtra("ed-treinb", "ed-trein");
+    filtra("ed-itemb", "ed-item"); filtra("ed-treinb", "ed-trein"); filtra("ed-marcob", "ed-marco");
     const dest = () => { s.destino = { grupo: +$("ed-dg").value || 0, num: +$("ed-dn").value || 0, x: +$("ed-dx").value || 0, y: +$("ed-dy").value || 0 }; };
     ["ed-dg", "ed-dn", "ed-dx", "ed-dy"].forEach((id) => liga(id, dest));
     if ($("ed-daqui")) $("ed-daqui").onclick = () => { this.escolhendoDestino = s; this.status("Toque no mapa no quadrado de chegada."); };
     if ($("ed-onde")) $("ed-onde").onclick = () => { const L = this.mapa.local; s.destino = { grupo: L.grupo, num: L.num, x: L.x, y: L.y }; this.mudou = true; this.desenhaPainel(); };
     $("ed-troca").onclick = () => { this.sel.trocar = true; this.aba("cat"); this.status("Toque no sprite novo na lista."); };
     $("ed-apaga").onclick = () => { const l = this.lista(); l.splice(l.indexOf(s), 1); this.sel = null; this.mudou = true; this.desenha(); this.desenhaPainel(); };
-    for (const id of ["ed-item", "ed-trein"]) { const el = $(id); if (el && el.selectedOptions[0]) el.selectedOptions[0].scrollIntoView({ block: "nearest" }); }
+    for (const id of ["ed-item", "ed-trein", "ed-marco"]) { const el = $(id); if (el && el.selectedOptions[0]) el.selectedOptions[0].scrollIntoView({ block: "nearest" }); }
   },
 
   // ---------- salvar ----------

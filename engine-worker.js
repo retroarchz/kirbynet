@@ -483,7 +483,7 @@ function tick() {
 // ---------- editor de eventos do Pokémon Quetzal (editorqz.js; a tela fica no editor.js) ----------
 // Nunca na sala por rollback (lá todos rodam a mesma ROM). Os eventos são escritas na ROM da partida (romWrite), refeitas
 // do zero a cada aplicação: desfaz as anteriores (cabeçalhos originais + faixas livres de volta a 0xFF) e monta de novo.
-let edPend = null, edOrig = null;
+let edPend = null, edOrig = null, edOrigScr = null;
 const edPode = () => run && run.quetzal && !run.rb && !SNES && run.s.romWrite;
 function edBus() {
   const s = run.s, r16 = (a) => s.read16(0, a) & 0xFFFF;
@@ -493,11 +493,11 @@ function edAplica(m) {
   if (!run) { edPend = m; return; }
   if (!edPode()) return postMessage({ t: "ed-ok", avisos: ["Os eventos não valem nesta partida (sala por rollback)."] });
   const bus = edBus(), escreve = (lista) => { for (const [a, b] of lista) run.s.romWrite(a - 0x08000000, Uint8Array.from(b)); };
-  if (edOrig) escreve(EditorQZ.desfazer(bus, edOrig));
+  if (edOrig) escreve(EditorQZ.desfazer(bus, edOrig, edOrigScr));
   const ev = { mapas: m.ev && m.ev.mapas || {} };
   const r = EditorQZ.montar(bus, ev);
   escreve(r.escritas);
-  edOrig = ev.orig || null;
+  edOrig = ev.orig || null; edOrigScr = ev.origScr || null;
   postMessage({ t: "ed-ok", avisos: r.avisos, marcas: ev.mapas, silencioso: !!m.silencioso });
 }
 // O jogo guarda no save uma cópia das pessoas do mapa atual (SaveBlock1 +0x1790, 24 bytes cada) e, ao continuar um jogo

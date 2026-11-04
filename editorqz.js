@@ -18,6 +18,10 @@
 //  - Treinadores: 0x085073E0, 0x20 cada, nome em +3, 973. Nomes de itens: 0x091E0360 (inglês, o que o jogo mostra), 20
 //    bytes cada, número do item = posição (SanitizeItemId 0x081491AC: acima de 0x379 vira 0).
 //  - Item no chão: o "achar item" do Quetzal (callstd 1) é o dos baús com item aleatório; usamos o "obter item" (0).
+//  - Marcos do jogo: insígnia N = marca 0xA7F + N - 1 (ginásio vencido 0x4F0 + N - 1), treinador vencido = 0x500 + id.
+//  - "Quando aparece" (depois/antes de um marco): a marca do objeto (ligada = some) vira uma marca nossa, ligada ou
+//    desligada por um script ON_TRANSITION (tipo 3 da lista de scripts do mapa, cabeçalho +8; roda ao entrar no mapa,
+//    antes das pessoas nascerem). Se o mapa já tinha um, o nosso roda primeiro e termina com goto para o dele.
 const EditorQZ = (() => {
   const GRUPOS = 0x08932FB8, SPR = 0x090E2BD4, PALS = 0x090F6470, NPALS = 3168;
   const LAYOUT_RAM = 0x02038CB0, PAL_RAM = 0x020391FC, OBJS = 0x02038D10, AVATAR = 0x02039070;
@@ -184,7 +188,7 @@ const EditorQZ = (() => {
     };
     const u16 = (v) => [v & 255, v >> 8 & 255], u32 = (v) => [v & 255, v >> 8 & 255, v >> 16 & 255, v >>> 24 & 255];
     const usadas = new Set();
-    for (const lista of Object.values(ev.mapas || {})) for (const e of lista) if (e.marca) usadas.add(e.marca);
+    for (const lista of Object.values(ev.mapas || {})) for (const e of lista) { if (e.marca) usadas.add(e.marca); if (e.marcaVis) usadas.add(e.marcaVis); }
     const novaMarca = () => { const m = MARCAS.find((f) => !usadas.has(f)); if (m) usadas.add(m); return m || 0; };
     const poeTexto = (s) => { const b = texto(s); const a = aloca(b.length); if (a) escritas.push([a, b]); return a; };
     for (const [chave, lista] of Object.entries(ev.mapas || {})) {
@@ -194,13 +198,16 @@ const EditorQZ = (() => {
       const orig = ev.orig && ev.orig[chave] ? ev.orig[chave] : bus.r32(h + 4);
       const n0 = bus.r8(orig), arr0 = bus.r32(orig + 4);
       let maxId = 0; for (let i = 0; i < n0; i++) maxId = Math.max(maxId, bus.r8(arr0 + 24 * i));
-      const novos = [];
+      const novos = [], trans = [];
       for (const e of lista) {
         if (n0 + novos.length >= 64) { avisos.push("mapa " + chave + ": no máximo 64 pessoas"); break; }
         const s = [];   // script
         const msg = (t) => { const a = poeTexto(t); s.push(0x0F, 0x00, ...u32(a), 0x09, 0x02); };   // loadword 0, texto; callstd MSGBOX_NPC
         let marcaObj = 0;
         if (e.acao === "item" || e.acao === "chao") { if (!e.marca) e.marca = novaMarca(); if (!e.marca) { avisos.push("acabaram as marcas livres"); continue; } }
+        const cond = e.cond && (e.cond.quando === "depois" || e.cond.quando === "antes") && e.cond.flag ? e.cond : null;
+        if (cond) { if (!e.marcaVis) e.marcaVis = novaMarca(); if (!e.marcaVis) { avisos.push("acabaram as marcas livres"); continue; }
+                    trans.push({ F: e.marcaVis, C: cond.flag, depois: cond.quando === "depois", pego: e.acao === "chao" ? e.marca : 0 }); }
         if (e.acao === "falar") { msg(e.texto || "…"); s.push(0x02); }
         else if (e.acao === "item") {   // dá o item uma vez; depois diz o texto2
           s.push(0x6A, 0x5A, 0x2B, ...u16(e.marca));                  // lock, faceplayer, checkflag
@@ -245,7 +252,7 @@ const EditorQZ = (() => {
         const lay = bus.r32(h), lw = bus.r32(lay), bl = bus.r32(lay + 0xC);
         const alt = e.alt || (e.x >= 0 && e.y >= 0 && e.x < lw ? bus.r16(bl + 2 * (e.y * lw + e.x)) >> 12 : 0) || 3;
         const mov = MOV[e.olhar] ?? 8, alc = e.olhar === "anda" ? 0x11 : 0;
-        novos.push([id, 0, ...u16(e.sprite | 0), ...u16(e.x), ...u16(e.y), alt, mov, alc, 0, 0, 0, 0, 0, ...u32(sa), ...u16(marcaObj), 0, 0]);
+        novos.push([id, 0, ...u16(e.sprite | 0), ...u16(e.x), ...u16(e.y), alt, mov, alc, 0, 0, 0, 0, 0, ...u32(sa), ...u16(cond ? e.marcaVis : marcaObj), 0, 0]);
       }
       const total = n0 + novos.length, arr = aloca(24 * total), evs = aloca(0x14);
       if (!arr || !evs) { avisos.push("acabou o espaço livre da ROM"); break; }
@@ -258,15 +265,47 @@ const EditorQZ = (() => {
       escritas.push([evs, cab]);
       escritas.push([h + 4, u32(evs)]);
       (ev.orig = ev.orig || {})[chave] = orig;
+      if (trans.length) {
+        // script ON_TRANSITION: para cada evento com condição, liga (some) ou desliga (aparece) a marca dele
+        const scr0 = ev.origScr && ev.origScr[chave] !== undefined ? ev.origScr[chave] : bus.r32(h + 8);
+        const ents = [];
+        if (ok(scr0)) for (let k = 0; k < 32; k++) { const t = bus.r8(scr0 + 5 * k); if (!t) break; const p = bus.r8(scr0 + 5 * k + 1) | bus.r8(scr0 + 5 * k + 2) << 8 | bus.r8(scr0 + 5 * k + 3) << 16 | bus.r8(scr0 + 5 * k + 4) << 24; ents.push([t, p >>> 0]); }
+        const velho = ents.find(([t]) => t === 3);
+        const c = [], fix = [], lab = {};
+        const vai = (op, nome) => { if (op === 0x06) c.push(0x06, 0x01); else c.push(op); fix.push([c.length, nome]); c.push(0, 0, 0, 0); };
+        trans.forEach((t, i) => {
+          if (t.pego) { c.push(0x2B, ...u16(t.pego)); vai(0x06, "some" + i); }           // item já pego: continua sumido
+          c.push(0x2B, ...u16(t.C)); vai(0x06, (t.depois ? "mostra" : "some") + i);      // checkflag marco; goto_if_set
+          vai(0x05, (t.depois ? "some" : "mostra") + i);                                  // goto
+          lab["some" + i] = c.length; c.push(0x29, ...u16(t.F)); vai(0x05, "prox" + i);  // setflag (some)
+          lab["mostra" + i] = c.length; c.push(0x2A, ...u16(t.F));                       // clearflag (aparece)
+          lab["prox" + i] = c.length;
+        });
+        if (velho) c.push(0x05, ...u32(velho[1])); else c.push(0x02);
+        const ca = aloca(c.length), la = aloca(5 * (ents.length + 2));
+        if (!ca || !la) { avisos.push("acabou o espaço livre da ROM"); break; }
+        for (const [k, nome] of fix) { const v = u32(ca + lab[nome]); for (let j = 0; j < 4; j++) c[k + j] = v[j]; }
+        escritas.push([ca, c]);
+        const l = [0x03, ...u32(ca)];
+        for (const [t, p] of ents) if (t !== 3) l.push(t, ...u32(p));
+        l.push(0x00);
+        escritas.push([la, l]);
+        escritas.push([h + 8, u32(la)]);
+        (ev.origScr = ev.origScr || {})[chave] = scr0;
+      }
     }
     return { escritas, avisos, usado: LIVRE.slice(0, fat).reduce((s, [a, b]) => s + b - a, 0) + (pos - (LIVRE[fat] || [pos])[0]) };
   }
   // desfaz (volta os cabeçalhos e limpa as faixas livres)
-  function desfazer(bus, orig) {
-    const escritas = [];
+  function desfazer(bus, orig, origScr) {
+    const escritas = [], w = (o) => [o & 255, o >> 8 & 255, o >> 16 & 255, o >>> 24 & 255];
     for (const [chave, o] of Object.entries(orig || {})) {
       const [grupo, num] = chave.split(".").map(Number), h = cabecalho(bus, grupo, num);
-      if (h) escritas.push([h + 4, [o & 255, o >> 8 & 255, o >> 16 & 255, o >>> 24 & 255]]);
+      if (h) escritas.push([h + 4, w(o)]);
+    }
+    for (const [chave, o] of Object.entries(origScr || {})) {
+      const [grupo, num] = chave.split(".").map(Number), h = cabecalho(bus, grupo, num);
+      if (h) escritas.push([h + 8, w(o)]);
     }
     for (const [a, b] of LIVRE) escritas.push([a, new Array(b - a).fill(0xFF)]);
     return escritas;
