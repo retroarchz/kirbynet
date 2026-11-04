@@ -498,6 +498,19 @@ function edAplica(m) {
   const r = EditorQZ.montar(bus, ev);
   escreve(r.escritas);
   edOrig = ev.orig || null; edOrigScr = ev.origScr || null;
+  // O jogo guarda na RAM uma cópia do cabeçalho do mapa atual (gMapHeader 0x02038CB0: +4 eventos, +8 scripts). Se
+  // aplicamos com o jogador DENTRO de um mapa editado, essa cópia ainda aponta para a lista velha, que acabou de ser
+  // apagada/regravada em outro lugar: as portas liam lixo e ninguém conseguia sair (relato 03/11, Wally no mapa 22.0).
+  // Agora a cópia passa a apontar para o cabeçalho de agora (lista nova, ou a original se o mapa não tem mais eventos).
+  const ram = run.s.ram(0);
+  if (ram) {
+    const s1 = ram.r32(0x030055BC);
+    if (s1 >= 0x02000000 && s1 < 0x02040000 - 0x2000) {
+      const h = EditorQZ.cabecalho(bus, ram.r8(s1 + 0x474), ram.r8(s1 + 0x475));
+      const w32 = (a, v) => { ram.w16(a, v & 0xFFFF); ram.w16(a + 2, v >>> 16); };
+      if (h && bus.r32(h) === ram.r32(0x02038CB0)) { w32(0x02038CB4, bus.r32(h + 4)); w32(0x02038CB8, bus.r32(h + 8)); }
+    }
+  }
   postMessage({ t: "ed-ok", avisos: r.avisos, marcas: ev.mapas, silencioso: !!m.silencioso });
 }
 // O jogo guarda no save uma cópia das pessoas do mapa atual (SaveBlock1 +0x1790, 24 bytes cada) e, ao continuar um jogo
@@ -519,7 +532,7 @@ function edMsg(m) {
   const bus = edBus();
   if (m.t === "ed-mapa") {
     const L = EditorQZ.local(bus), M = EditorQZ.desenhaMapa(bus), h = EditorQZ.cabecalho(bus, L.grupo, L.num);
-    if (!M || !h) return postMessage({ t: "ed-erro", msg: "Não consegui ler o mapa agora (está numa tela de menu ou batalha?)." });
+    if (!M || !h || !L.confere) return postMessage({ t: "ed-erro", msg: "Não consegui ler o mapa agora (está numa tela de menu, batalha ou trocando de lugar?). Feche, ande um pouco e abra de novo." });
     // objetos do jogo (sem os nossos: os nossos vêm do editor)
     const orig = edOrig && edOrig[L.grupo + "." + L.num] || bus.r32(h + 4);
     const objs = EditorQZ.objetos(bus, orig);

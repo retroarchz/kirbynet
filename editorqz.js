@@ -43,10 +43,14 @@ const EditorQZ = (() => {
     const h = bus.r32(lista + 4 * num);
     return ok(h) ? h : 0;
   }
-  // onde o jogador está agora
+  // onde o jogador está agora: SaveBlock1 (0x030055BC) +0x470 posição, +0x474 grupo, +0x475 número do mapa (o mesmo que o
+  // próprio jogo usa; o mapa guardado no objeto do jogador nem sempre está certo). Confere com o layout carregado.
   function local(bus) {
-    const o = OBJS + 0x24 * (bus.r8(AVATAR + 5) & 15);
-    return { grupo: bus.r8(o + 0xA), num: bus.r8(o + 9), x: bus.r16(o + 0x10) - 7, y: bus.r16(o + 0x12) - 7 };
+    const s1 = bus.r32(0x030055BC);
+    const L = { grupo: bus.r8(s1 + 0x474), num: bus.r8(s1 + 0x475), x: bus.r16(s1 + 0x470) << 16 >> 16, y: bus.r16(s1 + 0x472) << 16 >> 16 };
+    const h = cabecalho(bus, L.grupo, L.num);
+    L.confere = !!h && bus.r32(h) === bus.r32(LAYOUT_RAM);
+    return L;
   }
 
   // desenho do mapa atual: 16 px por quadrado, RGBA
