@@ -497,6 +497,13 @@ function edAplica(m) {
   const ev = { mapas: m.ev && m.ev.mapas || {} };
   const r = EditorQZ.montar(bus, ev);
   escreve(r.escritas);
+  // eventos mudados no editor (reset): o save esquece que eles já sumiram/já deram o item (marca "uma vez" desligada)
+  const ramR = run.s.ram(0);
+  if (ramR && !m.silencioso) {
+    const s1 = ramR.r32(0x030055BC);
+    if (s1 >= 0x02000000 && s1 < 0x02040000 - 0x2000)
+      for (const l of Object.values(ev.mapas)) for (const e of l) if (e.reset && e.marca) ramR.w8(s1 + (e.marca >> 3), ramR.r8(s1 + (e.marca >> 3)) & ~(1 << (e.marca & 7)));
+  }
   edOrig = ev.orig || null; edOrigScr = ev.origScr || null;
   // O jogo guarda na RAM uma cópia do cabeçalho do mapa atual (gMapHeader 0x02038CB0: +4 eventos, +8 scripts). Se
   // aplicamos com o jogador DENTRO de um mapa editado, essa cópia ainda aponta para a lista velha, que acabou de ser

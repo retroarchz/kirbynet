@@ -370,10 +370,12 @@ const Editor = {
       if (s.fim === "uma") h += `<label>O que diz depois (já fez tudo)</label><textarea id="ed-texto2">${esc(s.texto2 || "Boa sorte na sua jornada!")}</textarea>`;
       h += `<div class="dica">O caminho aparece no mapa: ✖ = parede ou alguém (ele para antes), 🚪 = sai pela porta e some. Se não for "Some", ele volta ao lugar quando você sai do mapa e volta.</div>`;
     }
-    h += `<div class="linha" style="margin-top:16px"><button id="ed-apaga" class="ghost perigo">🗑️ Apagar evento</button></div>`;
+    h += `<div class="linha" style="margin-top:16px"><button id="ed-reset" class="ghost" title="O jogo esquece que ele já sumiu, já deu o item ou já fez tudo">↺ Começar de novo${s.reset ? " ✓" : ""}</button><button id="ed-apaga" class="ghost perigo">🗑️ Apagar evento</button></div>`;
     p.innerHTML = h;
     const pv = this.sprites.get(s.sprite); if (pv) { const k = document.createElement("canvas"); k.width = pv.width; k.height = pv.height; k.getContext("2d").drawImage(pv, 0, 0); k.style.cssText = "image-rendering:pixelated;max-width:64px;max-height:64px;width:" + pv.width * 2 + "px"; $("ed-pv").appendChild(k); }
-    const liga = (id, f, ev = "input") => { const el = $(id); if (el) el.addEventListener(ev, () => { f(el); this.mudou = true; }); };
+    // mudou uma sequência: ao salvar ela começa do zero (o save esquece que ele já sumiu/já fez tudo)
+    const zera = () => { if (s.acao === "sequencia") s.reset = true; };
+    const liga = (id, f, ev = "input") => { const el = $(id); if (el) el.addEventListener(ev, () => { f(el); this.mudou = true; zera(); }); };
     liga("ed-olhar", (el) => s.olhar = el.value, "change");
     liga("ed-acao", (el) => { s.acao = el.value; if (s.acao === "lutar" && !s.treinador && lt.length) s.treinador = lt[0][0]; this.desenhaPainel(); this.desenha(); }, "change");
     liga("ed-texto", (el) => s.texto = el.value); liga("ed-texto2", (el) => s.texto2 = el.value); liga("ed-texto3", (el) => s.texto3 = el.value);
@@ -384,19 +386,19 @@ const Editor = {
     liga("ed-fim", (el) => { s.fim = el.value; this.desenhaPainel(); }, "change");
     const ps = $("ed-passos");
     if (ps) {
-      const muda = (el) => { const p = s.passos[+el.dataset.i]; if (!p) return; const k = el.dataset.k; p[k] = ["item", "qtd", "n"].includes(k) ? +el.value || 0 : el.value; this.mudou = true; this.desenha(); };
+      const muda = (el) => { const p = s.passos[+el.dataset.i]; if (!p) return; const k = el.dataset.k; p[k] = ["item", "qtd", "n"].includes(k) ? +el.value || 0 : el.value; this.mudou = true; zera(); this.desenha(); };
       ps.addEventListener("input", (e) => e.target.dataset.k && muda(e.target));
       ps.addEventListener("change", (e) => e.target.dataset.k && muda(e.target));
       ps.addEventListener("click", (e) => {
         const b = e.target.closest("button"); if (!b) return;
         if (b.dataset.rm) s.passos.splice(+b.dataset.rm, 1);
         if (b.dataset.mv) { const i = +b.dataset.mv, j = i + +b.dataset.d; if (j >= 0 && j < s.passos.length) [s.passos[i], s.passos[j]] = [s.passos[j], s.passos[i]]; }
-        this.mudou = true; this.desenhaPainel(); this.desenha();
+        this.mudou = true; zera(); this.desenhaPainel(); this.desenha();
       });
       p.querySelectorAll("[data-add]").forEach((b) => b.onclick = () => {
         const t = b.dataset.add, novo = { t };
         if (t === "falar") novo.texto = "…"; if (t === "item") { novo.item = 1; novo.qtd = 1; } if (t === "andar") { novo.dir = "baixo"; novo.n = 2; } if (t === "virar") novo.dir = "baixo"; if (t === "esperar") novo.n = 1;
-        s.passos.push(novo); if ((t === "voar" || t === "sumir") && (s.fim || "repete") === "repete") s.fim = "some"; this.mudou = true; this.desenhaPainel(); this.desenha();
+        s.passos.push(novo); if ((t === "voar" || t === "sumir") && (s.fim || "repete") === "repete") s.fim = "some"; this.mudou = true; zera(); this.desenhaPainel(); this.desenha();
       });
     }
     const filtra = (bid, sid) => { const b = $(bid), sel = $(sid); if (!b) return; b.oninput = () => { const t = b.value.toLowerCase(); for (const o of sel.options) o.hidden = t && !o.text.toLowerCase().includes(t); }; };
@@ -405,6 +407,7 @@ const Editor = {
     ["ed-dg", "ed-dn", "ed-dx", "ed-dy"].forEach((id) => liga(id, dest));
     if ($("ed-daqui")) $("ed-daqui").onclick = () => { this.escolhendoDestino = s; this.status("Toque no mapa no quadrado de chegada."); };
     if ($("ed-onde")) $("ed-onde").onclick = () => { const L = this.mapa.local; s.destino = { grupo: L.grupo, num: L.num, x: L.x, y: L.y }; this.mudou = true; this.desenhaPainel(); };
+    $("ed-reset").onclick = () => { s.reset = true; this.mudou = true; this.desenhaPainel(); this.status("Ao salvar, esse evento começa do zero (volta a aparecer, dá o item de novo…). Saia e entre no lugar para ver."); };
     $("ed-troca").onclick = () => { this.sel.trocar = true; this.aba("cat"); this.status("Toque no sprite novo na lista."); };
     $("ed-apaga").onclick = () => { const l = this.lista(); l.splice(l.indexOf(s), 1); this.sel = null; this.mudou = true; this.desenha(); this.desenhaPainel(); };
     for (const id of ["ed-item", "ed-trein", "ed-marco"]) { const el = $(id); if (el && el.selectedOptions[0]) el.selectedOptions[0].scrollIntoView({ block: "nearest" }); }
@@ -418,8 +421,11 @@ const Editor = {
       if (e.acao === "teleporte" && !e.destino) return this.status("⚠️ Escolha o destino do teleporte.");
     }
     this.dados.t = Date.now(); this.mudou = false;
+    // "começar do zero" vai só nesta aplicação (o worker apaga as marcas no save); não fica guardado
+    const envio = JSON.parse(JSON.stringify(this.dados));
+    for (const l of Object.values(this.dados.mapas)) for (const e of l) delete e.reset;
     this.gravarLocal();
-    this.run.worker.postMessage({ t: "ed-aplica", ev: this.dados });
+    this.run.worker.postMessage({ t: "ed-aplica", ev: envio });
     this.status("Salvando…");
     try { if (!(await this.gravarNuvem())) toast("Eventos guardados só neste aparelho (sem nuvem agora)."); } catch (e) { toast("Eventos guardados só neste aparelho (sem nuvem agora)."); }
   },
