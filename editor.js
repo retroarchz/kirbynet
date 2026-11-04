@@ -87,6 +87,7 @@ const Editor = {
   // ---------- abrir / fechar ----------
   abrir() {
     if (!this.run) return;
+    this.garanteIds();
     this.monta();
     this.aberto = true; $("ed").classList.remove("hidden");
     this.status("Lendo o mapa…");
@@ -241,9 +242,17 @@ const Editor = {
   },
   eventoEm(q) { return this.lista().find((e) => e.x === q.x && e.y === q.y); },
   ocupado(q, menos) { return this.lista().some((e) => e !== menos && e.x === q.x && e.y === q.y) || (this.mapa && this.mapa.objs.some((o) => o.x === q.x && o.y === q.y)); },
+  // cada evento tem um id próprio (para "só depois de outro evento seu"); os antigos ganham um ao abrir
+  novoId() { return Math.random().toString(36).slice(2, 10); },
+  garanteIds() { for (const l of Object.values(this.dados.mapas)) for (const e of l) if (!e.id) e.id = this.novoId(); },
+  // nome curto de um evento para listas: o primeiro texto que ele fala + onde fica
+  nomeEvento(e, k) {
+    const t = e.acao === "sequencia" ? ((e.passos || []).find((p) => p.texto) || {}).texto : e.texto;
+    return `${this.ACOES[e.acao] ? this.ACOES[e.acao].split(" ")[0] : ""} “${String(t || "evento").slice(0, 28)}” (mapa ${k}, ${e.x},${e.y})`;
+  },
   novo(gfx, q) {
     if (this.ocupado(q)) return this.status("Já tem alguém nesse quadrado.");
-    const e = { x: q.x, y: q.y, sprite: gfx, olhar: "baixo", acao: gfx === 59 ? "chao" : "falar", texto: "Olá!", item: 1, qtd: 1 };
+    const e = { id: this.novoId(), x: q.x, y: q.y, sprite: gfx, olhar: "baixo", acao: gfx === 59 ? "chao" : "falar", texto: "Olá!", item: 1, qtd: 1 };
     this.lista().push(e); this.sel = { ev: e }; this.colocar = null; this.mudou = true;
     this.pedeSprites([gfx]); this.aba("painel"); this.desenha(); this.desenhaPainel(); this.desenhaCatalogo();
     this.status(`Evento novo em ${q.x}, ${q.y}. Escolha o que ele faz ao lado e aperte 💾 Salvar.`);
@@ -325,10 +334,14 @@ const Editor = {
       <label>O que ele faz</label><select id="ed-acao">${op(this.ACOES, s.acao)}</select>
       <label>Quando aparece</label><select id="ed-quando">${op({ sempre: "Sempre", depois: "Só depois de…", antes: "Só antes de…" }, (s.cond && s.cond.quando) || "sempre")}</select>`;
     if (s.cond && s.cond.quando !== "sempre") {
-      const marcos = [...this.INSIGNIAS.map((n, i) => [0xA7F + i, n]), ...lt.map(([i, n]) => [0x500 + i, `vencer o treinador ${i} · ${n}`])];
+      this.garanteIds();
+      const meus = [];
+      for (const [k, l] of Object.entries(this.dados.mapas)) for (const o of l) if (o !== s && (o.acao === "sequencia" || o.acao === "item" || o.acao === "chao")) meus.push(["ev:" + o.id, "o seu evento " + this.nomeEvento(o, k) + " terminar"]);
+      const marcos = [...meus, ...this.INSIGNIAS.map((n, i) => [0xA7F + i, n]), ...lt.map(([i, n]) => [0x500 + i, `vencer o treinador ${i} · ${n}`])];
+      const atual = s.cond.evento ? "ev:" + s.cond.evento : s.cond.flag;
       h += `<input id="ed-marcob" placeholder="Procurar (ex.: Wattson, insígnia, nome do treinador)…" style="margin-top:6px">
-        <select id="ed-marco" size="6">${marcos.map(([f, n]) => `<option value="${f}"${f === s.cond.flag ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>
-        <div class="dica">Vale ao entrar no lugar: o jogo confere na hora se você já tem.</div>`;
+        <select id="ed-marco" size="6">${marcos.map(([f, n]) => `<option value="${f}"${f === atual ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>
+        <div class="dica">Vale ao entrar no lugar: o jogo confere na hora. "O seu evento … terminar" = quando ele faz o último passo (some, dá o item…); se o fim dele for "Repete", conta a 1ª vez que você falar com ele até o fim.</div>`;
     }
     h += ``;
     if (s.acao === "falar") h += `<label>O que ele diz</label><textarea id="ed-texto">${esc(s.texto)}</textarea><div class="dica">Linha em branco = caixa de texto nova.</div>`;
@@ -386,7 +399,7 @@ const Editor = {
     liga("ed-item", (el) => s.item = +el.value, "change"); liga("ed-qtd", (el) => s.qtd = Math.max(1, Math.min(99, +el.value || 1)));
     liga("ed-trein", (el) => s.treinador = +el.value, "change");
     liga("ed-quando", (el) => { if (el.value === "sempre") delete s.cond; else s.cond = { quando: el.value, flag: (s.cond && s.cond.flag) || 0xA7F + 2 }; this.desenhaPainel(); }, "change");
-    liga("ed-marco", (el) => { s.cond.flag = +el.value; }, "change");
+    liga("ed-marco", (el) => { const v = el.value; if (v.startsWith("ev:")) { s.cond.evento = v.slice(3); delete s.cond.flag; } else { s.cond.flag = +v; delete s.cond.evento; } }, "change");
     liga("ed-fim", (el) => { s.fim = el.value; this.desenhaPainel(); }, "change");
     const ps = $("ed-passos");
     if (ps) {

@@ -237,6 +237,12 @@ const EditorQZ = (() => {
     for (const lista of Object.values(ev.mapas || {})) for (const e of lista) { if (e.marca) usadas.add(e.marca); if (e.marcaVis) usadas.add(e.marcaVis); }
     const novaMarca = () => { const m = MARCAS.find((f) => !usadas.has(f)); if (m) usadas.add(m); return m || 0; };
     const poeTexto = (s) => { const b = texto(s); const a = aloca(b.length); if (a) escritas.push([a, b]); return a; };
+    // eventos encadeados (pedido 03/11: "entrego o item, ele sai e aparece atrás da casa"): cond.evento = id de outro
+    // evento seu; a marca dele (ligada quando ele termina) vira a condição. Marcas reservadas antes, em todos os mapas.
+    const porId = new Map(), citados = new Set();
+    for (const l of Object.values(ev.mapas || {})) for (const e of l) { if (e.id) porId.set(e.id, e); if (e.cond && e.cond.evento) citados.add(e.cond.evento); }
+    for (const l of Object.values(ev.mapas || {})) for (const e of l)
+      if (!e.marca && (e.acao === "item" || e.acao === "chao" || (e.acao === "sequencia" && e.fim && e.fim !== "repete") || citados.has(e.id))) e.marca = novaMarca();
     for (const [chave, lista] of Object.entries(ev.mapas || {})) {
       if (!lista.length) continue;
       const [grupo, num] = chave.split(".").map(Number), h = cabecalho(bus, grupo, num);
@@ -253,7 +259,9 @@ const EditorQZ = (() => {
         let marcaObj = 0;
         const somePego = e.acao === "chao" || (e.acao === "sequencia" && e.fim === "some");
         if (e.acao === "item" || e.acao === "chao" || (e.acao === "sequencia" && e.fim !== "repete")) { if (!e.marca) e.marca = novaMarca(); if (!e.marca) { avisos.push("acabaram as marcas livres"); continue; } }
-        const cond = e.cond && (e.cond.quando === "depois" || e.cond.quando === "antes") && e.cond.flag ? e.cond : null;
+        let cond = e.cond && (e.cond.quando === "depois" || e.cond.quando === "antes") ? { ...e.cond } : null;
+        if (cond && cond.evento) { const alvo = porId.get(cond.evento); cond.flag = alvo && alvo !== e ? alvo.marca : 0; }
+        if (cond && !cond.flag) cond = null;
         if (cond) { if (!e.marcaVis) e.marcaVis = novaMarca(); if (!e.marcaVis) { avisos.push("acabaram as marcas livres"); continue; }
                     trans.push({ F: e.marcaVis, C: cond.flag, depois: cond.quando === "depois", pego: somePego ? e.marca : 0 }); }
         if (e.acao === "falar") { msg(e.texto || "…"); s.push(0x02); }
@@ -313,7 +321,7 @@ const EditorQZ = (() => {
               s.push(0x53, ...u16(id), 0x9E, 0x1E, 0x00);                                                  // removeobject, waitfieldeffect
             }
           }
-          if (e.fim === "uma") s.push(0x29, ...u16(e.marca));
+          if (e.fim === "uma" || ((!e.fim || e.fim === "repete") && citados.has(e.id) && e.marca)) s.push(0x29, ...u16(e.marca));   // terminou (outro evento pode depender)
           if (e.fim === "some") s.push(0x29, ...u16(e.marca), 0x53, ...u16(id));   // setflag, removeobject id
           s.push(0x6C, 0x02);
           s.__fix = [];
