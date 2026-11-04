@@ -6,7 +6,7 @@ const Editor = {
   aberto: false, run: null, rom: null, who: "",
   dados: { mapas: {} },          // { "grupo.num": [evento, ...] }
   mapa: null,                    // { local, w, h, base(canvas), info, objs }
-  zoom: 2, grade: true, sel: null, colocar: null, hover: null, arrasto: null,
+  zoom: 0, Z: 2, grade: true,   // zoom 0 = ajustar à tela (Z = escala de verdade) sel: null, colocar: null, hover: null, arrasto: null,
   sprites: new Map(),            // gfx -> canvas
   pedidos: new Set(), listas: null, cat: "pessoas", pagina: 0, busca: "",
   mudou: false,
@@ -121,9 +121,18 @@ const Editor = {
 #ed header h2{margin:0;font-size:17px}
 #ed-status{color:#aab;font-size:13px;padding:4px 12px;min-height:18px}
 #ed-corpo{flex:1;display:flex;min-height:0}
-#ed-mapa{flex:1;overflow:auto;background:#0b0c10;position:relative;cursor:crosshair}
-#ed-mapa canvas{image-rendering:pixelated;display:block}
-#ed-lado{width:340px;max-width:45vw;border-left:1px solid #2a2e38;display:flex;flex-direction:column;min-height:0}
+#ed-mapa{flex:1;overflow:auto;background:radial-gradient(circle at 50% 40%,#1a1d27,#0b0c10 70%);position:relative;cursor:crosshair;display:flex;min-width:0}
+#ed-mapa canvas{image-rendering:pixelated;display:block;margin:auto;box-shadow:0 6px 30px rgba(0,0,0,.6);border-radius:4px}
+#ed-lado{width:clamp(380px,32vw,540px);border-left:1px solid #2a2e38;display:flex;flex-direction:column;min-height:0;background:#161922}
+#ed .passo{background:#1b1f2b;border:1px solid #2a2e38;border-radius:10px;padding:8px 10px;margin:8px 0}
+#ed .passo-cab{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+#ed .passo-cab .num{background:#ff5fa2;color:#14161c;font-weight:700;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:12px;flex:0 0 22px}
+#ed .passo-cab .tipo{font-weight:600;flex:1}
+#ed .mini{flex:0 0 auto !important;padding:3px 9px;min-width:0;font-size:13px;border-radius:6px;line-height:1.2}
+#ed .addpassos{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px}
+#ed .addpassos button{padding:8px 6px;font-size:13px;white-space:nowrap;border-radius:8px}
+#ed .passo textarea{min-height:52px}
+#ed .secao{margin-top:14px;padding-top:10px;border-top:1px solid #2a2e38}
 #ed-abas{display:flex;border-bottom:1px solid #2a2e38}
 #ed-abas button{flex:1;border-radius:0;background:none;border:0;padding:9px;color:#aab;cursor:pointer}
 #ed-abas button.on{color:#fff;box-shadow:inset 0 -2px #ff5fa2}
@@ -149,7 +158,7 @@ const Editor = {
     d.innerHTML = `
 <header><h2 id="ed-titulo">🛠️ Eventos</h2><div class="grow"></div>
   <button id="ed-recarrega" class="ghost" title="Lê de novo o lugar onde você está">🔄 Ler este lugar</button>
-  <button id="ed-zoom" class="ghost">🔍 2x</button>
+  <button id="ed-zoom" class="ghost" title="Tamanho do mapa">🔍 Ajustar</button>
   <button id="ed-grade-b" class="ghost">▦ Grade</button>
   <button id="ed-salvar">💾 Salvar</button>
   <button id="ed-fechar" class="ghost">Fechar</button></header>
@@ -178,7 +187,8 @@ const Editor = {
     $("ed-fechar").onclick = () => this.fechar();
     $("ed-salvar").onclick = () => this.salvar();
     $("ed-recarrega").onclick = () => { this.status("Lendo o mapa…"); this.run.worker.postMessage({ t: "ed-mapa" }); };
-    $("ed-zoom").onclick = () => { this.zoom = this.zoom >= 3 ? 1 : this.zoom + 1; $("ed-zoom").textContent = "🔍 " + this.zoom + "x"; this.desenha(); };
+    $("ed-zoom").onclick = () => { this.zoom = this.zoom >= 4 ? 0 : this.zoom + 1; $("ed-zoom").textContent = "🔍 " + (this.zoom ? this.zoom + "x" : "Ajustar"); this.desenha(); };
+    addEventListener("resize", () => { if (this.aberto && !this.zoom) this.desenha(); });
     $("ed-grade-b").onclick = () => { this.grade = !this.grade; this.desenha(); };
     d.querySelectorAll("#ed-abas button").forEach((b) => b.onclick = () => this.aba(b.dataset.aba));
     const cv = $("ed-cv");
@@ -226,7 +236,7 @@ const Editor = {
   // ---------- mapa ----------
   quadrado(e) {
     if (!this.mapa) return null;
-    const r = $("ed-cv").getBoundingClientRect(), x = Math.floor((e.clientX - r.left) / (16 * this.zoom)), y = Math.floor((e.clientY - r.top) / (16 * this.zoom));
+    const r = $("ed-cv").getBoundingClientRect(), x = Math.floor((e.clientX - r.left) / (16 * this.Z)), y = Math.floor((e.clientY - r.top) / (16 * this.Z));
     return x >= 0 && y >= 0 && x < this.mapa.w && y < this.mapa.h ? { x, y } : null;
   },
   eventoEm(q) { return this.lista().find((e) => e.x === q.x && e.y === q.y); },
@@ -255,12 +265,15 @@ const Editor = {
     this.desenha(); this.desenhaPainel();
   },
   desenhaSprite(ctx, gfx, x, y, alpha) {
-    const c = this.sprites.get(gfx), Z = this.zoom; if (!c) return;
+    const c = this.sprites.get(gfx), Z = this.Z; if (!c) return;
     ctx.globalAlpha = alpha; ctx.drawImage(c, (x * 16 + 8 - c.width / 2) * Z, (y * 16 + 16 - c.height) * Z, c.width * Z, c.height * Z); ctx.globalAlpha = 1;
   },
   desenha() {
     const M = this.mapa, cv = $("ed-cv"); if (!M || !cv) return;
-    const Z = this.zoom; cv.width = M.w * 16 * Z; cv.height = M.h * 16 * Z;
+    // Ajustar: o maior tamanho que cabe na área (em passos de 0,25, para os pixels não ficarem tortos demais)
+    let Z = this.zoom;
+    if (!Z) { const a = $("ed-mapa"); Z = Math.max(1, Math.floor(Math.min((a.clientWidth - 24) / (M.w * 16), (a.clientHeight - 24) / (M.h * 16)) * 4) / 4); }
+    this.Z = Z; cv.width = Math.round(M.w * 16 * Z); cv.height = Math.round(M.h * 16 * Z);
     const ctx = cv.getContext("2d"); ctx.imageSmoothingEnabled = false;
     ctx.drawImage(M.base, 0, 0, cv.width, cv.height);
     if (this.grade) { ctx.strokeStyle = "rgba(255,255,255,.08)"; ctx.lineWidth = 1; ctx.beginPath();
@@ -333,13 +346,13 @@ const Editor = {
         let campo = "";
         if (p.t === "falar") campo = `<textarea data-i="${i}" data-k="texto">${esc(p.texto)}</textarea>`;
         if (p.t === "item") campo = `<div class="linha"><select data-i="${i}" data-k="item" style="flex:3">${opItem(p.item)}</select><input data-i="${i}" data-k="qtd" type="number" min="1" max="99" value="${p.qtd || 1}"></div>`;
-        if (p.t === "andar") campo = `<div class="linha"><select data-i="${i}" data-k="dir">${op(this.DIRS, p.dir || "baixo")}</select><input data-i="${i}" data-k="n" type="number" min="1" max="30" value="${p.n || 1}" title="quantos quadrados"><span class="dica" style="flex:0">quadrados</span></div>`;
+        if (p.t === "andar") campo = `<div class="linha"><select data-i="${i}" data-k="dir">${op(this.DIRS, p.dir || "baixo")}</select><input data-i="${i}" data-k="n" type="number" min="1" max="30" value="${p.n || 1}" title="quantos quadrados"><span class="dica" style="flex:0 0 auto;margin:0">quadrados</span></div>`;
         if (p.t === "virar") campo = `<select data-i="${i}" data-k="dir">${op(this.DIRS, p.dir || "baixo")}</select>`;
-        if (p.t === "esperar") campo = `<div class="linha"><input data-i="${i}" data-k="n" type="number" min="1" max="10" value="${p.n || 1}"><span class="dica" style="flex:0">segundo(s)</span></div>`;
+        if (p.t === "esperar") campo = `<div class="linha"><input data-i="${i}" data-k="n" type="number" min="1" max="10" value="${p.n || 1}"><span class="dica" style="flex:0 0 auto;margin:0">segundo(s)</span></div>`;
         if (p.t === "voar") campo = `<div class="dica">Pulinho e um Pokémon voador passa e leva ele (como nas cenas do jogo). Use "Some e não volta mais" no fim para ele não voltar.</div>`;
-        return `<div style="border:1px solid #2a2e38;border-radius:8px;padding:6px;margin:6px 0"><div class="linha"><b style="flex:3">${i + 1}. ${this.PASSOS[p.t]}</b>
-          <button class="ghost" data-mv="${i}" data-d="-1" title="subir">↑</button><button class="ghost" data-mv="${i}" data-d="1" title="descer">↓</button><button class="ghost perigo" data-rm="${i}" title="tirar">✕</button></div>${campo}</div>`;
-      }).join("") + `</div><div class="linha" style="flex-wrap:wrap">${Object.entries(this.PASSOS).map(([k, n]) => `<button class="ghost" data-add="${k}">+ ${n}</button>`).join("")}</div>
+        return `<div class="passo"><div class="passo-cab"><span class="num">${i + 1}</span><span class="tipo">${this.PASSOS[p.t]}</span>
+          <button class="ghost mini" data-mv="${i}" data-d="-1" title="subir"${i ? "" : " disabled"}>↑</button><button class="ghost mini" data-mv="${i}" data-d="1" title="descer"${i < s.passos.length - 1 ? "" : " disabled"}>↓</button><button class="ghost mini perigo" data-rm="${i}" title="tirar">✕</button></div>${campo}</div>`;
+      }).join("") + `</div><div class="dica">Acrescentar passo:</div><div class="addpassos">${Object.entries(this.PASSOS).map(([k, n]) => `<button class="ghost" data-add="${k}">+ ${n}</button>`).join("")}</div>
         <label>No fim</label><select id="ed-fim">${op({ repete: "Repete toda vez que falar com ele", uma: "Só a primeira vez (depois diz outra coisa)", some: "Some e não volta mais" }, s.fim || "repete")}</select>`;
       if (s.fim === "uma") h += `<label>O que diz depois (já fez tudo)</label><textarea id="ed-texto2">${esc(s.texto2 || "Boa sorte na sua jornada!")}</textarea>`;
       h += `<div class="dica">Ao andar, ele para se tiver alguém ou algo no caminho. Se não for "Some", ele volta ao lugar quando você sai do mapa e volta.</div>`;
