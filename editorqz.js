@@ -286,7 +286,7 @@ const EditorQZ = (() => {
           let desvio = -1;
           if (e.fim === "uma") { s.push(0x2B, ...u16(e.marca)); desvio = s.length; s.push(0x06, 0x01, 0, 0, 0, 0); }
           const movs = [], tr = trajeto(mapaD, e, lista);
-          for (const p of tr.passos) if (p.t === "andar" && p.n < p.quer && !p.porta) avisos.push(`evento em ${e.x},${e.y}: andou ${p.n} de ${p.quer} (tem parede ou alguém no caminho)`);
+          // (sem aviso de 'andou menos': o editor já desenha o caminho com ✖ onde ele para; o usuário pediu sem esse pop-up)
           for (const p of tr.passos) {
             if (p.t === "falar") { const a = poeTexto(p.texto || "…"); s.push(0x0F, 0x00, ...u32(a), 0x09, 0x04); }
             else if (p.t === "item") s.push(0x1A, 0x00, 0x80, ...u16(p.item | 0), 0x1A, 0x01, 0x80, ...u16(Math.max(1, p.qtd | 0)), 0x09, 0x00);
