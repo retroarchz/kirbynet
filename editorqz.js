@@ -250,7 +250,7 @@ const EditorQZ = (() => {
       const orig = ev.orig && ev.orig[chave] ? ev.orig[chave] : bus.r32(h + 4);
       const n0 = bus.r8(orig), arr0 = bus.r32(orig + 4);
       let maxId = 0; for (let i = 0; i < n0; i++) maxId = Math.max(maxId, bus.r8(arr0 + 24 * i));
-      const novos = [], trans = [], mapaD = dadosMapa(bus, h, orig);
+      const novos = [], trans = [], autos = [], mapaD = dadosMapa(bus, h, orig);
       for (const e of lista) {
         if (n0 + novos.length >= 64) { avisos.push("mapa " + chave + ": no máximo 64 pessoas"); break; }
         const id = ++maxId === 0xD1 ? ++maxId : maxId;
@@ -288,50 +288,71 @@ const EditorQZ = (() => {
           const fim = s.length; s.push(0x6C, 0x02);
           s.__fix = [[cheia + 2, fim]];
         }
-        else if (e.acao === "sequencia") {   // vários passos em ordem: falar, dar item, andar, virar, esperar
+        else if (e.acao === "sequencia") {   // vários passos em ordem: falar, dar item, andar, virar, esperar, voar…
           if (somePego) marcaObj = e.marca;   // some de vez: removeobject liga a marca do objeto
-          s.push(0x6A, 0x5A);                                          // lock, faceplayer
-          let desvio = -1;
-          if (e.fim === "uma") { s.push(0x2B, ...u16(e.marca)); desvio = s.length; s.push(0x06, 0x01, 0, 0, 0, 0); }
-          const movs = [], tr = trajeto(mapaD, e, lista), faltas = [];
+          const tr = trajeto(mapaD, e, lista);
           // (sem aviso de 'andou menos': o editor já desenha o caminho com ✖ onde ele para; o usuário pediu sem esse pop-up)
-          for (const p of tr.passos) {
-            if (p.t === "falar") { const a = poeTexto(p.texto || "…"); s.push(0x0F, 0x00, ...u32(a), 0x09, 0x04); }
-            else if (p.t === "item") s.push(0x1A, 0x00, 0x80, ...u16(p.item | 0), 0x1A, 0x01, 0x80, ...u16(Math.max(1, p.qtd | 0)), 0x09, 0x00);
-            else if (p.t === "andar" || p.t === "virar") {
-              const d = DIRS[p.dir] ?? 0, n = p.t === "andar" ? p.n : 1;
-              if (n > 0) {
-                const ml = new Array(n).fill(p.t === "andar" ? 0x08 + d : d); ml.push(0xFE);
-                movs.push([s.length + 3, ml]); s.push(0x4F, ...u16(id), 0, 0, 0, 0, 0x51, 0x00, 0x00);   // applymovement id, lista; waitmovement 0
+          // monta o script da sequência. auto = cena que começa sozinha ao chegar no lugar (pedido 03/11): trava todos
+          // (lockall/releaseall), sem faceplayer, e antes confere se o evento vale (já aconteceu? condição?).
+          const montaSeq = (auto) => {
+            const c = [], fx = [], mv = [], faltas = [];
+            const LOCK = auto ? 0x69 : 0x6A, REL = auto ? 0x6B : 0x6C;   // lockall 0x69 / releaseall 0x6B (0x6D é waitbuttonpress)
+            let desvio = -1; const fimCedo = [];
+            if (auto) {
+              c.push(0x16, ...u16(auto.var), 0x01, 0x00);                                   // setvar temp = 1 (uma vez por entrada)
+              if (e.marca && e.fim && e.fim !== "repete") { c.push(0x2B, ...u16(e.marca)); fimCedo.push(c.length + 2); c.push(0x06, 0x01, 0, 0, 0, 0); }   // já aconteceu
+              if (cond) { c.push(0x2B, ...u16(cond.flag)); fimCedo.push(c.length + 2); c.push(0x06, cond.quando === "depois" ? 0x00 : 0x01, 0, 0, 0, 0); }   // ainda não vale
+              c.push(LOCK);
+            } else {
+              c.push(LOCK, 0x5A);                                                            // lock, faceplayer
+              if (e.fim === "uma") { c.push(0x2B, ...u16(e.marca)); desvio = c.length; c.push(0x06, 0x01, 0, 0, 0, 0); }
+            }
+            for (const p of tr.passos) {
+              if (p.t === "falar") { const a = poeTexto(p.texto || "…"); c.push(0x0F, 0x00, ...u32(a), 0x09, 0x04); }
+              else if (p.t === "item") c.push(0x1A, 0x00, 0x80, ...u16(p.item | 0), 0x1A, 0x01, 0x80, ...u16(Math.max(1, p.qtd | 0)), 0x09, 0x00);
+              else if (p.t === "andar" || p.t === "virar") {
+                const d = DIRS[p.dir] ?? 0, n = p.t === "andar" ? p.n : 1;
+                if (n > 0) {
+                  const ml = new Array(n).fill(p.t === "andar" ? 0x08 + d : d); ml.push(0xFE);
+                  mv.push([c.length + 3, ml]); c.push(0x4F, ...u16(id), 0, 0, 0, 0, 0x51, 0x00, 0x00);   // applymovement id, lista; waitmovement 0
+                }
+                if (p.porta) c.push(0x2F, 0x09, 0x00, 0x53, ...u16(id));   // pisou na porta: som de saída (playse 9) e some
               }
-              if (p.porta) s.push(0x2F, 0x09, 0x00, 0x53, ...u16(id));   // pisou na porta: som de saída (playse 9) e some
+              else if (p.t === "esperar") c.push(0x28, ...u16(Math.max(1, Math.min(600, (p.n | 0) * 60))));   // delay em quadros (n segundos)
+              else if (p.t === "pedir") {   // missão: confere a mochila; sem o item diz o pedido e para; com o item, tira e segue
+                const it = p.item | 0, q = Math.max(1, Math.min(99, p.qtd | 0));
+                c.push(0x47, ...u16(it), ...u16(q), 0x21, 0x0D, 0x80, 0x00, 0x00);   // checkitem; compare VAR_RESULT, 0
+                faltas.push([c.length + 2, p.texto || "Preciso de um item… volte quando tiver!"]); c.push(0x06, 0x01, 0, 0, 0, 0);   // goto_if_eq -> pedido
+                c.push(0x45, ...u16(it), ...u16(q));                                // removeitem
+                if (p.texto2) { const a = poeTexto(p.texto2); c.push(0x0F, 0x00, ...u32(a), 0x09, 0x04); }
+              }
+              else if (p.t === "sumir") c.push(0x2F, 0x09, 0x00, 0x53, ...u16(id));   // "entra" (porta de enfeite, caverna…): som de porta e some
+              else if (p.t === "voar") {   // sai voando como nas cenas do jogo (0x082C72D2): pulinho, o pássaro passa e leva
+                mv.push([c.length + 3, [0x25, 0xFE]]); c.push(0x4F, ...u16(id), 0, 0, 0, 0, 0x51, 0x00, 0x00);   // pulo no lugar
+                c.push(0x28, 0x32, 0x00, 0x9D, 0x00, 0x01, 0x00, 0x9C, 0x1E, 0x00, 0x28, 0x0F, 0x00);           // delay 50, efeito 30
+                c.push(0x53, ...u16(id), 0x9E, 0x1E, 0x00);                                                  // removeobject, waitfieldeffect
+              }
             }
-            else if (p.t === "esperar") s.push(0x28, ...u16(Math.max(1, Math.min(600, (p.n | 0) * 60))));   // delay em quadros (n segundos)
-            else if (p.t === "pedir") {   // missão: confere a mochila; sem o item diz o pedido e para; com o item, tira e segue
-              const it = p.item | 0, q = Math.max(1, Math.min(99, p.qtd | 0));
-              s.push(0x47, ...u16(it), ...u16(q), 0x21, 0x0D, 0x80, 0x00, 0x00);   // checkitem; compare VAR_RESULT, 0
-              faltas.push([s.length + 2, p.texto || "Preciso de um item… volte quando tiver!"]); s.push(0x06, 0x01, 0, 0, 0, 0);   // goto_if_eq -> pedido
-              s.push(0x45, ...u16(it), ...u16(q));                                // removeitem
-              if (p.texto2) { const a = poeTexto(p.texto2); s.push(0x0F, 0x00, ...u32(a), 0x09, 0x04); }
+            if (e.fim === "uma" || ((!e.fim || e.fim === "repete") && citados.has(e.id) && e.marca)) c.push(0x29, ...u16(e.marca));   // terminou (outro evento pode depender)
+            if (e.fim === "some") c.push(0x29, ...u16(e.marca), 0x53, ...u16(id));   // setflag, removeobject id
+            c.push(REL, 0x02);
+            if (!auto && e.fim === "uma") {
+              const ja = c.length, a2 = poeTexto(e.texto2 || "Boa sorte na sua jornada!");
+              c.push(0x0F, 0x00, ...u32(a2), 0x09, 0x04, REL, 0x02);
+              fx.push([desvio + 2, ja]);
             }
-            else if (p.t === "sumir") s.push(0x2F, 0x09, 0x00, 0x53, ...u16(id));   // "entra" (porta de enfeite, caverna…): som de porta e some
-            else if (p.t === "voar") {   // sai voando como nas cenas do jogo (0x082C72D2): pulinho, o pássaro passa e leva
-              movs.push([s.length + 3, [0x25, 0xFE]]); s.push(0x4F, ...u16(id), 0, 0, 0, 0, 0x51, 0x00, 0x00);   // pulo no lugar
-              s.push(0x28, 0x32, 0x00, 0x9D, 0x00, 0x01, 0x00, 0x9C, 0x1E, 0x00, 0x28, 0x0F, 0x00);           // delay 50, efeito 30
-              s.push(0x53, ...u16(id), 0x9E, 0x1E, 0x00);                                                  // removeobject, waitfieldeffect
-            }
+            for (const [k, t] of faltas) { fx.push([k, c.length]); const a = poeTexto(t); c.push(0x0F, 0x00, ...u32(a), 0x09, 0x04, REL, 0x02); }
+            if (fimCedo.length) { const fim = c.length; c.push(0x02); for (const k of fimCedo) fx.push([k, fim]); }
+            for (const [k, ml] of mv) { const a = aloca(ml.length); if (!a) { avisos.push("acabou o espaço livre da ROM"); break; } escritas.push([a, ml]); const v = u32(a); for (let j = 0; j < 4; j++) c[k + j] = v[j]; }
+            return { c, fx };
+          };
+          const fala = montaSeq(null);
+          s.push(...fala.c); s.__fix = fala.fx;
+          if (e.comeca === "sozinho") {   // cena: script próprio, ligado pela tabela ON_FRAME do mapa (var temporária == 0)
+            const v = 0x400F - autos.length, au = montaSeq({ var: v }), aa = aloca(au.c.length);
+            if (!aa) { avisos.push("acabou o espaço livre da ROM"); }
+            else { for (const [k, rel] of au.fx) { const w = u32(aa + rel); for (let j = 0; j < 4; j++) au.c[k + j] = w[j]; } escritas.push([aa, au.c]); autos.push([v, aa]); }
           }
-          if (e.fim === "uma" || ((!e.fim || e.fim === "repete") && citados.has(e.id) && e.marca)) s.push(0x29, ...u16(e.marca));   // terminou (outro evento pode depender)
-          if (e.fim === "some") s.push(0x29, ...u16(e.marca), 0x53, ...u16(id));   // setflag, removeobject id
-          s.push(0x6C, 0x02);
-          s.__fix = [];
-          if (e.fim === "uma") {
-            const ja = s.length, a2 = poeTexto(e.texto2 || "Boa sorte na sua jornada!");
-            s.push(0x0F, 0x00, ...u32(a2), 0x09, 0x04, 0x6C, 0x02);
-            s.__fix.push([desvio + 2, ja]);
-          }
-          for (const [k, t] of faltas) { s.__fix.push([k, s.length]); const a = poeTexto(t); s.push(0x0F, 0x00, ...u32(a), 0x09, 0x04, 0x6C, 0x02); }
-          for (const [k, ml] of movs) { const a = aloca(ml.length); if (!a) { avisos.push("acabou o espaço livre da ROM"); break; } escritas.push([a, ml]); const v = u32(a); for (let j = 0; j < 4; j++) s[k + j] = v[j]; }
         }
         else if (e.acao === "lutar") {   // treinador existente: luta uma vez (a marca é a do próprio treinador)
           const a1 = poeTexto(e.texto || "Vamos lutar!"), a2 = poeTexto(e.texto2 || "Você venceu!"), a3 = poeTexto(e.texto3 || e.texto2 || "Foi uma boa luta!");
@@ -365,12 +386,12 @@ const EditorQZ = (() => {
       escritas.push([evs, cab]);
       escritas.push([h + 4, u32(evs)]);
       (ev.orig = ev.orig || {})[chave] = orig;
-      if (trans.length) {
+      if (trans.length || autos.length) {
         // script ON_TRANSITION: para cada evento com condição, liga (some) ou desliga (aparece) a marca dele
         const scr0 = ev.origScr && ev.origScr[chave] !== undefined ? ev.origScr[chave] : bus.r32(h + 8);
         const ents = [];
         if (ok(scr0)) for (let k = 0; k < 32; k++) { const t = bus.r8(scr0 + 5 * k); if (!t) break; const p = bus.r8(scr0 + 5 * k + 1) | bus.r8(scr0 + 5 * k + 2) << 8 | bus.r8(scr0 + 5 * k + 3) << 16 | bus.r8(scr0 + 5 * k + 4) << 24; ents.push([t, p >>> 0]); }
-        const velho = ents.find(([t]) => t === 3);
+        const velho = ents.find(([t]) => t === 3), velhoQ = ents.find(([t]) => t === 2);
         const c = [], fix = [], lab = {};
         const vai = (op, nome) => { if (op === 0x06) c.push(0x06, 0x01); else c.push(op); fix.push([c.length, nome]); c.push(0, 0, 0, 0); };
         trans.forEach((t, i) => {
@@ -382,12 +403,22 @@ const EditorQZ = (() => {
           lab["prox" + i] = c.length;
         });
         if (velho) c.push(0x05, ...u32(velho[1])); else c.push(0x02);
-        const ca = aloca(c.length), la = aloca(5 * (ents.length + 2));
-        if (!ca || !la) { avisos.push("acabou o espaço livre da ROM"); break; }
+        const ca = trans.length ? aloca(c.length) : 0, la = aloca(5 * (ents.length + 3));
+        if ((trans.length && !ca) || !la) { avisos.push("acabou o espaço livre da ROM"); break; }
         for (const [k, nome] of fix) { const v = u32(ca + lab[nome]); for (let j = 0; j < 4; j++) c[k + j] = v[j]; }
-        escritas.push([ca, c]);
-        const l = [0x03, ...u32(ca)];
-        for (const [t, p] of ents) if (t !== 3) l.push(t, ...u32(p));
+        if (trans.length) escritas.push([ca, c]);
+        const l = [];
+        if (trans.length) l.push(0x03, ...u32(ca));
+        else if (velho) l.push(0x03, ...u32(velho[1]));
+        if (autos.length) {   // tabela ON_FRAME: as nossas cenas primeiro, depois as do mapa ({var, valor, script}, fim = var 0)
+          const tq = [];
+          for (const [v, p] of autos) tq.push(...u16(v), 0, 0, ...u32(p));
+          if (velhoQ && ok(velhoQ[1])) for (let k = 0; k < 32; k++) { const q = velhoQ[1] + 8 * k, v = bus.r16(q); if (!v) break; for (let j = 0; j < 8; j++) tq.push(bus.r8(q + j)); }
+          tq.push(0, 0);
+          const ta = aloca(tq.length); if (!ta) { avisos.push("acabou o espaço livre da ROM"); break; }
+          escritas.push([ta, tq]); l.push(0x02, ...u32(ta));
+        } else if (velhoQ) l.push(0x02, ...u32(velhoQ[1]));
+        for (const [t, p] of ents) if (t !== 3 && t !== 2) l.push(t, ...u32(p));
         l.push(0x00);
         escritas.push([la, l]);
         escritas.push([h + 8, u32(la)]);
