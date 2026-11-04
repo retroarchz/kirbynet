@@ -20,7 +20,7 @@ const Editor = {
   },
   ACOES: { falar: "💬 Falar", item: "🎁 Dar item (uma vez)", chao: "📦 Item no chão", lutar: "⚔️ Lutar", teleporte: "🌀 Teleporte",
            sequencia: "📜 Sequência (falar, dar item, andar…)" },
-  PASSOS: { falar: "💬 Falar", item: "🎁 Dar item", andar: "🚶 Andar", virar: "↪️ Virar", esperar: "⏳ Esperar", voar: "🕊️ Sair voando" },
+  PASSOS: { falar: "💬 Falar", item: "🎁 Dar item", andar: "🚶 Andar", virar: "↪️ Virar", esperar: "⏳ Esperar", voar: "🕊️ Sair voando", sumir: "🚪 Entrar e sumir" },
   DIRS: { baixo: "para baixo", cima: "para cima", esq: "para a esquerda", dir: "para a direita" },
   // marcas que o jogo liga: insígnia N = 0xA7F + N - 1 (achado nos scripts dos ginásios), treinador vencido = 0x500 + id
   INSIGNIAS: ["ganhar a 1ª insígnia (Roxanne, Rustboro)", "ganhar a 2ª insígnia (Brawly, Dewford)", "ganhar a 3ª insígnia (Wattson, Mauville — Raio)",
@@ -129,7 +129,7 @@ const Editor = {
 #ed .passo-cab .num{background:#ff5fa2;color:#14161c;font-weight:700;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:12px;flex:0 0 22px}
 #ed .passo-cab .tipo{font-weight:600;flex:1}
 #ed .mini{flex:0 0 auto !important;padding:3px 9px;min-width:0;font-size:13px;border-radius:6px;line-height:1.2}
-#ed .addpassos{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px}
+#ed .addpassos{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:6px}
 #ed .addpassos button{padding:8px 6px;font-size:13px;white-space:nowrap;border-radius:8px}
 #ed .passo textarea{min-height:52px}
 #ed .secao{margin-top:14px;padding-top:10px;border-top:1px solid #2a2e38}
@@ -361,6 +361,7 @@ const Editor = {
         if (p.t === "andar") campo = `<div class="linha"><select data-i="${i}" data-k="dir">${op(this.DIRS, p.dir || "baixo")}</select><input data-i="${i}" data-k="n" type="number" min="1" max="30" value="${p.n || 1}" title="quantos quadrados"><span class="dica" style="flex:0 0 auto;margin:0">quadrados</span></div>`;
         if (p.t === "virar") campo = `<select data-i="${i}" data-k="dir">${op(this.DIRS, p.dir || "baixo")}</select>`;
         if (p.t === "esperar") campo = `<div class="linha"><input data-i="${i}" data-k="n" type="number" min="1" max="10" value="${p.n || 1}"><span class="dica" style="flex:0 0 auto;margin:0">segundo(s)</span></div>`;
+        if (p.t === "sumir") campo = `<div class="dica">Som de porta e ele desaparece, como se entrasse. Use depois de "Andar" até uma porta de enfeite, cortina, caverna…</div>`;
         if (p.t === "voar") campo = `<div class="dica">Pulinho e um Pokémon voador passa e leva ele (como nas cenas do jogo). Use "Some e não volta mais" no fim para ele não voltar.</div>`;
         return `<div class="passo"><div class="passo-cab"><span class="num">${i + 1}</span><span class="tipo">${this.PASSOS[p.t]}</span>
           <button class="ghost mini" data-mv="${i}" data-d="-1" title="subir"${i ? "" : " disabled"}>↑</button><button class="ghost mini" data-mv="${i}" data-d="1" title="descer"${i < s.passos.length - 1 ? "" : " disabled"}>↓</button><button class="ghost mini perigo" data-rm="${i}" title="tirar">✕</button></div>${campo}</div>`;
@@ -395,7 +396,7 @@ const Editor = {
       p.querySelectorAll("[data-add]").forEach((b) => b.onclick = () => {
         const t = b.dataset.add, novo = { t };
         if (t === "falar") novo.texto = "…"; if (t === "item") { novo.item = 1; novo.qtd = 1; } if (t === "andar") { novo.dir = "baixo"; novo.n = 2; } if (t === "virar") novo.dir = "baixo"; if (t === "esperar") novo.n = 1;
-        s.passos.push(novo); if (t === "voar" && (s.fim || "repete") === "repete") s.fim = "some"; this.mudou = true; this.desenhaPainel(); this.desenha();
+        s.passos.push(novo); if ((t === "voar" || t === "sumir") && (s.fim || "repete") === "repete") s.fim = "some"; this.mudou = true; this.desenhaPainel(); this.desenha();
       });
     }
     const filtra = (bid, sid) => { const b = $(bid), sel = $(sid); if (!b) return; b.oninput = () => { const t = b.value.toLowerCase(); for (const o of sel.options) o.hidden = t && !o.text.toLowerCase().includes(t); }; };

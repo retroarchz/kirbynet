@@ -196,8 +196,8 @@ const EditorQZ = (() => {
     let x = e.x, y = e.y, saiu = false; const alt0 = mapa.info[y * mapa.w + x] >> 12 || 3;
     const pontos = [], passos = [];
     for (const p of e.passos || []) {
-      if (saiu && (p.t === "andar" || p.t === "virar" || p.t === "voar")) continue;   // já foi embora
-      if (p.t !== "andar") { passos.push(p); if (p.t === "voar") saiu = true; continue; }
+      if (saiu && (p.t === "andar" || p.t === "virar" || p.t === "voar" || p.t === "sumir")) continue;   // já foi embora
+      if (p.t !== "andar") { passos.push(p); if (p.t === "voar" || p.t === "sumir") saiu = true; continue; }
       const [dx, dy] = PASSO_XY[p.dir] || [0, 1], quer = Math.max(1, Math.min(30, p.n | 0)); let foi = 0, parou = null;
       for (let k = 0; k < quer; k++) {
         const nx = x + dx, ny = y + dy;
@@ -299,6 +299,7 @@ const EditorQZ = (() => {
               if (p.porta) s.push(0x2F, 0x09, 0x00, 0x53, ...u16(id));   // pisou na porta: som de saída (playse 9) e some
             }
             else if (p.t === "esperar") s.push(0x28, ...u16(Math.max(1, Math.min(600, (p.n | 0) * 60))));   // delay em quadros (n segundos)
+            else if (p.t === "sumir") s.push(0x2F, 0x09, 0x00, 0x53, ...u16(id));   // "entra" (porta de enfeite, caverna…): som de porta e some
             else if (p.t === "voar") {   // sai voando como nas cenas do jogo (0x082C72D2): pulinho, o pássaro passa e leva
               movs.push([s.length + 3, [0x25, 0xFE]]); s.push(0x4F, ...u16(id), 0, 0, 0, 0, 0x51, 0x00, 0x00);   // pulo no lugar
               s.push(0x28, 0x32, 0x00, 0x9D, 0x00, 0x01, 0x00, 0x9C, 0x1E, 0x00, 0x28, 0x0F, 0x00);           // delay 50, efeito 30
