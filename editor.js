@@ -163,6 +163,9 @@ const Editor = {
 #ed .addpassos button{padding:8px 6px;font-size:13px;white-space:nowrap;border-radius:8px}
 #ed .passo textarea{min-height:52px}
 #ed .secao{margin-top:14px;padding-top:10px;border-top:1px solid #2a2e38}
+#ed .marcos{display:flex;flex-direction:column;gap:3px;max-height:190px;overflow:auto;margin-top:6px;border:1px solid #333a4a;border-radius:8px;padding:4px}
+#ed .marcos .marco{text-align:left;padding:5px 8px;font-size:13px;border-radius:6px}
+#ed .marcos .marco.on{border-color:#ffd166;background:#3a3220;color:#fff}
 #ed .evs{display:flex;flex-direction:column;gap:4px;margin-top:4px;max-height:150px;overflow:auto}
 #ed .evs .ev{text-align:left;padding:6px 8px;font-size:13px;display:flex;justify-content:space-between;gap:8px}
 #ed .evs .ev.on{border-color:#ff5fa2;background:#2a1f2a}
@@ -406,7 +409,8 @@ const Editor = {
       const marcos = [...meus, ...this.INSIGNIAS.map((n, i) => [0xA7F + i, n]), ...lt.map(([i, n]) => [0x500 + i, `vencer o treinador ${i} · ${n}`])];
       const atual = s.cond.evento ? "ev:" + s.cond.evento : s.cond.flag;
       h += `<input id="ed-marcob" placeholder="Procurar (ex.: Wattson, insígnia, nome do treinador)…" style="margin-top:6px">
-        <select id="ed-marco" size="6">${marcos.map(([f, n]) => `<option value="${f}"${f === atual ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>
+        <div id="ed-marco" class="marcos">${marcos.map(([f, n]) => `<button class="ghost marco${f === atual ? " on" : ""}" data-marco="${f}">${f === atual ? "✓ " : ""}${esc(n)}</button>`).join("")}</div>
+        <div class="dica" style="color:#ffd166">Escolhido: ${esc((marcos.find(([f]) => f === atual) || [0, "nada ainda — clique numa opção acima"])[1])}</div>
         <div class="dica">Vale ao entrar no lugar: o jogo confere na hora. "O seu evento … terminar" = quando ele faz o último passo (some, dá o item…); se o fim dele for "Repete", conta a 1ª vez que você falar com ele até o fim.</div>`;
     }
     h += ``;
@@ -465,8 +469,13 @@ const Editor = {
     liga("ed-texto", (el) => s.texto = el.value); liga("ed-texto2", (el) => s.texto2 = el.value); liga("ed-texto3", (el) => s.texto3 = el.value);
     liga("ed-item", (el) => s.item = +el.value, "change"); liga("ed-qtd", (el) => s.qtd = Math.max(1, Math.min(99, +el.value || 1)));
     liga("ed-trein", (el) => s.treinador = +el.value, "change");
-    liga("ed-quando", (el) => { if (el.value === "sempre") delete s.cond; else s.cond = { quando: el.value, flag: (s.cond && s.cond.flag) || 0xA7F + 2 }; this.desenhaPainel(); }, "change");
-    liga("ed-marco", (el) => { const v = el.value; if (v.startsWith("ev:")) { s.cond.evento = v.slice(3); delete s.cond.flag; } else { s.cond.flag = +v; delete s.cond.evento; } }, "change");
+    liga("ed-quando", (el) => { if (el.value === "sempre") delete s.cond; else s.cond = { ...(s.cond || {}), quando: el.value }; this.desenhaPainel(); }, "change");
+    p.querySelectorAll("[data-marco]").forEach((b) => b.onclick = () => {
+      const v = b.dataset.marco;
+      if (v.startsWith("ev:")) { s.cond.evento = v.slice(3); delete s.cond.flag; } else { s.cond.flag = +v; delete s.cond.evento; }
+      this.mudou = true; zera(); const lista = $("ed-marco"), rol = lista.scrollTop; this.desenhaPainel(); if ($("ed-marco")) $("ed-marco").scrollTop = rol;
+      this.status("✓ Condição escolhida. Não esqueça de apertar 💾 Salvar.");
+    });
     liga("ed-fim", (el) => { s.fim = el.value; this.desenhaPainel(); }, "change");
     const ps = $("ed-passos");
     if (ps) {
@@ -486,7 +495,8 @@ const Editor = {
       });
     }
     const filtra = (bid, sid) => { const b = $(bid), sel = $(sid); if (!b) return; b.oninput = () => { const t = b.value.toLowerCase(); for (const o of sel.options) o.hidden = t && !o.text.toLowerCase().includes(t); }; };
-    filtra("ed-itemb", "ed-item"); filtra("ed-treinb", "ed-trein"); filtra("ed-marcob", "ed-marco");
+    filtra("ed-itemb", "ed-item"); filtra("ed-treinb", "ed-trein");
+    if ($("ed-marcob")) $("ed-marcob").oninput = () => { const t = $("ed-marcob").value.toLowerCase(); for (const b of $("ed-marco").children) b.hidden = t && !b.textContent.toLowerCase().includes(t); };
     const dest = () => { s.destino = { grupo: +$("ed-dg").value || 0, num: +$("ed-dn").value || 0, x: +$("ed-dx").value || 0, y: +$("ed-dy").value || 0 }; };
     ["ed-dg", "ed-dn", "ed-dx", "ed-dy"].forEach((id) => liga(id, dest));
     if ($("ed-daqui")) $("ed-daqui").onclick = () => { this.escolhendoDestino = s; this.status("Toque no mapa no quadrado de chegada."); };
@@ -501,7 +511,7 @@ const Editor = {
     $("ed-reset").onclick = () => { s.reset = true; this.mudou = true; this.desenhaPainel(); this.status("Ao salvar, esse evento começa do zero (volta a aparecer, dá o item de novo…). Saia e entre no lugar para ver."); };
     $("ed-troca").onclick = () => { this.sel.trocar = true; this.aba("cat"); this.status("Toque no sprite novo na lista."); };
     $("ed-apaga").onclick = () => { const l = this.lista(); l.splice(l.indexOf(s), 1); this.sel = null; this.mudou = true; this.desenha(); this.desenhaPainel(); };
-    for (const id of ["ed-item", "ed-trein", "ed-marco"]) { const el = $(id); if (el && el.selectedOptions[0]) el.selectedOptions[0].scrollIntoView({ block: "nearest" }); }
+    for (const id of ["ed-item", "ed-trein"]) { const el = $(id); if (el && el.selectedOptions[0]) el.selectedOptions[0].scrollIntoView({ block: "nearest" }); }
   },
 
   // ---------- salvar ----------
