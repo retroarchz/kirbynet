@@ -81,6 +81,12 @@ PLENTO, ALINHA = 0x0203FF3B, 0x0203FF30
 # quadrado de onde veio enquanto anda): se o Pokémon não está colado, vai para esse quadrado (coords + sprite andam o
 # mesmo tanto). Colado: SOLTO = 0.
 SOLTO = 0x0203FF32
+# Diagonal (pedido 03/11, print 21:22 no mapa 0.25: pedras do mar em escada, a de cima fica 2 para cima e 2 para o lado).
+# Em cima de pedra do mar, se nada reto (1, 2, 3 casas) serve, tenta as faixas de fora do bloco 2x2 (coluna/fileira ao
+# lado), 1 e depois 2 casas além da borda da frente. O jogador passa SÓ DE LADO para essa faixa (mesma fileira/coluna;
+# o desenho não se mexe) e dá dali o pulo reto do jogo (1 ou 2 casas; 3 não). O jogo anda para a frente e o P anda de
+# lado 1 px por quadro: diagonal de 45 graus, e como cada eixo só é mexido por um, a câmera não pula a divisa.
+# Não vale no pulo de lado da bike (r8 = 1).
 # CÂMERA (03/11, o usuário viu o mapa desenhado errado): a câmera só desenha a coluna/fileira nova quando a posição dela
 # cai EXATAMENTE num múltiplo de 16 px; passos 1,2,1,2 pulavam o 32 (31 -> 33) e a câmera ficava 1 quadrado atrás.
 # PLENTO: 0 desligado, 1 quer andar, 2 descansa; no quadro: 5 anda, 3 descansa, 4 adiado (o jogo deixou o sprite na
@@ -608,6 +614,7 @@ def code():
     a.pop(['r2', 'r3']); a.movh('r8', 'r2'); a.movh('r9', 'r3')
     a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r1']); a.bx('r1')
     a.label('callr3b'); a.bx('r3')
+    a.pool()
     a.label('poeira')   # a pé: pouso sem poeira (r5 = jogador)
     a.ldrb_i('r0', 'r5', 3); a.mov('r1', 2); a.alu('orr', 'r0', 'r1'); a.strb_i('r0', 'r5', 3)
     a.ldr_lit('r1', POEIRA); a.mov('r0', 1); a.strb_i('r0', 'r1', 0); a.bx('lr')
@@ -617,6 +624,7 @@ def code():
     a.movh('r0', 'r4'); a.ldr_lit('r3', JUMP1 | 1); a.bl('callr3b')
     a.mov('r1', 2); a.ldr_lit('r3', SET_ANIM | 1); a.bl('callr3b')
     a.mov('r0', 1); a.b('fim')
+    a.pool()
     # ---------- em cima de uma pedra do mar (r0 = deslocamento do quadrado atual) ----------
     # A pedra ocupa um bloco 2x2 e o desenho está no centro dela. Procura, nas duas fileiras (ou colunas) da pedra, a
     # partir da borda da frente, pedra/cerca ou chão a 1 e depois a 2 casas; se for preciso, troca o quadrado do
@@ -702,7 +710,44 @@ def code():
         a.ldr_sp('r0', sy); a.add_r('r0', 'r0', 'r7'); a.str_sp('r0', 32); a.mov('r0', 2); a.str_sp('r0', 36)
         a.bl('giromarca'); a.b('pachou')
         a.label('pn3_' + n)
+    # diagonal: faixas de fora do bloco (lado: bx - 1 e bx + 2, ou by - 1 e by + 2)
+    a.movh('r0', 'r8'); a.cmpi('r0', 1); a.bfar('eq', 'pdnada')
+    for dist in (1, 2):
+        for e in (-1, 2):
+            n = 'dg%d%d' % (dist, e + 1)
+            # alvo: faixa de fora, 'dist' casas além da borda da frente -> sp 28/32
+            a.cmpi('r6', 0); a.bc('ne', 'dh' + n)
+            a.ldr_sp('r0', 0); a.ldr_sp('r1', 16); a.b('dc' + n)
+            a.label('dh' + n); a.ldr_sp('r0', 12); a.ldr_sp('r1', 4)
+            a.label('dc' + n)
+            a.cmpi('r6', 0); a.bc('ne', 'de' + n)
+            if e < 0: a.subi('r0', 1)
+            else: a.addi('r0', e)
+            a.b('df' + n)
+            a.label('de' + n)
+            if e < 0: a.subi('r1', 1)
+            else: a.addi('r1', e)
+            a.label('df' + n)
+            for _ in range(dist): a.add_r('r0', 'r0', 'r6'); a.add_r('r1', 'r1', 'r7')
+            a.str_sp('r0', 28); a.str_sp('r1', 32)
+            a.bl('tile'); a.str_sp('r0', 36); a.bl('plat'); a.cmpi('r0', 0); a.bc('ne', 'dk' + n)
+            a.ldr_sp('r0', 36); a.bl('chao'); a.cmpi('r0', 0); a.bfar('eq', 'dn' + n)
+            a.label('dk' + n)
+            a.ldr_sp('r0', 28); a.ldr_sp('r1', 32); a.bl('livre'); a.cmpi('r0', 0); a.bfar('eq', 'dn' + n)
+            # casas para a frente desde o jogador: F = (alvo - jogador) na direção (1 ou 2)
+            a.ldr_sp('r0', 28); a.movh('r1', 'r10'); a.sub_r('r0', 'r0', 'r1'); a.alu('mul', 'r0', 'r6')
+            a.ldr_sp('r1', 32); a.movh('r2', 'r11'); a.sub_r('r1', 'r1', 'r2'); a.alu('mul', 'r1', 'r7'); a.add_r('r0', 'r0', 'r1')
+            a.subi('r0', 1); a.cmpi('r0', 1); a.bfar('hi', 'dn' + n); a.addi('r0', 1); a.str_sp('r0', 36)
+            # início: só de lado (a coordenada da frente volta à do jogador)
+            a.cmpi('r6', 0); a.bc('ne', 'dv' + n)
+            a.movh('r0', 'r11'); a.str_sp('r0', 32); a.b('dw' + n)
+            a.label('dv' + n); a.movh('r0', 'r10'); a.str_sp('r0', 28)
+            a.label('dw' + n)
+            a.bl('jogador'); a.b('pachou')
+            a.label('dn' + n)
+    a.label('pdnada')
     a.addsp(40); a.b('nada')
+    a.pool()
     a.label('pachou')
     # troca o quadrado do jogador dentro da pedra (se precisar) sem mexer no desenho
     a.ldr_lit('r3', DESL)
