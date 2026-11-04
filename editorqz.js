@@ -343,8 +343,9 @@ const EditorQZ = (() => {
               else if (p.t === "sumir") c.push(0x2F, 0x09, 0x00, 0x53, ...u16(id));   // "entra" (porta de enfeite, caverna…): som de porta e some
               else if (p.t === "voar") {   // sai voando como nas cenas do jogo (0x082C72D2): pulinho, o pássaro passa e leva
                 c.push(0x68); mv.push([c.length + 3, [0x25, 0xFE]]); c.push(0x4F, ...u16(id), 0, 0, 0, 0, 0x51, 0x00, 0x00);   // igual ao Steven (0x082C72C7): closemessage, passinho no lugar 0x25 (0x083601D5)
-                c.push(0x28, 0x32, 0x00, 0x9D, 0x00, 0x01, 0x00, 0x9C, 0x1E, 0x00, 0x28, 0x0F, 0x00);           // delay 50, efeito 30
-                c.push(0x53, ...u16(id), 0x9E, 0x1E, 0x00);                                                  // removeobject, waitfieldeffect
+                c.push(0x28, 0x32, 0x00, 0x9D, 0x00, 0x01, 0x00, 0x9C, 0x1E, 0x00, 0x28, 0x06, 0x00);           // delay 50, efeito 30, delay 6
+                mv.push([c.length + 3, [0x46, 0xFE]]); c.push(0x4F, ...u16(id), 0, 0, 0, 0, 0x28, 0x09, 0x00);   // pulo quando o pássaro chega (pedido 04/11), sem esperar; delay 9
+                c.push(0x53, ...u16(id), 0x9E, 0x1E, 0x00, 0x51, ...u16(id));                                // some no meio do pulo; waitfieldeffect; waitmovement (libera)
               }
             }
             if (e.fim === "uma" || ((!e.fim || e.fim === "repete") && citados.has(e.id) && e.marca)) c.push(0x29, ...u16(e.marca));   // terminou (outro evento pode depender)
@@ -373,9 +374,12 @@ const EditorQZ = (() => {
               escritas.push([aa, au.c]); autos.push([v, 0, aa]);
               if (au.voaFim) {   // modo solto + voar: quando ele chega no fim, o site (worker) põe a var em 2 e esta parte roda
                 // mesmo script do voo do Steven (0x082C72C7), com waitmovement id antes (libera a ordem de andar da 1ª parte)
-                const ml = [0x25, 0xFE], ma = aloca(ml.length), c2 = [0x69, 0x51, ...u16(id), 0x4F, ...u16(id), ...u32(ma || 0), 0x51, 0x00, 0x00,
-                  0x28, 0x32, 0x00, 0x9D, 0x00, 0x01, 0x00, 0x9C, 0x1E, 0x00, 0x28, 0x0F, 0x00, 0x53, ...u16(id), 0x9E, 0x1E, 0x00,
+                const ml = [0x25, 0xFE], ma = aloca(ml.length), mp = [0x46, 0xFE], mpa = aloca(mp.length), c2 = [0x69, 0x51, ...u16(id), 0x4F, ...u16(id), ...u32(ma || 0), 0x51, 0x00, 0x00,
+                  0x28, 0x32, 0x00, 0x9D, 0x00, 0x01, 0x00, 0x9C, 0x1E, 0x00, 0x28, 0x06, 0x00,
+                  0x4F, ...u16(id), ...u32(mpa || 0), 0x28, 0x09, 0x00,   // pulo quando o pássaro chega (pedido 04/11), some no meio dele
+                  0x53, ...u16(id), 0x9E, 0x1E, 0x00, 0x51, ...u16(id),
                   0x16, ...u16(v), 0x03, 0x00, 0x6B, 0x02];
+                if (mpa) escritas.push([mpa, mp]);
                 const a2 = aloca(c2.length);
                 if (!ma || !a2) avisos.push("acabou o espaço livre da ROM");
                 else { escritas.push([ma, ml], [a2, c2]); autos.push([v, 2, a2]); vigias.push({ mapa: chave, id, v, x: tr.fim.x, y: tr.fim.y }); }
