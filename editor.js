@@ -437,7 +437,9 @@ const Editor = {
     if (s.acao === "sequencia") {
       if (!s.passos || !s.passos.length) s.passos = [{ t: "falar", texto: s.texto || "Olá!" }];
       const opItem = (v) => li.map(([i, n]) => `<option value="${i}"${i === v ? " selected" : ""}>${esc(n)}</option>`).join("");
-      h += `<label>Passos (nessa ordem, quando você fala com ele)</label><div id="ed-passos">` + s.passos.map((p, i) => {
+      h += `<label>Quando começa</label><select id="ed-comeca">${op({ falar: "Quando você fala com ele", sozinho: "Sozinho, assim que você chega no lugar (cena)" }, s.comeca || "falar")}</select>
+        ${s.comeca === "sozinho" ? `<div class="dica">Cena: ao entrar no lugar, tudo para e ele faz os passos sozinho (se ele estiver valendo e ainda não tiver ido embora).</div>` : ""}
+        <label>Passos (nessa ordem)</label><div id="ed-passos">` + s.passos.map((p, i) => {
         let campo = "";
         if (p.t === "falar") campo = `<textarea data-i="${i}" data-k="texto">${esc(p.texto)}</textarea>`;
         if (p.t === "item") campo = `<div class="linha"><select data-i="${i}" data-k="item" style="flex:3">${opItem(p.item)}</select><input data-i="${i}" data-k="qtd" type="number" min="1" max="99" value="${p.qtd || 1}"></div>`;
@@ -477,6 +479,7 @@ const Editor = {
       this.status("✓ Condição escolhida. Não esqueça de apertar 💾 Salvar.");
     });
     liga("ed-fim", (el) => { s.fim = el.value; this.desenhaPainel(); }, "change");
+    liga("ed-comeca", (el) => { if (el.value === "sozinho") s.comeca = "sozinho"; else delete s.comeca; this.mudou = true; this.desenhaPainel(); }, "change");
     const ps = $("ed-passos");
     if (ps) {
       const muda = (el) => { const p = s.passos[+el.dataset.i]; if (!p) return; const k = el.dataset.k; p[k] = ["item", "qtd", "n"].includes(k) ? +el.value || 0 : el.value; this.mudou = true; zera(); this.desenha(); };
