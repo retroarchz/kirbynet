@@ -40,7 +40,9 @@ DESL = 0x0203FF40
 OFFS = [(0x150, 8, 8), (0x152, 8, 8), (0x154, 8, 8), (0x151, -8, 8), (0x153, -8, 8),
         (0x158, 8, -8), (0x15C, 8, -8), (0x159, -8, -8),
         (0x164, 8, 8), (0x16C, 8, -8), (0x15A, 8, -8), (0x15B, -8, -8),
-        (0x175, 8, 8), (0x176, -8, 8), (0x17D, 8, -8), (0x17E, -8, -8)]   # quadrado do bloco -> onde fica o centro da pedra (px)
+        (0x175, 8, 8), (0x176, -8, 8), (0x17D, 8, -8), (0x17E, -8, -8),
+        (0x15E, 8, 8), (0x15F, -8, 8), (0x16E, 8, -8), (0x16F, -8, -8),        # pedra pontuda da baía (mapa 0.23)
+        (0x162, 8, 8), (0x16A, 8, -8), (0x163, -8, 8), (0x16B, -8, -8)]        # pedras do mar na beira da baía   # quadrado do bloco -> onde fica o centro da pedra (px)
 # A pé (pedido 02/11; 03/11 trocado de X para Z): virado para a pedra/cerca, apertando Z (= A do GBA) ele dá o pulinho do barranco para cima dela.
 # PlayerNotOnBikeMoving (0x080CB538, r5 = direção, r6 = teclas seguradas): no "bate na parede" (0x080CB58C) desvia.
 # Enquanto ele bate na parede o jogo não lê teclas, então o aperto do B fica guardado por 40 quadros (TRAVA_B, contado
@@ -98,6 +100,8 @@ PLAT = [
     (PRIM, [0x080, 0x081, 0x082, 0x088, 0x071, 0x08A, 0x090, 0x079, 0x092]),   # pedra grande marrom (3x3)
     (PRIM, [0x150, 0x151, 0x152, 0x153, 0x154, 0x158, 0x159, 0x15C]),    # pedras cinza do mar
     (PRIM, [0x164, 0x16C, 0x15A, 0x15B]),                                # pedras do mar encostadas na margem (print 02/11 20:14)
+    (PRIM, [0x15E, 0x15F, 0x16E, 0x16F, 0x194]),                         # baía do mapa 0.23 (print 03/11 21:05): pedra pontuda 2x2 e pedrinha 1x1
+    (PRIM, [0x162, 0x16A, 0x163, 0x16B]),                                # pedras do mar emendadas na beira da baía
     (PRIM, [0x175, 0x176, 0x17D, 0x17E]),                                # pedra pontuda do mar 2x2 (print 03/11 20:21, mapa 0.21)
     (PRIM, [0x172, 0x174, 0x17A, 0x17B, 0x17C, 0x182, 0x184, 0x0B4, 0x089]),   # pedra grande do mar (o meio é 0x071/0x079)
     (SEC, [0x280, 0x282, 0x288, 0x28A, 0x291, 0x292]),                   # cerca de troncos
@@ -246,6 +250,7 @@ def code():
     a.label('lloop')
     a.alu('cmp', 'r2', 'r6'); a.bc('eq', 'lprox')
     a.ldrb_i('r4', 'r2', 0); a.mov('r5', 1); a.alu('tst', 'r4', 'r5'); a.bc('eq', 'lprox')
+    a.ldrb_i('r4', 'r2', 8); a.cmpi('r4', 0xD1); a.bc('eq', 'lprox')        # Pokémon que segue: o jogador passa por ele
     a.ldrh_i('r4', 'r2', 0x10); a.alu('cmp', 'r4', 'r0'); a.bc('ne', 'lprox')
     a.ldrh_i('r4', 'r2', 0x12); a.alu('cmp', 'r4', 'r1'); a.bc('ne', 'lprox')
     a.mov('r0', 0); a.pop(['r4', 'r5', 'r6']); a.bx('lr')
@@ -373,9 +378,15 @@ def code():
     a.ldr_lit('r0', GIRO_N); a.ldrb_i('r0', 'r0', 0); a.cmpi('r0', 0); a.bfar('ne', 'pose_sai')
     a.ldrh_i('r0', 'r5', 0x10); a.ldrh_i('r1', 'r5', 0x12); a.bl('tile')
     a.lsl('r0', 'r0', 22); a.lsr('r0', 'r0', 22); a.ldr_lit('r1', 0x175); a.sub_r('r0', 'r0', 'r1')
-    a.cmpi('r0', 9); a.bfar('hi', 'pose_nao')
+    a.cmpi('r0', 9); a.bc('hi', 'pose_baia')
     a.mov('r1', 1); a.h(0x4000 | 2 << 6 | 0 << 3 | 1)                       # lsl r1, r0
     a.ldr_lit('r2', 0x303); a.alu('tst', 'r1', 'r2'); a.bfar('eq', 'pose_nao')   # 0x175 + 0, 1, 8, 9
+    a.b('pose_sim')
+    a.label('pose_baia')   # pontuda da baía: 0x15E + 0, 1, 16, 17 (r0 = id - 0x175)
+    a.addi('r0', 0x17); a.cmpi('r0', 17); a.bfar('hi', 'pose_nao')
+    a.mov('r1', 1); a.h(0x4000 | 2 << 6 | 0 << 3 | 1)                       # lsl r1, r0
+    a.ldr_lit('r2', 0x30003); a.alu('tst', 'r1', 'r2'); a.bfar('eq', 'pose_nao')
+    a.label('pose_sim')
     a.ldr_lit('r0', AVATAR); a.ldrb_i('r0', 'r0', 0); a.mov('r1', 1); a.alu('tst', 'r0', 'r1'); a.bfar('eq', 'pose_nao')
     a.ldr_i('r0', 'r4', 0xC); a.ldr_lit('r1', IMG657); a.alu('cmp', 'r0', 'r1'); a.bfar('ne', 'pose_nao')
     a.ldr_lit('r3', POSE); a.ldrb_i('r0', 'r3', 0); a.cmpi('r0', 0); a.bfar('ne', 'pose_sai')
