@@ -10,8 +10,11 @@ const Editor = {
   sprites: new Map(),            // gfx -> canvas
   pedidos: new Set(), listas: null, cat: "pessoas", pagina: 0, busca: "",
   mudou: false,
+  // favoritos com nome: { sprite: "nome" }, neste aparelho e na nuvem (saves/<chave>/<sha1('kirbynet-favoritos:'+rom)>)
+  favs: {}, favsT: 0,
 
   CATS: {
+    favoritos: ["⭐ Favoritos", (g) => Editor.favs[g] !== undefined],
     pessoas: ["Pessoas", (g) => g >= 10000 && g < 15000],
     classicas: ["Pessoas clássicas", (g) => g < 257],
     pokemon: ["Pokémon", (g) => g >= 257 && g <= 1462],
@@ -38,7 +41,32 @@ const Editor = {
       if (n && n.dados && (n.t || 0) > (this.dados.t || 0)) { this.dados = n.dados; this.dados.t = n.t; this.gravarLocal(); }
     } catch (e) {}
     if (this.total()) run.worker.postMessage({ t: "ed-aplica", ev: this.dados, silencioso: true });
+    this.lerFavs();
   },
+  chaveFavs() { return `kirbynet.favoritos.${this.who || "-"}.${this.rom}`; },
+  urlFavs() { return `${CLOUD_DB}/saves/${Cloud.key(this.who)}/${sha1Hex(enc("kirbynet-favoritos:" + this.rom))}.json`; },
+  async lerFavs() {
+    try { const d = JSON.parse(localStorage.getItem(this.chaveFavs())); if (d && d.favs) { this.favs = d.favs; this.favsT = d.t || 0; } } catch (e) {}
+    try {
+      if (this.who && typeof Cloud !== "undefined") {
+        const r = await fetch(this.urlFavs(), { cache: "no-store" }); const j = r.ok ? await r.json() : null;
+        if (j && j.d && (j.t || 0) > this.favsT) { this.favs = JSON.parse(j.d); this.favsT = j.t; this.gravarFavs(false); }
+      }
+    } catch (e) {}
+    if (!this.favsT && !Object.keys(this.favs).length) this.favs = { 10387: "Wally" };   // o usuário contou: Wally = 10387
+  },
+  gravarFavs(nuvem = true) {
+    if (nuvem) this.favsT = Date.now();
+    try { localStorage.setItem(this.chaveFavs(), JSON.stringify({ favs: this.favs, t: this.favsT })); } catch (e) {}
+    if (nuvem && this.who && typeof Cloud !== "undefined")
+      fetch(this.urlFavs(), { method: "PUT", body: JSON.stringify({ d: JSON.stringify(this.favs), t: this.favsT, dev: Cloud.dev }) }).catch(() => {});
+  },
+  estrela(id) {
+    if (this.favs[id] !== undefined) { if (!confirm(`Tirar "${this.favs[id] || id}" dos favoritos?`)) return; delete this.favs[id]; }
+    else { const n = prompt("Nome para este personagem (ex.: Wally):", ""); if (n === null) return; this.favs[id] = n.trim().slice(0, 24); }
+    this.gravarFavs(); this.desenhaCatalogo(); this.desenhaPainel();
+  },
+  nomeSprite(id) { return this.favs[id] ? `${this.favs[id]} (${id})` : String(id); },
   chave() { return `kirbynet.eventos.${this.who || "-"}.${this.rom}`; },
   lerLocal() { try { const d = JSON.parse(localStorage.getItem(this.chave())); if (d && d.mapas) return d; } catch (e) {} return { mapas: {} }; },
   gravarLocal() { try { localStorage.setItem(this.chave(), JSON.stringify(this.dados)); } catch (e) {} },
@@ -145,7 +173,9 @@ const Editor = {
 #ed-grade .sp{background:#1f2230;border:1px solid #2a2e38;border-radius:6px;height:72px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:grab;user-select:none}
 #ed-grade .sp.on{border-color:#ff5fa2;background:#2a1f2a}
 #ed-grade .sp canvas{image-rendering:pixelated;max-width:56px;max-height:52px}
-#ed-grade .sp span{font-size:10px;color:#889}
+#ed-grade .sp span{font-size:10px;color:#889;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 2px}
+#ed-grade .sp{position:relative}
+#ed-grade .estrela{position:absolute;top:2px;right:2px;background:none;border:0;color:#ffd166;font-size:15px;padding:0 3px;cursor:pointer;line-height:1;min-width:0}
 #ed label{display:block;margin:10px 0 4px;color:#aab;font-size:12px}
 #ed select,#ed input,#ed textarea{width:100%;box-sizing:border-box;background:#1f2230;color:#eee;border:1px solid #333a4a;border-radius:6px;padding:6px}
 #ed textarea{min-height:70px;resize:vertical}
@@ -173,7 +203,7 @@ const Editor = {
     <div id="ed-abas"><button data-aba="cat" class="on">🧍 Personagens</button><button data-aba="painel">✏️ Evento</button></div>
     <div id="ed-cat">
       <select id="ed-cats"></select>
-      <input id="ed-busca" placeholder="Procurar pelo número (ex.: 10657)" inputmode="numeric">
+      <input id="ed-busca" placeholder="Procurar pelo número ou nome (ex.: 10657, Wally)">
       <div class="dica">Arraste para o mapa, ou toque num e depois toque no lugar.</div>
       <div id="ed-grade"></div>
       <div id="ed-pag"><button id="ed-ant" class="ghost">◀</button><span id="ed-pagt" class="dica"></span><button id="ed-prox" class="ghost">▶</button></div>
@@ -184,6 +214,7 @@ const Editor = {
     document.body.appendChild(d);
     const cats = $("ed-cats");
     for (const [k, [n]] of Object.entries(this.CATS)) cats.add(new Option(n, k));
+    if (Object.keys(this.favs).length) { this.cat = "favoritos"; cats.value = "favoritos"; } else this.cat = "pessoas";
     cats.onchange = () => { this.cat = cats.value; this.pagina = 0; this.desenhaCatalogo(); };
     $("ed-busca").oninput = () => { this.busca = $("ed-busca").value.trim(); this.pagina = 0; this.desenhaCatalogo(); };
     $("ed-ant").onclick = () => { this.pagina = Math.max(0, this.pagina - 1); this.desenhaCatalogo(); };
@@ -213,7 +244,7 @@ const Editor = {
     const g = $("ed-grade"); if (!g) return;
     if (!this.listas) { g.innerHTML = '<div class="dica">Carregando a lista de sprites…</div>'; return; }
     let ids = this.listas.sprites;
-    if (this.busca) ids = ids.filter((x) => String(x).includes(this.busca));
+    if (this.busca) { const b = this.busca.toLowerCase(); ids = ids.filter((x) => String(x).includes(b) || (this.favs[x] || "").toLowerCase().includes(b)); }
     else ids = ids.filter(this.CATS[this.cat][1]);
     const POR = 48, pags = Math.max(1, Math.ceil(ids.length / POR));
     this.pagina = Math.min(this.pagina, pags - 1);
@@ -226,7 +257,9 @@ const Editor = {
       el.className = "sp" + (this.colocar === id ? " on" : ""); el.draggable = true; el.title = "Sprite " + id;
       const c = this.sprites.get(id);
       if (c) { const k = document.createElement("canvas"); k.width = c.width; k.height = c.height; k.getContext("2d").drawImage(c, 0, 0); k.style.width = Math.min(56, c.width * 1.5) + "px"; el.appendChild(k); }
-      const s = document.createElement("span"); s.textContent = id; el.appendChild(s);
+      const s = document.createElement("span"); s.textContent = this.favs[id] ? this.favs[id] || id : id; if (this.favs[id]) s.style.color = "#ffd166"; el.appendChild(s);
+      const st = document.createElement("button"); st.className = "estrela"; st.textContent = this.favs[id] !== undefined ? "★" : "☆"; st.title = this.favs[id] !== undefined ? "Tirar dos favoritos" : "Favoritar e dar nome";
+      st.onclick = (ev) => { ev.stopPropagation(); this.estrela(id); }; el.appendChild(st);
       el.addEventListener("dragstart", (e) => e.dataTransfer.setData("text/plain", String(id)));
       el.onclick = () => {
         if (this.sel && this.sel.trocar) { this.sel.ev.sprite = id; this.sel.trocar = false; this.mudou = true; this.aba("painel"); this.desenha(); this.desenhaPainel(); return; }
@@ -341,7 +374,7 @@ const Editor = {
     const lt = this.listas ? this.listas.treinadores : [], li = this.listas ? this.listas.itens : [];
     const esc = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
     let h = topo + `<div class="secao"></div><div class="linha"><div id="ed-pv" style="flex:0 0 72px;height:72px;background:#1f2230;border-radius:8px;display:flex;align-items:center;justify-content:center"></div>
-      <div><div>Sprite <b>${s.sprite}</b> em <b>${s.x}, ${s.y}</b></div><button id="ed-troca" class="ghost" style="margin-top:6px">Trocar sprite</button></div></div>
+      <div><div><b>${esc(this.nomeSprite(s.sprite))}</b> em <b>${s.x}, ${s.y}</b></div><button id="ed-troca" class="ghost" style="margin-top:6px">Trocar sprite</button></div></div>
       <label>Como fica parado</label><select id="ed-olhar">${op(this.OLHAR, s.olhar || "baixo")}</select>
       <label>O que ele faz</label><select id="ed-acao">${op(this.ACOES, s.acao)}</select>
       <label>Quando aparece</label><select id="ed-quando">${op({ sempre: "Sempre", depois: "Só depois de…", antes: "Só antes de…" }, (s.cond && s.cond.quando) || "sempre")}</select>`;
