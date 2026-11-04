@@ -371,8 +371,8 @@ const EditorQZ = (() => {
               for (const [k, rel] of au.fx) { const w = u32(aa + rel); for (let j = 0; j < 4; j++) au.c[k + j] = w[j]; }
               escritas.push([aa, au.c]); autos.push([v, 0, aa]);
               if (au.voaFim) {   // modo solto + voar: quando ele chega no fim, o site (worker) põe a var em 2 e esta parte roda
-                const ml = [0x46, 0xFE], ma = aloca(ml.length), c2 = [0x69, 0x4F, ...u16(id), ...u32(ma || 0), 0x51, 0x00, 0x00,
-                  0x28, 0x1E, 0x00, 0x9D, 0x00, 0x01, 0x00, 0x9C, 0x1E, 0x00, 0x28, 0x10, 0x00, 0x53, ...u16(id), 0x9E, 0x1E, 0x00,   // como no jogo: some quando o pássaro encosta (16 quadros = ponto mais baixo)
+                const ml = [0x46, 0xFE], ma = aloca(ml.length), c2 = [0x69, 0x51, ...u16(id), 0x4F, ...u16(id), ...u32(ma || 0), 0x51, 0x00, 0x00,   // waitmovement id: libera a ordem de andar da 1ª parte (senão o pulo é recusado)
+                  0x28, 0x1E, 0x00, 0x9D, 0x00, 0x01, 0x00, 0x9C, 0x1E, 0x00, 0x9E, 0x1E, 0x00, 0x53, ...u16(id),   // ele sobe montado no pássaro (vigiaVoo) e só some no fim
                   0x16, ...u16(v), 0x03, 0x00, 0x6B, 0x02];
                 const a2 = aloca(c2.length);
                 if (!ma || !a2) avisos.push("acabou o espaço livre da ROM");
@@ -513,8 +513,25 @@ const EditorQZ = (() => {
         const o = OBJS + 0x24 * oi, dx = (ram.r16(o + 0x10) - ram.r16(OBJS + 0x10)) * 16, dy = (ram.r16(o + 0x12) - ram.r16(OBJS + 0x12)) * 16;
         const b = SPRS + 0x44 * ave; w16(b + 0x20, 120 + dx - 12); w16(b + 0x22, dy);   // -12: o desenho do pássaro fica à direita do centro
         g.ave = ave; g.sw = sw; g.fase = 2;
-      } else if (!(ram.r16(SPRS + 0x44 * g.ave + 0x3E) & 1)) g.fase = 0;   // o pássaro saiu: acabou
-      // (sem carregar: como no Fly do jogo, ele some quando o pássaro encosta; pedido 04/11 "o pássaro arrastou ele")
+      } else if (g.fase === 2) {   // espera o ponto mais baixo do arco (t = 64), onde o pássaro está nele
+        const b = SPRS + 0x44 * g.ave;
+        if (!(ram.r16(b + 0x3E) & 1)) { g.fase = 0; continue; }
+        if (ram.r16(b + 0x32) >= 64) { g.px = s16(b + 0x20) + s16(b + 0x24); g.py = s16(b + 0x22) + s16(b + 0x26); g.n = 0; g.fase = 3; }
+      }
+      if (g.fase === 3) {
+        // Como o Fly do jogador (pedido 04/11: "o pássaro arrastou ele / levou como comida"): ele fica MONTADO no pássaro
+        // e os dois sobem em diagonal. O efeito calcula x2/y2 pelo t (Cos(t,140), Sin(t,72)); a gente põe a base x/y para
+        // o pássaro ficar no caminho que queremos, e o t anda pela metade (voo mais longo). Escrevemos depois do quadro,
+        // então tudo é a posição do PRÓXIMO quadro. O x/y da figura dele o jogo desfaz; o x2/y2 fica.
+        const b = SPRS + 0x44 * g.ave, w = SPRS + 0x44 * g.sw;
+        for (const i of g.outras || []) { const f = SPRS + 0x44 * i + 0x3E; if (ram.r16(f) & 1) w16(f, ram.r16(f) | 4); }   // reflexo/poça escondidos
+        if (!(ram.r16(b + 0x3E) & 1)) { g.fase = 0; continue; }   // o pássaro acabou: o script tira ele
+        const t = Math.max(64, (ram.r16(b + 0x32) & 0xFF) - 2); w16(b + 0x32, t);   // metade da velocidade
+        g.n++;
+        const tx = g.px + 2.5 * g.n, ty = g.py - 1.5 * g.n - 0.12 * g.n * g.n, ang = t * Math.PI / 128;
+        w16(b + 0x20, Math.round(tx - 140 * Math.cos(ang))); w16(b + 0x22, Math.round(ty - 72 * Math.sin(ang)));
+        if (ram.r16(w + 0x3E) & 1) { w16(w + 0x24, Math.round(tx - g.px + 12)); w16(w + 0x26, Math.round(ty - g.py - 10)); }   // +12: centro do desenho do pássaro; -10: sentado nas costas
+      }
     }
     return ativo;
   }
