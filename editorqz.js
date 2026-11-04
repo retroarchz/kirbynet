@@ -1,0 +1,276 @@
+// Editor de eventos do Pokémon Quetzal (pedido 03/11/2026: "criar meu próprio evento arrastando e soltando, com o mapa
+// de verdade"). Este arquivo roda dentro do engine-worker (onde está o GBA) e nos testes em node.
+// bus = { r8(a), r16(a), r32(a) } lê qualquer endereço do GBA (ROM, EWRAM, VRAM...). escreve(a, bytes) grava na ROM da
+// partida (romWrite): o arquivo da ROM não muda e o save continua valendo.
+//
+// Achados do Quetzal (ROM igual nas duas versões):
+//  - gMapGroups 0x08932FB8 (grupo -> lista de cabeçalhos). Cabeçalho: +0 layout, +4 eventos, +8 scripts do mapa.
+//    Layout: +0 largura, +4 altura, +0xC blocos (u16: id 10 bits, colisão 2 bits, altura 4 bits), +0x10/+0x14 tilesets.
+//    Tileset: +0xC metatiles (16 bytes: 4 de baixo e 4 de cima, u16 = peça 10 bits, espelho 2 bits, paleta 4 bits).
+//  - As imagens dos tilesets são comprimidas num formato próprio: o mapa é desenhado com as peças já descompactadas na
+//    VRAM (0x06000000, secundário a partir da peça 512) e as cores sem o tom do dia/noite (gPlttBufferUnfaded 0x020391FC).
+//  - Sprite de pessoa: tabela 0x090E2BD4 indexada direto pelo número (0..19999, GetObjectEventGraphicsInfo 0x080D2228).
+//    graphicsInfo: +2 tag da paleta, +8 largura, +0xA altura, +0x1C quadros {dados, tamanho}. Paletas: tabela 0x090F6470
+//    de {ponteiro, tag u16, 0} (3168). Quadros comprimidos (457) ficam de fora.
+//  - Objeto do mapa (24 bytes): +0 id local, +2 sprite u16, +4 x, +6 y, +8 altura, +9 movimento, +0xA alcance,
+//    +0xC tipo de treinador, +0xE visão, +0x10 script, +0x14 marca (ligada = some).
+//  - Texto: tabela do Emerald + ã 0x32, õ 0x33 (Quetzal).
+//  - Treinadores: 0x085073E0, 0x20 cada, nome em +3, 973. Nomes de itens: 0x091E0360 (inglês, o que o jogo mostra), 20
+//    bytes cada, número do item = posição (SanitizeItemId 0x081491AC: acima de 0x379 vira 0).
+//  - Item no chão: o "achar item" do Quetzal (callstd 1) é o dos baús com item aleatório; usamos o "obter item" (0).
+const EditorQZ = (() => {
+  const GRUPOS = 0x08932FB8, SPR = 0x090E2BD4, PALS = 0x090F6470, NPALS = 3168;
+  const LAYOUT_RAM = 0x02038CB0, PAL_RAM = 0x020391FC, OBJS = 0x02038D10, AVATAR = 0x02039070;
+  // espaço livre da ROM (FF nas duas ROMs, fora de tudo que o site grava; 0x09FF6600.. fica para o código dos pulos crescer)
+  const LIVRE = [[0x09FFCD00, 0x09FFE000], [0x09FF9100, 0x09FFA000], [0x09FE5200, 0x09FE6000], [0x09FF8300, 0x09FF9000],
+                 [0x09FEF300, 0x09FEFF00], [0x09FF0900, 0x09FF1000], [0x09FFF900, 0x0A000000], [0x09FECA00, 0x09FED000]];
+  // marcas do save sem uso no jogo (nenhum script, objeto ou código cita): "uma vez só" (item dado, item do chão)
+  const MARCAS = [0xca7,0xcae,0xcb1,0xcb7,0xce2,0xce3,0xcef,0xcf0,0xcf1,0xcf4,0xd2f,0xd38,0xd3e,0xd4b,0xd4e,0xd52,0xd63,0xd6b,
+    0xd6d,0xd6f,0xd7e,0xd80,0xd82,0xd8f,0xd93,0xd9b,0xd9c,0xd9e,0xd9f,0xda7,0xdaf,0xdc3,0xdc5,0xdc6,0xdd8,0xde1,0xde3,0xde5,
+    0xde7,0xdf2,0xdf5,0xe2e,0xe47,0xe4b,0xe4d,0xe4f,0xe52,0xe5d,0xe61,0xe6f,0xe70,0xe72,0xe73,0xe7a,0xe8a,0xe90,0xe92,0xe96,
+    0xea1,0xea2,0xea7,0xea8,0xeac,0xeaf,0xeb0,0xeb2,0xeb4,0xebd,0xec6,0xec9,0xecd,0xece,0xecf,0xed3,0xee5,0xef1,0xef2,0xefc];
+
+  const ok = (p) => p >= 0x08000000 && p < 0x0A000000;
+  const cor = (v) => [(v & 31) << 3, (v >> 5 & 31) << 3, (v >> 10 & 31) << 3];
+
+  function cabecalho(bus, grupo, num) {
+    const lista = bus.r32(GRUPOS + 4 * grupo);
+    if (!ok(lista)) return 0;
+    const h = bus.r32(lista + 4 * num);
+    return ok(h) ? h : 0;
+  }
+  // onde o jogador está agora
+  function local(bus) {
+    const o = OBJS + 0x24 * (bus.r8(AVATAR + 5) & 15);
+    return { grupo: bus.r8(o + 0xA), num: bus.r8(o + 9), x: bus.r16(o + 0x10) - 7, y: bus.r16(o + 0x12) - 7 };
+  }
+
+  // desenho do mapa atual: 16 px por quadrado, RGBA
+  function desenhaMapa(bus) {
+    const lay = bus.r32(LAYOUT_RAM);
+    if (!ok(lay)) return null;
+    const w = bus.r32(lay), h = bus.r32(lay + 4), blocos = bus.r32(lay + 0xC);
+    const ts = [bus.r32(lay + 0x10), bus.r32(lay + 0x14)];
+    if (w < 1 || h < 1 || w > 512 || h > 512) return null;
+    const vram = new Uint8Array(0x8000);
+    for (let a = 0; a < 0x8000; a += 2) { const v = bus.r16(0x06000000 + a); vram[a] = v & 255; vram[a + 1] = v >> 8; }
+    const pal = []; for (let i = 0; i < 16 * 16; i++) pal.push(cor(bus.r16(PAL_RAM + 2 * i)));
+    const metaCache = new Map();
+    const meta = (id) => {
+      let m = metaCache.get(id); if (m) return m;
+      const t = id < 0x200 ? ts[0] : ts[1], i = id < 0x200 ? id : id - 0x200, base = ok(t) ? bus.r32(t + 0xC) : 0;
+      m = []; for (let k = 0; k < 8; k++) m.push(ok(base) ? bus.r16(base + i * 16 + k * 2) : 0);
+      metaCache.set(id, m); return m;
+    };
+    const W = w * 16, H = h * 16, rgba = new Uint8ClampedArray(W * H * 4), info = new Uint16Array(w * h);
+    for (let my = 0; my < h; my++) for (let mx = 0; mx < w; mx++) {
+      const v = bus.r16(blocos + 2 * (my * w + mx)); info[my * w + mx] = v;
+      const t = meta(v & 0x3FF);
+      for (let layer = 0; layer < 2; layer++) for (let q = 0; q < 4; q++) {
+        const e = t[layer * 4 + q], tile = e & 0x3FF, hf = e & 0x400, vf = e & 0x800, p = (e >> 12) * 16;
+        for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+          const sx = hf ? 7 - x : x, sy = vf ? 7 - y : y, a = tile * 32 + sy * 4 + (sx >> 1);
+          if (a >= 0x8000) continue;
+          const c = sx & 1 ? vram[a] >> 4 : vram[a] & 15;
+          if (!c && layer) continue;
+          const rgb = pal[p + c], X = mx * 16 + (q & 1) * 8 + x, Y = my * 16 + (q >> 1) * 8 + y, o = (Y * W + X) * 4;
+          rgba[o] = rgb[0]; rgba[o + 1] = rgb[1]; rgba[o + 2] = rgb[2]; rgba[o + 3] = 255;
+        }
+      }
+    }
+    return { w, h, rgba, info };
+  }
+
+  // objetos (eventos de pessoa) do mapa: os do jogo e os nossos
+  function objetos(bus, eventos) {
+    if (!ok(eventos)) return [];
+    const n = bus.r8(eventos), arr = bus.r32(eventos + 4), out = [];
+    if (!ok(arr) || n > 64) return out;
+    for (let i = 0; i < n; i++) {
+      const o = arr + 24 * i;
+      out.push({ id: bus.r8(o), gfx: bus.r16(o + 2), x: bus.r16(o + 4) << 16 >> 16, y: bus.r16(o + 6) << 16 >> 16,
+                 alt: bus.r8(o + 8), mov: bus.r8(o + 9), script: bus.r32(o + 0x10), marca: bus.r16(o + 0x14) });
+    }
+    return out;
+  }
+
+  // paleta por tag (lista montada uma vez)
+  let palTags = null;
+  function paleta(bus, tag) {
+    if (!palTags) { palTags = new Map(); for (let i = 0; i < NPALS; i++) { const e = PALS + 8 * i; if (!palTags.has(bus.r16(e + 4))) palTags.set(bus.r16(e + 4), bus.r32(e)); } }
+    const p = palTags.get(tag);
+    const out = []; for (let i = 0; i < 16; i++) out.push(ok(p) ? cor(bus.r16(p + 2 * i)) : [i * 16, i * 16, i * 16]);
+    return out;
+  }
+  function infoSprite(bus, gfx) {
+    if (gfx < 0 || gfx > 19999) return null;
+    const gi = bus.r32(SPR + 4 * gfx);
+    if (!ok(gi) || bus.r16(gi) !== 0xFFFF) return null;
+    const w = bus.r16(gi + 8), h = bus.r16(gi + 0xA), im = bus.r32(gi + 0x1C);
+    if (!ok(im) || w > 64 || h > 64 || !w || !h) return null;
+    const dados = bus.r32(im), tam = bus.r32(im + 4) & 0xFFFF;
+    if (!ok(dados) || tam !== w * h / 2) return null;   // comprimido: fora
+    return { gi, w, h, dados, tag: bus.r16(gi + 2) };
+  }
+  // 1º quadro (de frente) do sprite, RGBA
+  function desenhaSprite(bus, gfx) {
+    const s = infoSprite(bus, gfx); if (!s) return null;
+    const pal = paleta(bus, s.tag), rgba = new Uint8ClampedArray(s.w * s.h * 4), tw = s.w / 8;
+    for (let ty = 0; ty < s.h / 8; ty++) for (let tx = 0; tx < tw; tx++) for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x += 2) {
+      const b = bus.r8(s.dados + (ty * tw + tx) * 32 + y * 4 + (x >> 1));
+      for (const [k, c] of [[0, b & 15], [1, b >> 4]]) {
+        if (!c) continue;
+        const o = ((ty * 8 + y) * s.w + tx * 8 + x + k) * 4, rgb = pal[c];
+        rgba[o] = rgb[0]; rgba[o + 1] = rgb[1]; rgba[o + 2] = rgb[2]; rgba[o + 3] = 255;
+      }
+    }
+    return { w: s.w, h: s.h, rgba };
+  }
+  // todos os sprites que dá para usar (números), em grupos
+  function catalogo(bus) {
+    const out = [];
+    for (let g = 0; g < 20000; g++) if (infoSprite(bus, g)) out.push(g);
+    return out;
+  }
+
+  const TREIN = 0x085073E0, NTREIN = 973, ITENS = 0x091E0360, NITENS = 0x37A;
+  const DEC = {}; for (let i = 0; i < 26; i++) { DEC[0xBB + i] = String.fromCharCode(65 + i); DEC[0xD5 + i] = String.fromCharCode(97 + i); }
+  for (let i = 0; i < 10; i++) DEC[0xA1 + i] = String(i);
+  Object.assign(DEC, { 0: " ", 0x1B: "é", 0x17: "á", 0x19: "ç", 0x1C: "ê", 0x23: "ó", 0x27: "ú", 0x6F: "í", 0x32: "ã", 0x33: "õ",
+    0x24: "ô", 0x68: "â", 0x16: "à", 0x06: "É", 0xAB: "!", 0xAC: "?", 0xAD: ".", 0xAE: "-", 0xB8: ",", 0xBA: "/", 0x2D: "&", 0xF0: ":", 0xB4: "'" });
+  function nome(bus, a, max) { let t = ""; for (let i = 0; i < max; i++) { const c = bus.r8(a + i); if (c === 0xFF) break; t += DEC[c] ?? ""; } return t.trim(); }
+  function treinadores(bus) { const out = []; for (let i = 1; i < NTREIN; i++) out.push([i, nome(bus, TREIN + 0x20 * i + 3, 11)]); return out; }
+  function itens(bus) { const out = []; for (let i = 1; i < NITENS; i++) { const n = nome(bus, ITENS + 20 * i, 20); if (n && !/^\?+$/.test(n)) out.push([i, n]); } return out; }
+
+  // ---------- texto ----------
+  const TAB = {};
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").forEach((c, i) => TAB[c] = 0xBB + i);
+  "abcdefghijklmnopqrstuvwxyz".split("").forEach((c, i) => TAB[c] = 0xD5 + i);
+  "0123456789".split("").forEach((c, i) => TAB[c] = 0xA1 + i);
+  Object.assign(TAB, { " ": 0x00, "À": 0x01, "Á": 0x02, "Â": 0x03, "Ç": 0x04, "É": 0x06, "Ê": 0x07, "Í": 0x5A, "Ó": 0x0E, "Ô": 0x0F,
+    "Ú": 0x12, "à": 0x16, "á": 0x17, "ç": 0x19, "é": 0x1B, "ê": 0x1C, "ó": 0x23, "ô": 0x24, "ú": 0x27, "â": 0x68, "í": 0x6F,
+    "ã": 0x32, "õ": 0x33, "Ã": 0xBB, "Õ": 0xC9, "ñ": 0x29, "!": 0xAB, "?": 0xAC, ".": 0xAD, "-": 0xAE, "…": 0xB0, "“": 0xB1,
+    "”": 0xB2, "\"": 0xB1, "‘": 0xB3, "’": 0xB4, "'": 0xB4, ",": 0xB8, "/": 0xBA, ":": 0xF0, "%": 0x5B, "(": 0x5C, ")": 0x5D,
+    "&": 0x2D, "+": 0x2E, "=": 0x35, ";": 0x36, "¿": 0x51, "¡": 0x52, "♂": 0xB5, "♀": 0xB6 });
+  // quebra as linhas sozinho (~34 letras por linha, 2 linhas por caixa); linha em branco no texto = caixa nova
+  function texto(s) {
+    const out = [], caixas = String(s || "").replace(/\r/g, "").split(/\n\s*\n/);
+    caixas.forEach((cx, ci) => {
+      const pal = cx.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+      let linha = "", nl = 0;
+      const solta = (l, fim) => {
+        for (const ch of l) out.push(TAB[ch] ?? TAB[ch.normalize("NFD")[0]] ?? 0xAC);
+        if (!fim) { out.push(nl % 2 === 0 ? 0xFE : 0xFA); nl++; }
+      };
+      for (const p of pal) { if (linha && (linha + " " + p).length > 34) { solta(linha, false); linha = p; } else linha = linha ? linha + " " + p : p; }
+      solta(linha, true);
+      if (ci < caixas.length - 1) out.push(0xFB);
+    });
+    out.push(0xFF);
+    return out;
+  }
+
+  // ---------- montagem: eventos -> escritas na ROM ----------
+  // ev = { mapas: { "grupo.num": [ { x, y, sprite, olhar:'baixo'|'cima'|'esq'|'dir'|'anda', acao, texto, texto2, item, qtd,
+  //        treinador, destino:{grupo,num,x,y}, marca } ] } }
+  const MOV = { baixo: 8, cima: 7, esq: 9, dir: 10, anda: 2, gira: 1 };
+  function montar(bus, ev) {
+    const escritas = [], avisos = [];
+    let fat = 0, pos = LIVRE[0][0];
+    const aloca = (n) => {   // n bytes alinhados em 4 nas faixas livres
+      n = (n + 3) & ~3;
+      while (fat < LIVRE.length) { if (pos + n <= LIVRE[fat][1]) { const a = pos; pos += n; return a; } fat++; if (fat < LIVRE.length) pos = LIVRE[fat][0]; }
+      return 0;
+    };
+    const u16 = (v) => [v & 255, v >> 8 & 255], u32 = (v) => [v & 255, v >> 8 & 255, v >> 16 & 255, v >>> 24 & 255];
+    const usadas = new Set();
+    for (const lista of Object.values(ev.mapas || {})) for (const e of lista) if (e.marca) usadas.add(e.marca);
+    const novaMarca = () => { const m = MARCAS.find((f) => !usadas.has(f)); if (m) usadas.add(m); return m || 0; };
+    const poeTexto = (s) => { const b = texto(s); const a = aloca(b.length); if (a) escritas.push([a, b]); return a; };
+    for (const [chave, lista] of Object.entries(ev.mapas || {})) {
+      if (!lista.length) continue;
+      const [grupo, num] = chave.split(".").map(Number), h = cabecalho(bus, grupo, num);
+      if (!h) { avisos.push("mapa " + chave + " não existe"); continue; }
+      const orig = ev.orig && ev.orig[chave] ? ev.orig[chave] : bus.r32(h + 4);
+      const n0 = bus.r8(orig), arr0 = bus.r32(orig + 4);
+      let maxId = 0; for (let i = 0; i < n0; i++) maxId = Math.max(maxId, bus.r8(arr0 + 24 * i));
+      const novos = [];
+      for (const e of lista) {
+        if (n0 + novos.length >= 64) { avisos.push("mapa " + chave + ": no máximo 64 pessoas"); break; }
+        const s = [];   // script
+        const msg = (t) => { const a = poeTexto(t); s.push(0x0F, 0x00, ...u32(a), 0x09, 0x02); };   // loadword 0, texto; callstd MSGBOX_NPC
+        let marcaObj = 0;
+        if (e.acao === "item" || e.acao === "chao") { if (!e.marca) e.marca = novaMarca(); if (!e.marca) { avisos.push("acabaram as marcas livres"); continue; } }
+        if (e.acao === "falar") { msg(e.texto || "…"); s.push(0x02); }
+        else if (e.acao === "item") {   // dá o item uma vez; depois diz o texto2
+          s.push(0x6A, 0x5A, 0x2B, ...u16(e.marca));                  // lock, faceplayer, checkflag
+          const desvio = s.length; s.push(0x06, 0x01, 0, 0, 0, 0);   // goto_if_set -> já deu
+          if (e.texto) { const a = poeTexto(e.texto); s.push(0x0F, 0x00, ...u32(a), 0x09, 0x04); }   // MSGBOX_DEFAULT
+          s.push(0x1A, 0x00, 0x80, ...u16(e.item | 0), 0x1A, 0x01, 0x80, ...u16(Math.max(1, e.qtd | 0)), 0x09, 0x00);   // giveitem
+          s.push(0x21, 0x0D, 0x80, 0x00, 0x00);                       // compare VAR_RESULT, 0 (mochila cheia)
+          const cheia = s.length; s.push(0x06, 0x01, 0, 0, 0, 0);
+          s.push(0x29, ...u16(e.marca), 0x6C, 0x02);                  // setflag, release, end
+          const ja = s.length; const a2 = poeTexto(e.texto2 || "Boa sorte na sua jornada!");
+          s.push(0x0F, 0x00, ...u32(a2), 0x09, 0x04);
+          const fim = s.length; s.push(0x6C, 0x02);
+          s.__fix = [[desvio + 2, ja], [cheia + 2, fim]];
+        }
+        else if (e.acao === "chao") {   // item no chão: dá o item escolhido e some (a marca do objeto fica ligada).
+          // O "achar item" padrão do Quetzal (callstd 1) é o dos baús com item aleatório: ignora o item pedido.
+          marcaObj = e.marca;
+          s.push(0x6A, 0x1A, 0x00, 0x80, ...u16(e.item | 0), 0x1A, 0x01, 0x80, ...u16(Math.max(1, e.qtd | 0)), 0x09, 0x00);
+          s.push(0x21, 0x0D, 0x80, 0x00, 0x00);                       // mochila cheia: fica no chão
+          const cheia = s.length; s.push(0x06, 0x01, 0, 0, 0, 0);
+          s.push(0x29, ...u16(e.marca), 0x53, 0x0F, 0x80);            // setflag, removeobject VAR_LAST_TALKED
+          const fim = s.length; s.push(0x6C, 0x02);
+          s.__fix = [[cheia + 2, fim]];
+        }
+        else if (e.acao === "lutar") {   // treinador existente: luta uma vez (a marca é a do próprio treinador)
+          const a1 = poeTexto(e.texto || "Vamos lutar!"), a2 = poeTexto(e.texto2 || "Você venceu!"), a3 = poeTexto(e.texto3 || e.texto2 || "Foi uma boa luta!");
+          s.push(0x5C, 0x00, ...u16(e.treinador | 0), 0x00, 0x00, ...u32(a1), ...u32(a2));   // trainerbattle_single
+          s.push(0x0F, 0x00, ...u32(a3), 0x09, 0x02, 0x02);
+        }
+        else if (e.acao === "teleporte") {
+          const d = e.destino || {};
+          s.push(0x6A, 0x5A);
+          if (e.texto) { const a = poeTexto(e.texto); s.push(0x0F, 0x00, ...u32(a), 0x09, 0x04); }
+          s.push(0x39, d.grupo & 255, d.num & 255, 0xFF, ...u16(d.x | 0), ...u16(d.y | 0), 0x27, 0x6C, 0x02);   // warp, waitstate
+        }
+        else { s.push(0x02); }
+        const sa = aloca(s.length);
+        if (!sa) { avisos.push("acabou o espaço livre da ROM"); break; }
+        for (const [k, rel] of s.__fix || []) { const v = u32(sa + rel); for (let j = 0; j < 4; j++) s[k + j] = v[j]; }
+        escritas.push([sa, s.slice()]);
+        const id = ++maxId === 0xD1 ? ++maxId : maxId;
+        const lay = bus.r32(h), lw = bus.r32(lay), bl = bus.r32(lay + 0xC);
+        const alt = e.alt || (e.x >= 0 && e.y >= 0 && e.x < lw ? bus.r16(bl + 2 * (e.y * lw + e.x)) >> 12 : 0) || 3;
+        const mov = MOV[e.olhar] ?? 8, alc = e.olhar === "anda" ? 0x11 : 0;
+        novos.push([id, 0, ...u16(e.sprite | 0), ...u16(e.x), ...u16(e.y), alt, mov, alc, 0, 0, 0, 0, 0, ...u32(sa), ...u16(marcaObj), 0, 0]);
+      }
+      const total = n0 + novos.length, arr = aloca(24 * total), evs = aloca(0x14);
+      if (!arr || !evs) { avisos.push("acabou o espaço livre da ROM"); break; }
+      const bytes = [];
+      for (let i = 0; i < n0 * 24; i++) bytes.push(bus.r8(arr0 + i));
+      for (const nv of novos) bytes.push(...nv);
+      escritas.push([arr, bytes]);
+      const cab = []; for (let i = 0; i < 0x14; i++) cab.push(bus.r8(orig + i));
+      cab[0] = total; const pa = u32(arr); for (let j = 0; j < 4; j++) cab[4 + j] = pa[j];
+      escritas.push([evs, cab]);
+      escritas.push([h + 4, u32(evs)]);
+      (ev.orig = ev.orig || {})[chave] = orig;
+    }
+    return { escritas, avisos, usado: LIVRE.slice(0, fat).reduce((s, [a, b]) => s + b - a, 0) + (pos - (LIVRE[fat] || [pos])[0]) };
+  }
+  // desfaz (volta os cabeçalhos e limpa as faixas livres)
+  function desfazer(bus, orig) {
+    const escritas = [];
+    for (const [chave, o] of Object.entries(orig || {})) {
+      const [grupo, num] = chave.split(".").map(Number), h = cabecalho(bus, grupo, num);
+      if (h) escritas.push([h + 4, [o & 255, o >> 8 & 255, o >> 16 & 255, o >>> 24 & 255]]);
+    }
+    for (const [a, b] of LIVRE) escritas.push([a, new Array(b - a).fill(0xFF)]);
+    return escritas;
+  }
+  return { local, cabecalho, desenhaMapa, objetos, desenhaSprite, infoSprite, catalogo, treinadores, itens, texto, montar, desfazer, MOV, LIVRE, MARCAS };
+})();
+if (typeof module !== "undefined" && module.exports) module.exports = EditorQZ;

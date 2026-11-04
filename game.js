@@ -749,6 +749,10 @@ function startRun(opts) {
                        cabo: run.cabo || null, especial: Cheats.usable(run) ? CheatPresets.especial() : mkSala ? AM_MK_ESPECIAL : 0,
                        delay: run.delay || 0, cheats: cheats.length ? cheats : null }, [roms.buffer]);
   $("btn-cheats").classList.toggle("hidden", !Cheats.usable(run));
+  // editor de eventos do Quetzal (editor.js): os eventos desta pessoa entram na ROM da partida; nunca na sala por rollback
+  const edPode = !!run.moto && !(run.net && !run.free) && typeof Editor !== "undefined";
+  $("btn-eventos").classList.toggle("hidden", !edPode);
+  if (edPode) Editor.inicio(run, opts.romSha1);
   $("relogio-linha").classList.toggle("hidden", !run.moto);
   Relogio.rotulo();
   if (run.cabo && run.net) run.net.onCabo = (u8) => { const b = u8.slice(); run.worker.postMessage({ t: "cabo", bytes: b.buffer }, [b.buffer]); };
@@ -1531,6 +1535,7 @@ function onWorker(run, m) {
   }
   else if (m.t === "cheats") cheatsResult(run, m.res);
   else if (m.t === "modo") toast(m.v ? "↩ Voltou" : "✓ Pronto");
+  else if (m.t && m.t.startsWith("ed-") && typeof Editor !== "undefined") Editor.recebe(m);   // editor de eventos (editor.js)
   else if (m.t === "moto") { if (!m.remoto) Moto.feito(m.v); }
   else if (m.t === "capOutro") Moto.aplica(run, !!m.v, true);
   else if (m.t === "relogio") Relogio.gravar("kn-relogio-min", String(m.min));

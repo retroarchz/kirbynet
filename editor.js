@@ -1,0 +1,344 @@
+"use strict";
+// Editor de eventos do Pokémon Quetzal (tela). O GBA fica no engine-worker; lá o editorqz.js lê o mapa/sprites e grava os
+// eventos na ROM da partida. Aqui: o mapa de verdade, o catálogo de sprites para arrastar, e as propriedades de cada evento.
+// Eventos guardados por pessoa (nome) e por ROM: neste navegador e na nuvem (eventos/<chave do nome>/<rom>.json).
+const Editor = {
+  aberto: false, run: null, rom: null, who: "",
+  dados: { mapas: {} },          // { "grupo.num": [evento, ...] }
+  mapa: null,                    // { local, w, h, base(canvas), info, objs }
+  zoom: 2, grade: true, sel: null, colocar: null, hover: null, arrasto: null,
+  sprites: new Map(),            // gfx -> canvas
+  pedidos: new Set(), listas: null, cat: "pessoas", pagina: 0, busca: "",
+  mudou: false,
+
+  CATS: {
+    pessoas: ["Pessoas", (g) => g >= 10000 && g < 15000],
+    classicas: ["Pessoas clássicas", (g) => g < 257],
+    pokemon: ["Pokémon", (g) => g >= 257 && g <= 1462],
+    brilhantes: ["Pokémon brilhantes", (g) => g >= 5257 && g <= 6462],
+    outros: ["Outros", (g) => (g > 1462 && g < 5257) || (g > 6462 && g < 10000) || g >= 15000],
+  },
+  ACOES: { falar: "💬 Falar", item: "🎁 Dar item (uma vez)", chao: "📦 Item no chão", lutar: "⚔️ Lutar", teleporte: "🌀 Teleporte" },
+  OLHAR: { baixo: "Olhando para baixo", cima: "Olhando para cima", esq: "Olhando para a esquerda", dir: "Olhando para a direita",
+           anda: "Anda por perto", gira: "Olha em volta" },
+
+  // ---------- começo da partida: carrega e aplica ----------
+  async inicio(run, romSha1) {
+    this.run = run; this.rom = romSha1; this.who = (typeof Cloud !== "undefined" && Cloud.who) || "";
+    this.dados = this.lerLocal();
+    try {
+      const n = await this.lerNuvem();
+      if (n && n.dados && (n.t || 0) > (this.dados.t || 0)) { this.dados = n.dados; this.dados.t = n.t; this.gravarLocal(); }
+    } catch (e) {}
+    if (this.total()) run.worker.postMessage({ t: "ed-aplica", ev: this.dados, silencioso: true });
+  },
+  chave() { return `kirbynet.eventos.${this.who || "-"}.${this.rom}`; },
+  lerLocal() { try { const d = JSON.parse(localStorage.getItem(this.chave())); if (d && d.mapas) return d; } catch (e) {} return { mapas: {} }; },
+  gravarLocal() { try { localStorage.setItem(this.chave(), JSON.stringify(this.dados)); } catch (e) {} },
+  async lerNuvem() {
+    if (!this.who || typeof Cloud === "undefined") return null;
+    const r = await fetch(`${CLOUD_DB}/eventos/${Cloud.key(this.who)}/${this.rom}.json`, { cache: "no-store" });
+    if (!r.ok) return null;
+    const j = await r.json(); if (!j || !j.d) return null;
+    return { dados: JSON.parse(j.d), t: j.t || 0 };
+  },
+  async gravarNuvem() {
+    if (!this.who || typeof Cloud === "undefined") return false;
+    const r = await fetch(`${CLOUD_DB}/eventos/${Cloud.key(this.who)}/${this.rom}.json`, {
+      method: "PUT", body: JSON.stringify({ d: JSON.stringify(this.dados), t: this.dados.t }) });
+    return r.ok;
+  },
+  total() { return Object.values(this.dados.mapas || {}).reduce((s, l) => s + l.length, 0); },
+
+  // ---------- mensagens do worker ----------
+  recebe(m) {
+    if (m.t === "ed-mapa") this.chegouMapa(m);
+    else if (m.t === "ed-sprites") { for (const s of m.lista) this.sprites.set(s.gfx, this.canvasDe(s.w, s.h, new Uint8ClampedArray(s.rgba))); for (const s of m.lista) this.pedidos.delete(s.gfx); this.desenha(); this.desenhaCatalogo(); this.desenhaPainel(); }
+    else if (m.t === "ed-listas") { this.listas = m; this.desenhaCatalogo(); this.desenhaPainel(); }
+    else if (m.t === "ed-ok") {
+      // as marcas "uma vez só" escolhidas no worker ficam guardadas no evento (senão o item seria dado de novo)
+      if (m.marcas) for (const [k, l] of Object.entries(m.marcas)) (l || []).forEach((e, i) => { const d = (this.dados.mapas[k] || [])[i]; if (d && e.marca && !d.marca) d.marca = e.marca; });
+      this.gravarLocal();
+      if (!m.silencioso) this.status(m.avisos && m.avisos.length ? "⚠️ " + m.avisos.join(" · ") : "✅ Salvo! Os eventos aparecem quando você entra no lugar: se já estiver nele, entre numa casa e saia (ou vá a outro mapa e volte).");
+      else if (m.avisos && m.avisos.length) toast("Eventos: " + m.avisos.join(" · "));
+    }
+    else if (m.t === "ed-erro") this.status("⚠️ " + m.msg);
+  },
+  canvasDe(w, h, rgba) {
+    const c = document.createElement("canvas"); c.width = w; c.height = h;
+    c.getContext("2d").putImageData(new ImageData(rgba, w, h), 0, 0); return c;
+  },
+  pedeSprites(ids) {
+    const falta = ids.filter((g) => !this.sprites.has(g) && !this.pedidos.has(g));
+    if (!falta.length || !this.run) return;
+    falta.forEach((g) => this.pedidos.add(g));
+    this.run.worker.postMessage({ t: "ed-sprites", ids: falta });
+  },
+
+  // ---------- abrir / fechar ----------
+  abrir() {
+    if (!this.run) return;
+    this.monta();
+    this.aberto = true; $("ed").classList.remove("hidden");
+    this.status("Lendo o mapa…");
+    this.run.worker.postMessage({ t: "ed-mapa" });
+    if (!this.listas) this.run.worker.postMessage({ t: "ed-listas" });
+  },
+  fechar() {
+    if (this.mudou && !confirm("Fechar sem salvar? As mudanças não salvas somem.")) return;
+    if (this.mudou) { this.dados = this.lerLocal(); this.mudou = false; }
+    this.aberto = false; $("ed").classList.add("hidden"); this.sel = null; this.colocar = null;
+  },
+  chegouMapa(m) {
+    const base = this.canvasDe(m.w * 16, m.h * 16, new Uint8ClampedArray(m.rgba));
+    this.mapa = { local: m.local, w: m.w, h: m.h, base, info: m.info, objs: m.objs };
+    this.sel = null;
+    this.pedeSprites([...new Set([...m.objs.map((o) => o.gfx), ...this.lista().map((e) => e.sprite)])]);
+    $("ed-titulo").textContent = `🛠️ Eventos — mapa ${m.local.grupo}.${m.local.num}`;
+    this.status(`Você está em ${m.local.x}, ${m.local.y}. Arraste um personagem da lista para o mapa.`);
+    this.desenha(); this.desenhaPainel();
+  },
+  lista() { if (!this.mapa) return []; const k = this.mapa.local.grupo + "." + this.mapa.local.num; return this.dados.mapas[k] || (this.dados.mapas[k] = []); },
+  status(t) { const s = $("ed-status"); if (s) s.textContent = t; },
+
+  // ---------- montagem da tela (uma vez) ----------
+  monta() {
+    if ($("ed")) return;
+    const st = document.createElement("style");
+    st.textContent = `
+#ed{position:fixed;inset:0;z-index:60;background:#14161c;color:#e8e8ee;display:flex;flex-direction:column;font-size:14px}
+#ed.hidden{display:none}
+#ed header{display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid #2a2e38;flex-wrap:wrap}
+#ed header h2{margin:0;font-size:17px}
+#ed-status{color:#aab;font-size:13px;padding:4px 12px;min-height:18px}
+#ed-corpo{flex:1;display:flex;min-height:0}
+#ed-mapa{flex:1;overflow:auto;background:#0b0c10;position:relative;cursor:crosshair}
+#ed-mapa canvas{image-rendering:pixelated;display:block}
+#ed-lado{width:340px;max-width:45vw;border-left:1px solid #2a2e38;display:flex;flex-direction:column;min-height:0}
+#ed-abas{display:flex;border-bottom:1px solid #2a2e38}
+#ed-abas button{flex:1;border-radius:0;background:none;border:0;padding:9px;color:#aab;cursor:pointer}
+#ed-abas button.on{color:#fff;box-shadow:inset 0 -2px #ff5fa2}
+#ed-cat,#ed-painel{flex:1;overflow:auto;padding:10px}
+#ed-grade{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px;margin-top:8px}
+#ed-grade .sp{background:#1f2230;border:1px solid #2a2e38;border-radius:6px;height:72px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:grab;user-select:none}
+#ed-grade .sp.on{border-color:#ff5fa2;background:#2a1f2a}
+#ed-grade .sp canvas{image-rendering:pixelated;max-width:56px;max-height:52px}
+#ed-grade .sp span{font-size:10px;color:#889}
+#ed label{display:block;margin:10px 0 4px;color:#aab;font-size:12px}
+#ed select,#ed input,#ed textarea{width:100%;box-sizing:border-box;background:#1f2230;color:#eee;border:1px solid #333a4a;border-radius:6px;padding:6px}
+#ed textarea{min-height:70px;resize:vertical}
+#ed .linha{display:flex;gap:6px;align-items:center}
+#ed .linha > *{flex:1}
+#ed .dica{color:#889;font-size:12px;margin-top:4px}
+#ed .perigo{background:#5a1f2a !important}
+#ed-pag{display:flex;gap:6px;align-items:center;margin-top:8px}
+@media (max-width:720px){#ed-corpo{flex-direction:column}#ed-lado{width:auto;max-width:none;height:45vh;border-left:0;border-top:1px solid #2a2e38}}`;
+    document.head.appendChild(st);
+    const d = document.createElement("div");
+    d.id = "ed"; d.className = "hidden";
+    d.innerHTML = `
+<header><h2 id="ed-titulo">🛠️ Eventos</h2><div class="grow"></div>
+  <button id="ed-recarrega" class="ghost" title="Lê de novo o lugar onde você está">🔄 Ler este lugar</button>
+  <button id="ed-zoom" class="ghost">🔍 2x</button>
+  <button id="ed-grade-b" class="ghost">▦ Grade</button>
+  <button id="ed-salvar">💾 Salvar</button>
+  <button id="ed-fechar" class="ghost">Fechar</button></header>
+<div id="ed-status"></div>
+<div id="ed-corpo">
+  <div id="ed-mapa"><canvas id="ed-cv"></canvas></div>
+  <div id="ed-lado">
+    <div id="ed-abas"><button data-aba="cat" class="on">🧍 Personagens</button><button data-aba="painel">✏️ Evento</button></div>
+    <div id="ed-cat">
+      <select id="ed-cats"></select>
+      <input id="ed-busca" placeholder="Procurar pelo número (ex.: 10657)" inputmode="numeric">
+      <div class="dica">Arraste para o mapa, ou toque num e depois toque no lugar.</div>
+      <div id="ed-grade"></div>
+      <div id="ed-pag"><button id="ed-ant" class="ghost">◀</button><span id="ed-pagt" class="dica"></span><button id="ed-prox" class="ghost">▶</button></div>
+    </div>
+    <div id="ed-painel" class="hidden"></div>
+  </div>
+</div>`;
+    document.body.appendChild(d);
+    const cats = $("ed-cats");
+    for (const [k, [n]] of Object.entries(this.CATS)) cats.add(new Option(n, k));
+    cats.onchange = () => { this.cat = cats.value; this.pagina = 0; this.desenhaCatalogo(); };
+    $("ed-busca").oninput = () => { this.busca = $("ed-busca").value.trim(); this.pagina = 0; this.desenhaCatalogo(); };
+    $("ed-ant").onclick = () => { this.pagina = Math.max(0, this.pagina - 1); this.desenhaCatalogo(); };
+    $("ed-prox").onclick = () => { this.pagina++; this.desenhaCatalogo(); };
+    $("ed-fechar").onclick = () => this.fechar();
+    $("ed-salvar").onclick = () => this.salvar();
+    $("ed-recarrega").onclick = () => { this.status("Lendo o mapa…"); this.run.worker.postMessage({ t: "ed-mapa" }); };
+    $("ed-zoom").onclick = () => { this.zoom = this.zoom >= 3 ? 1 : this.zoom + 1; $("ed-zoom").textContent = "🔍 " + this.zoom + "x"; this.desenha(); };
+    $("ed-grade-b").onclick = () => { this.grade = !this.grade; this.desenha(); };
+    d.querySelectorAll("#ed-abas button").forEach((b) => b.onclick = () => this.aba(b.dataset.aba));
+    const cv = $("ed-cv");
+    cv.addEventListener("dragover", (e) => { e.preventDefault(); this.hover = this.quadrado(e); this.desenha(); });
+    cv.addEventListener("drop", (e) => { e.preventDefault(); const g = +e.dataTransfer.getData("text/plain"); const q = this.quadrado(e); if (g >= 0 && q) this.novo(g, q); });
+    cv.addEventListener("pointermove", (e) => this.mexe(e));
+    cv.addEventListener("pointerdown", (e) => this.aperta(e));
+    cv.addEventListener("pointerup", (e) => this.solta(e));
+    cv.addEventListener("pointerleave", () => { this.hover = null; this.desenha(); });
+  },
+  aba(qual) {
+    document.querySelectorAll("#ed-abas button").forEach((b) => b.classList.toggle("on", b.dataset.aba === qual));
+    $("ed-cat").classList.toggle("hidden", qual !== "cat"); $("ed-painel").classList.toggle("hidden", qual !== "painel");
+  },
+
+  // ---------- catálogo ----------
+  desenhaCatalogo() {
+    const g = $("ed-grade"); if (!g) return;
+    if (!this.listas) { g.innerHTML = '<div class="dica">Carregando a lista de sprites…</div>'; return; }
+    let ids = this.listas.sprites;
+    if (this.busca) ids = ids.filter((x) => String(x).includes(this.busca));
+    else ids = ids.filter(this.CATS[this.cat][1]);
+    const POR = 48, pags = Math.max(1, Math.ceil(ids.length / POR));
+    this.pagina = Math.min(this.pagina, pags - 1);
+    const vis = ids.slice(this.pagina * POR, this.pagina * POR + POR);
+    $("ed-pagt").textContent = `página ${this.pagina + 1} de ${pags} (${ids.length})`;
+    this.pedeSprites(vis);
+    g.innerHTML = "";
+    for (const id of vis) {
+      const el = document.createElement("div");
+      el.className = "sp" + (this.colocar === id ? " on" : ""); el.draggable = true; el.title = "Sprite " + id;
+      const c = this.sprites.get(id);
+      if (c) { const k = document.createElement("canvas"); k.width = c.width; k.height = c.height; k.getContext("2d").drawImage(c, 0, 0); k.style.width = Math.min(56, c.width * 1.5) + "px"; el.appendChild(k); }
+      const s = document.createElement("span"); s.textContent = id; el.appendChild(s);
+      el.addEventListener("dragstart", (e) => e.dataTransfer.setData("text/plain", String(id)));
+      el.onclick = () => {
+        if (this.sel && this.sel.trocar) { this.sel.ev.sprite = id; this.sel.trocar = false; this.mudou = true; this.aba("painel"); this.desenha(); this.desenhaPainel(); return; }
+        this.colocar = this.colocar === id ? null : id; this.desenhaCatalogo();
+        this.status(this.colocar != null ? `Toque no mapa onde quer pôr o sprite ${id}.` : "");
+      };
+      g.appendChild(el);
+    }
+  },
+
+  // ---------- mapa ----------
+  quadrado(e) {
+    if (!this.mapa) return null;
+    const r = $("ed-cv").getBoundingClientRect(), x = Math.floor((e.clientX - r.left) / (16 * this.zoom)), y = Math.floor((e.clientY - r.top) / (16 * this.zoom));
+    return x >= 0 && y >= 0 && x < this.mapa.w && y < this.mapa.h ? { x, y } : null;
+  },
+  eventoEm(q) { return this.lista().find((e) => e.x === q.x && e.y === q.y); },
+  ocupado(q, menos) { return this.lista().some((e) => e !== menos && e.x === q.x && e.y === q.y) || (this.mapa && this.mapa.objs.some((o) => o.x === q.x && o.y === q.y)); },
+  novo(gfx, q) {
+    if (this.ocupado(q)) return this.status("Já tem alguém nesse quadrado.");
+    const e = { x: q.x, y: q.y, sprite: gfx, olhar: "baixo", acao: gfx === 59 ? "chao" : "falar", texto: "Olá!", item: 1, qtd: 1 };
+    this.lista().push(e); this.sel = { ev: e }; this.colocar = null; this.mudou = true;
+    this.pedeSprites([gfx]); this.aba("painel"); this.desenha(); this.desenhaPainel(); this.desenhaCatalogo();
+    this.status(`Evento novo em ${q.x}, ${q.y}. Escolha o que ele faz ao lado e aperte 💾 Salvar.`);
+  },
+  aperta(e) {
+    const q = this.quadrado(e); if (!q) return;
+    if (this.escolhendoDestino) { const ev = this.escolhendoDestino; ev.destino = { grupo: this.mapa.local.grupo, num: this.mapa.local.num, x: q.x, y: q.y }; this.escolhendoDestino = null; this.mudou = true; this.desenhaPainel(); this.status(`Destino: ${q.x}, ${q.y} deste mapa.`); return; }
+    if (this.colocar != null) return this.novo(this.colocar, q);
+    const ev = this.eventoEm(q);
+    if (ev) { this.sel = { ev }; this.arrasto = { ev, de: q }; $("ed-cv").setPointerCapture(e.pointerId); this.aba("painel"); }
+    else { this.sel = null; const o = this.mapa.objs.find((o) => o.x === q.x && o.y === q.y); this.status(o ? `NPC do próprio jogo (sprite ${o.gfx}) em ${q.x}, ${q.y}: esse não dá para mudar.` : `Quadrado ${q.x}, ${q.y}.`); }
+    this.desenha(); this.desenhaPainel();
+  },
+  mexe(e) { const q = this.quadrado(e); this.hover = q; if (this.arrasto && q) this.arrasto.para = q; this.desenha(); },
+  solta(e) {
+    const a = this.arrasto; this.arrasto = null; if (!a) return;
+    const q = a.para;
+    if (q && (q.x !== a.de.x || q.y !== a.de.y)) { if (this.ocupado(q, a.ev)) this.status("Já tem alguém nesse quadrado."); else { a.ev.x = q.x; a.ev.y = q.y; this.mudou = true; this.status(`Movido para ${q.x}, ${q.y}.`); } }
+    this.desenha(); this.desenhaPainel();
+  },
+  desenhaSprite(ctx, gfx, x, y, alpha) {
+    const c = this.sprites.get(gfx), Z = this.zoom; if (!c) return;
+    ctx.globalAlpha = alpha; ctx.drawImage(c, (x * 16 + 8 - c.width / 2) * Z, (y * 16 + 16 - c.height) * Z, c.width * Z, c.height * Z); ctx.globalAlpha = 1;
+  },
+  desenha() {
+    const M = this.mapa, cv = $("ed-cv"); if (!M || !cv) return;
+    const Z = this.zoom; cv.width = M.w * 16 * Z; cv.height = M.h * 16 * Z;
+    const ctx = cv.getContext("2d"); ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(M.base, 0, 0, cv.width, cv.height);
+    if (this.grade) { ctx.strokeStyle = "rgba(255,255,255,.08)"; ctx.lineWidth = 1; ctx.beginPath();
+      for (let x = 0; x <= M.w; x++) { ctx.moveTo(x * 16 * Z + .5, 0); ctx.lineTo(x * 16 * Z + .5, cv.height); }
+      for (let y = 0; y <= M.h; y++) { ctx.moveTo(0, y * 16 * Z + .5); ctx.lineTo(cv.width, y * 16 * Z + .5); } ctx.stroke(); }
+    for (const o of M.objs) this.desenhaSprite(ctx, o.gfx, o.x, o.y, .85);
+    // você
+    ctx.strokeStyle = "#4fc3ff"; ctx.lineWidth = 2; ctx.strokeRect(M.local.x * 16 * Z + 1, M.local.y * 16 * Z + 1, 16 * Z - 2, 16 * Z - 2);
+    for (const e of this.lista()) {
+      const a = this.arrasto && this.arrasto.ev === e && this.arrasto.para ? this.arrasto.para : e;
+      ctx.fillStyle = "rgba(255,95,162,.25)"; ctx.fillRect(a.x * 16 * Z, a.y * 16 * Z, 16 * Z, 16 * Z);
+      this.desenhaSprite(ctx, e.sprite, a.x, a.y, 1);
+      ctx.strokeStyle = this.sel && this.sel.ev === e ? "#ffd166" : "#ff5fa2"; ctx.lineWidth = 2;
+      ctx.strokeRect(a.x * 16 * Z + 1, a.y * 16 * Z + 1, 16 * Z - 2, 16 * Z - 2);
+    }
+    if (this.hover) {
+      ctx.strokeStyle = "rgba(255,255,255,.7)"; ctx.lineWidth = 1; ctx.strokeRect(this.hover.x * 16 * Z + .5, this.hover.y * 16 * Z + .5, 16 * Z - 1, 16 * Z - 1);
+      if (this.colocar != null) this.desenhaSprite(ctx, this.colocar, this.hover.x, this.hover.y, .6);
+    }
+  },
+
+  // ---------- painel do evento ----------
+  desenhaPainel() {
+    const p = $("ed-painel"); if (!p) return;
+    const s = this.sel && this.sel.ev;
+    if (!s) { p.innerHTML = `<div class="dica">Toque num evento seu no mapa (moldura rosa) para mudar o que ele faz.<br><br>
+      Você tem ${this.lista().length} evento(s) neste mapa e ${this.total()} no total.<br><br>
+      Como funciona: escolha um personagem na aba 🧍, arraste para o mapa, diga o que ele faz e aperte 💾 Salvar.
+      Os eventos aparecem quando você entra no lugar (se já estiver nele, entre numa casa e saia).
+      Ficam guardados na nuvem com o seu nome e valem sempre que você jogar, sozinho ou no coop (só no seu jogo).</div>`; return; }
+    const op = (o, v) => Object.entries(o).map(([k, n]) => `<option value="${k}"${k === v ? " selected" : ""}>${n}</option>`).join("");
+    const lt = this.listas ? this.listas.treinadores : [], li = this.listas ? this.listas.itens : [];
+    const esc = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+    let h = `<div class="linha"><div id="ed-pv" style="flex:0 0 72px;height:72px;background:#1f2230;border-radius:8px;display:flex;align-items:center;justify-content:center"></div>
+      <div><div>Sprite <b>${s.sprite}</b> em <b>${s.x}, ${s.y}</b></div><button id="ed-troca" class="ghost" style="margin-top:6px">Trocar sprite</button></div></div>
+      <label>Como fica parado</label><select id="ed-olhar">${op(this.OLHAR, s.olhar || "baixo")}</select>
+      <label>O que ele faz</label><select id="ed-acao">${op(this.ACOES, s.acao)}</select>`;
+    if (s.acao === "falar") h += `<label>O que ele diz</label><textarea id="ed-texto">${esc(s.texto)}</textarea><div class="dica">Linha em branco = caixa de texto nova.</div>`;
+    if (s.acao === "item" || s.acao === "chao") {
+      h += `<label>Item</label><input id="ed-itemb" placeholder="Procurar item…"><select id="ed-item" size="6">${li.map(([i, n]) => `<option value="${i}"${i === s.item ? " selected" : ""}>${esc(n)}</option>`).join("")}</select>
+        <label>Quantidade</label><input id="ed-qtd" type="number" min="1" max="99" value="${s.qtd || 1}">`;
+      if (s.acao === "item") h += `<label>O que diz antes de dar</label><textarea id="ed-texto">${esc(s.texto)}</textarea>
+        <label>O que diz depois (já deu)</label><textarea id="ed-texto2">${esc(s.texto2 || "Boa sorte na sua jornada!")}</textarea>`;
+      else h += `<div class="dica">Some do chão depois de pego. Dica: o sprite 59 é um baú.</div>`;
+    }
+    if (s.acao === "lutar") h += `<label>Treinador (time e nome dele)</label><input id="ed-treinb" placeholder="Procurar treinador…">
+      <select id="ed-trein" size="6">${lt.map(([i, n]) => `<option value="${i}"${i === s.treinador ? " selected" : ""}>${i} · ${esc(n)}</option>`).join("")}</select>
+      <label>Antes da luta</label><textarea id="ed-texto">${esc(s.texto || "Vamos lutar!")}</textarea>
+      <label>Quando perde</label><textarea id="ed-texto2">${esc(s.texto2 || "Você venceu!")}</textarea>
+      <label>Depois (se falar de novo)</label><textarea id="ed-texto3">${esc(s.texto3 || s.texto2 || "Foi uma boa luta!")}</textarea>
+      <div class="dica">Luta uma vez: se esse treinador já foi vencido no jogo, ele só diz o texto de depois.</div>`;
+    if (s.acao === "teleporte") { const d = s.destino || {};
+      h += `<label>O que diz antes</label><textarea id="ed-texto">${esc(s.texto || "")}</textarea>
+      <label>Destino (mapa grupo.número e quadrado)</label>
+      <div class="linha"><input id="ed-dg" type="number" placeholder="grupo" value="${d.grupo ?? ""}"><input id="ed-dn" type="number" placeholder="número" value="${d.num ?? ""}"><input id="ed-dx" type="number" placeholder="x" value="${d.x ?? ""}"><input id="ed-dy" type="number" placeholder="y" value="${d.y ?? ""}"></div>
+      <div class="linha" style="margin-top:6px"><button id="ed-daqui" class="ghost">📍 Escolher neste mapa</button><button id="ed-onde" class="ghost">🧍 Onde estou</button></div>
+      <div class="dica">Para mandar para outro lugar: vá até lá no jogo, abra o editor, aperte "🔄 Ler este lugar" e use "Onde estou".</div>`; }
+    h += `<div class="linha" style="margin-top:16px"><button id="ed-apaga" class="ghost perigo">🗑️ Apagar evento</button></div>`;
+    p.innerHTML = h;
+    const pv = this.sprites.get(s.sprite); if (pv) { const k = document.createElement("canvas"); k.width = pv.width; k.height = pv.height; k.getContext("2d").drawImage(pv, 0, 0); k.style.cssText = "image-rendering:pixelated;max-width:64px;max-height:64px;width:" + pv.width * 2 + "px"; $("ed-pv").appendChild(k); }
+    const liga = (id, f, ev = "input") => { const el = $(id); if (el) el.addEventListener(ev, () => { f(el); this.mudou = true; }); };
+    liga("ed-olhar", (el) => s.olhar = el.value, "change");
+    liga("ed-acao", (el) => { s.acao = el.value; if (s.acao === "lutar" && !s.treinador && lt.length) s.treinador = lt[0][0]; this.desenhaPainel(); }, "change");
+    liga("ed-texto", (el) => s.texto = el.value); liga("ed-texto2", (el) => s.texto2 = el.value); liga("ed-texto3", (el) => s.texto3 = el.value);
+    liga("ed-item", (el) => s.item = +el.value, "change"); liga("ed-qtd", (el) => s.qtd = Math.max(1, Math.min(99, +el.value || 1)));
+    liga("ed-trein", (el) => s.treinador = +el.value, "change");
+    const filtra = (bid, sid) => { const b = $(bid), sel = $(sid); if (!b) return; b.oninput = () => { const t = b.value.toLowerCase(); for (const o of sel.options) o.hidden = t && !o.text.toLowerCase().includes(t); }; };
+    filtra("ed-itemb", "ed-item"); filtra("ed-treinb", "ed-trein");
+    const dest = () => { s.destino = { grupo: +$("ed-dg").value || 0, num: +$("ed-dn").value || 0, x: +$("ed-dx").value || 0, y: +$("ed-dy").value || 0 }; };
+    ["ed-dg", "ed-dn", "ed-dx", "ed-dy"].forEach((id) => liga(id, dest));
+    if ($("ed-daqui")) $("ed-daqui").onclick = () => { this.escolhendoDestino = s; this.status("Toque no mapa no quadrado de chegada."); };
+    if ($("ed-onde")) $("ed-onde").onclick = () => { const L = this.mapa.local; s.destino = { grupo: L.grupo, num: L.num, x: L.x, y: L.y }; this.mudou = true; this.desenhaPainel(); };
+    $("ed-troca").onclick = () => { this.sel.trocar = true; this.aba("cat"); this.status("Toque no sprite novo na lista."); };
+    $("ed-apaga").onclick = () => { const l = this.lista(); l.splice(l.indexOf(s), 1); this.sel = null; this.mudou = true; this.desenha(); this.desenhaPainel(); };
+    for (const id of ["ed-item", "ed-trein"]) { const el = $(id); if (el && el.selectedOptions[0]) el.selectedOptions[0].scrollIntoView({ block: "nearest" }); }
+  },
+
+  // ---------- salvar ----------
+  async salvar() {
+    for (const [k, l] of Object.entries(this.dados.mapas)) if (!l.length) delete this.dados.mapas[k];
+    for (const l of Object.values(this.dados.mapas)) for (const e of l) {
+      if (e.acao === "lutar" && !e.treinador) return this.status("⚠️ Escolha o treinador do evento de luta.");
+      if (e.acao === "teleporte" && !e.destino) return this.status("⚠️ Escolha o destino do teleporte.");
+    }
+    this.dados.t = Date.now(); this.mudou = false;
+    this.gravarLocal();
+    this.run.worker.postMessage({ t: "ed-aplica", ev: this.dados });
+    this.status("Salvando…");
+    try { if (!(await this.gravarNuvem())) toast("Eventos guardados só neste aparelho (sem nuvem agora)."); } catch (e) { toast("Eventos guardados só neste aparelho (sem nuvem agora)."); }
+  },
+};

@@ -61,6 +61,7 @@ function boundKeys() {
 let altSo = false;
 addEventListener("keydown", (e) => {
   if (capture) { e.preventDefault(); return finishCapture("kb", e.code); }
+  if (typeof Editor !== "undefined" && Editor.aberto) { if (e.key === "Escape" && !typing()) Editor.fechar(); return; }   // editor de eventos aberto: nada vai para o jogo
   if (e.key === "Alt") { if (Play.run && !typing()) { e.preventDefault(); if (!e.repeat) altSo = true; } return; }
   // 0 sem atalho próprio: capacete da moto no Pokémon Quetzal
   if ((e.code === "Digit0" || e.code === "Numpad0") && Play.run && !typing() && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && !boundKeys().has(e.code)) Moto.troca();
@@ -77,6 +78,7 @@ addEventListener("keydown", (e) => {
   if (Play.run) sendKeys(Play.run);   // manda o botão NA HORA (não espera o próximo timer)
 });
 addEventListener("keyup", (e) => {
+  if (typeof Editor !== "undefined" && Editor.aberto) return;
   if (e.key === "Alt") {
     if (Play.run && !typing()) e.preventDefault();
     if (altSo && Play.run) Play.run.worker.postMessage({ t: "modo" });
@@ -565,6 +567,7 @@ $("btn-sound").onclick = () => Sound.toggle();
 $("btn-cabolog").onclick = (e) => { e.currentTarget.blur(); if (Play.run && Play.run.kcOn) KcLog.baixa(); else CaboLog.baixa(); };
 $("btn-touch").onclick = () => toggleTouch();
 $("btn-full").onclick = goFull;
+$("btn-eventos").onclick = (e) => { e.currentTarget.blur(); down.clear(); if (Play.run) sendKeys(Play.run); Editor.abrir(); };
 $("btn-fit").onclick = () => Fit.cycle();
 $("stage").ondblclick = goFull;
 

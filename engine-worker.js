@@ -9,7 +9,7 @@ const V = (location.search.match(/[?&]v=(\w+)/) || [])[1] || "";   // mesma vers
 const NO_RB = /[?&]rb=0\b/.test(location.search);   // página aberta com ?semrollback
 // SNES: também o Mundo livre (fantasma dos outros e inimigos compartilhados, do snesnet v1.6)
 // GBA: o cabo link pela internet (linkhle.js) para o coop do Pokémon Quetzal
-importScripts(...(SNES ? ["sncore.js", "ghost-core.js", "objlayout.js", "coop-sync.js"] : ["kncore.js", "linkhle.js", "dianoite.js", "kirbycoop.js"]).map(f => f + "?v=" + V));
+importScripts(...(SNES ? ["sncore.js", "ghost-core.js", "objlayout.js", "coop-sync.js"] : ["kncore.js", "linkhle.js", "dianoite.js", "kirbycoop.js", "editorqz.js"]).map(f => f + "?v=" + V));
 const Core = SNES ? SnCore : KnCore;
 
 const W = Core.W, H = Core.H, FRAME_BYTES = W * H * 4;
@@ -290,6 +290,7 @@ function relogio() {
     if (r) { run.dn = DiaNoite.create(r, run.dnPed.modo, run.dnPed.min); run.dnJogo = run.dnPed.modo === "jogo"; run.dnPed = null; }
   }
   if (run.quetzal && run.frames >= 120) LinkHLE.semRocket(run.s.ram(0));   // sem trapaça, a Equipe Rocket não aparece (linkhle.js)
+  if (run.quetzal && edOrig) edVigia();   // eventos do editor no mapa atual (cópia do save)
   if (!run.dn) return;
   run.dn.quadro();
   if (run.dnJogo && run.frames % 1800 === 0) postMessage({ t: "relogio", min: run.dn.minuto() });
@@ -479,6 +480,60 @@ function tick() {
   if (now - run.snapT >= SNAP_MS && (!run.rb || run.confirmed === run.frames)) snapshot();
 }
 
+// ---------- editor de eventos do Pokémon Quetzal (editorqz.js; a tela fica no editor.js) ----------
+// Nunca na sala por rollback (lá todos rodam a mesma ROM). Os eventos são escritas na ROM da partida (romWrite), refeitas
+// do zero a cada aplicação: desfaz as anteriores (cabeçalhos originais + faixas livres de volta a 0xFF) e monta de novo.
+let edPend = null, edOrig = null;
+const edPode = () => run && run.quetzal && !run.rb && !SNES && run.s.romWrite;
+function edBus() {
+  const s = run.s, r16 = (a) => s.read16(0, a) & 0xFFFF;
+  return { r16, r8: (a) => (r16(a & ~1) >> ((a & 1) * 8)) & 255, r32: (a) => (r16(a) | (r16(a + 2) << 16)) >>> 0 };
+}
+function edAplica(m) {
+  if (!run) { edPend = m; return; }
+  if (!edPode()) return postMessage({ t: "ed-ok", avisos: ["Os eventos não valem nesta partida (sala por rollback)."] });
+  const bus = edBus(), escreve = (lista) => { for (const [a, b] of lista) run.s.romWrite(a - 0x08000000, Uint8Array.from(b)); };
+  if (edOrig) escreve(EditorQZ.desfazer(bus, edOrig));
+  const ev = { mapas: m.ev && m.ev.mapas || {} };
+  const r = EditorQZ.montar(bus, ev);
+  escreve(r.escritas);
+  edOrig = ev.orig || null;
+  postMessage({ t: "ed-ok", avisos: r.avisos, marcas: ev.mapas, silencioso: !!m.silencioso });
+}
+// O jogo guarda no save uma cópia das pessoas do mapa atual (SaveBlock1 +0x1790, 24 bytes cada) e, ao continuar um jogo
+// salvo, usa essa cópia: o evento novo só nasceria depois de sair e voltar ao mapa. A cada 30 quadros: se o mapa carregado
+// usa a NOSSA lista (ponteiro de eventos do gMapHeader 0x02038CB4 dentro das faixas do editor) e a cópia está diferente,
+// copia a lista certa. O jogo cria quem faltar quando a câmera anda (TrySpawnObjectEvents lê essa cópia).
+function edVigia() {
+  if (!edOrig || run.frames % 30 || !edPode()) return;
+  const ram = run.s.ram(0); if (!ram) return;
+  const ev = ram.r32(0x02038CB4);
+  if (!EditorQZ.LIVRE.some(([a, b]) => ev >= a && ev < b)) return;
+  const bus = edBus(), n = bus.r8(ev), arr = bus.r32(ev + 4), s1 = ram.r32(0x030055BC);
+  if (n > 64 || s1 < 0x02000000 || s1 >= 0x02040000 - 0x2000) return;
+  for (let i = 0; i < n * 24; i++) { const v = bus.r8(arr + i); if (ram.r8(s1 + 0x1790 + i) !== v) ram.w8(s1 + 0x1790 + i, v); }
+}
+function edMsg(m) {
+  if (m.t === "ed-aplica") return edAplica(m);
+  if (!edPode()) return postMessage({ t: "ed-erro", msg: "O editor só funciona no Pokémon Quetzal, fora da sala por rollback." });
+  const bus = edBus();
+  if (m.t === "ed-mapa") {
+    const L = EditorQZ.local(bus), M = EditorQZ.desenhaMapa(bus), h = EditorQZ.cabecalho(bus, L.grupo, L.num);
+    if (!M || !h) return postMessage({ t: "ed-erro", msg: "Não consegui ler o mapa agora (está numa tela de menu ou batalha?)." });
+    // objetos do jogo (sem os nossos: os nossos vêm do editor)
+    const orig = edOrig && edOrig[L.grupo + "." + L.num] || bus.r32(h + 4);
+    const objs = EditorQZ.objetos(bus, orig);
+    const buf = M.rgba.buffer;
+    postMessage({ t: "ed-mapa", local: L, w: M.w, h: M.h, rgba: buf, info: Array.from(M.info), objs }, [buf]);
+  } else if (m.t === "ed-sprites") {
+    const lista = [], bufs = [];
+    for (const g of m.ids || []) { const sp = EditorQZ.desenhaSprite(bus, g); if (sp) { lista.push({ gfx: g, w: sp.w, h: sp.h, rgba: sp.rgba.buffer }); bufs.push(sp.rgba.buffer); } }
+    postMessage({ t: "ed-sprites", lista }, bufs);
+  } else if (m.t === "ed-listas") {
+    postMessage({ t: "ed-listas", sprites: EditorQZ.catalogo(bus), treinadores: EditorQZ.treinadores(bus), itens: EditorQZ.itens(bus) });
+  }
+}
+
 onmessage = async (ev) => {
   const m = ev.data;
   if (m.t === "start") {
@@ -513,6 +568,7 @@ onmessage = async (ev) => {
       applyView();
       iv = setInterval(tick, 4);
       postMessage({ t: "started" });
+      if (edPend) { const e = edPend; edPend = null; edAplica(e); }
     } catch (err) { postMessage({ t: "err", msg: String(err && err.message || err) }); }
   }
   else if (m.t === "input") { if (run && run.kc) return; if (run) bookPut(m.slot, m.frame, m.keys); else (pending = pending || []).push([m.slot, m.frame, m.keys]); }
@@ -549,6 +605,7 @@ onmessage = async (ev) => {
       }
     }
   }
+  else if (m.t && m.t.startsWith("ed-")) edMsg(m);   // editor de eventos do Quetzal (editorqz.js)
   else if (m.t === "relogio") {   // Pokémon Quetzal: hora real ou hora do jogo
     if (run && run.quetzal && !run.rb && !SNES) {
       run.dnJogo = m.modo === "jogo";
