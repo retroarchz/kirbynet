@@ -224,8 +224,10 @@ const EditorQZ = (() => {
   // movimentos (applymovement): virar 0x00-0x03, andar 0x08-0x0B (baixo, cima, esquerda, direita; no Quetzal, medido:
   // 0x10-0x13 do Emerald não anda, 0x0C+ desliza/corre), fim 0xFE
   const DIRS = { baixo: 0, cima: 1, esq: 2, dir: 3 };
+  // movimento "ficar invisível" do Quetzal (para o modo solto: some no fim do caminho sem travar o jogador)
+  const INVIS = () => (typeof globalThis.QZ_INVIS === "number" ? globalThis.QZ_INVIS : 0x54);
   function montar(bus, ev) {
-    const escritas = [], avisos = [];
+    const escritas = [], avisos = [], vigias = [];
     let fat = 0, pos = LIVRE[0][0];
     const aloca = (n) => {   // n bytes alinhados em 4 nas faixas livres
       n = (n + 3) & ~3;
@@ -298,6 +300,9 @@ const EditorQZ = (() => {
             const c = [], fx = [], mv = [], faltas = [];
             const LOCK = auto ? 0x69 : 0x6A, REL = auto ? 0x6B : 0x6C;   // lockall 0x69 / releaseall 0x6B (0x6D é waitbuttonpress)
             let desvio = -1; const fimCedo = [];
+            // modo solto (pedido 04/11: "me mexer enquanto ele se mexe"): o script só dá a ordem de andar e termina;
+            // o caminho inteiro vira UMA lista de movimento sem waitmovement. Falas só antes de começar a andar.
+            const solto = !!auto && e.comeca === "solto", ml2 = []; let soltou = false, avisou = false, voaFim = false;
             if (auto) {
               c.push(0x16, ...u16(auto.var), 0x01, 0x00);                                   // setvar temp = 1 (uma vez por entrada)
               if (e.marca && e.fim && e.fim !== "repete") { c.push(0x2B, ...u16(e.marca)); fimCedo.push(c.length + 2); c.push(0x06, 0x01, 0, 0, 0, 0); }   // já aconteceu
@@ -308,6 +313,14 @@ const EditorQZ = (() => {
               if (e.fim === "uma") { c.push(0x2B, ...u16(e.marca)); desvio = c.length; c.push(0x06, 0x01, 0, 0, 0, 0); }
             }
             for (const p of tr.passos) {
+              if (solto && (p.t === "andar" || p.t === "virar" || p.t === "sumir" || p.t === "voar")) {
+                soltou = true;
+                if (p.t === "andar" || p.t === "virar") { const d = DIRS[p.dir] ?? 0, n = p.t === "andar" ? p.n : 1; for (let k = 0; k < n; k++) ml2.push(p.t === "andar" ? 0x08 + d : d); if (p.porta) ml2.push(INVIS()); }
+                else if (p.t === "voar") voaFim = true;   // voa quando chegar (2ª parte da cena, disparada pelo site)
+                else ml2.push(INVIS());   // sumir: some no fim do caminho
+                continue;
+              }
+              if (solto && soltou) { if (!avisou) avisos.push("modo 'você anda junto': falas, itens e esperas só antes dele começar a andar (os de depois foram ignorados)"); avisou = true; continue; }
               if (p.t === "falar") { const a = poeTexto(p.texto || "…"); c.push(0x0F, 0x00, ...u32(a), 0x09, 0x04); }
               else if (p.t === "item") c.push(0x1A, 0x00, 0x80, ...u16(p.item | 0), 0x1A, 0x01, 0x80, ...u16(Math.max(1, p.qtd | 0)), 0x09, 0x00);
               else if (p.t === "andar" || p.t === "virar") {
@@ -334,8 +347,11 @@ const EditorQZ = (() => {
               }
             }
             if (e.fim === "uma" || ((!e.fim || e.fim === "repete") && citados.has(e.id) && e.marca)) c.push(0x29, ...u16(e.marca));   // terminou (outro evento pode depender)
-            if (e.fim === "some") c.push(0x29, ...u16(e.marca), 0x53, ...u16(id));   // setflag, removeobject id
-            c.push(REL, 0x02);
+            if (e.fim === "some") c.push(0x29, ...u16(e.marca), ...(solto ? [] : [0x53, ...u16(id)]));   // setflag, removeobject id
+            if (solto && ml2.length) {
+              if (e.fim === "some" && !voaFim && ml2[ml2.length - 1] !== INVIS()) ml2.push(INVIS());
+              ml2.push(0xFE); c.push(REL); mv.push([c.length + 3, ml2]); c.push(0x4F, ...u16(id), 0, 0, 0, 0, 0x02);   // releaseall, applymovement (sem esperar), end
+            } else c.push(REL, 0x02);
             if (!auto && e.fim === "uma") {
               const ja = c.length, a2 = poeTexto(e.texto2 || "Boa sorte na sua jornada!");
               c.push(0x0F, 0x00, ...u32(a2), 0x09, 0x04, REL, 0x02);
@@ -344,14 +360,25 @@ const EditorQZ = (() => {
             for (const [k, t] of faltas) { fx.push([k, c.length]); const a = poeTexto(t); c.push(0x0F, 0x00, ...u32(a), 0x09, 0x04, REL, 0x02); }
             if (fimCedo.length) { const fim = c.length; c.push(0x02); for (const k of fimCedo) fx.push([k, fim]); }
             for (const [k, ml] of mv) { const a = aloca(ml.length); if (!a) { avisos.push("acabou o espaço livre da ROM"); break; } escritas.push([a, ml]); const v = u32(a); for (let j = 0; j < 4; j++) c[k + j] = v[j]; }
-            return { c, fx };
+            return { c, fx, voaFim };
           };
           const fala = montaSeq(null);
           s.push(...fala.c); s.__fix = fala.fx;
-          if (e.comeca === "sozinho") {   // cena: script próprio, ligado pela tabela ON_FRAME do mapa (var temporária == 0)
+          if (e.comeca === "sozinho" || e.comeca === "solto") {   // cena: script próprio, ligado pela tabela ON_FRAME do mapa (var temporária == 0)
             const v = 0x400F - autos.length, au = montaSeq({ var: v }), aa = aloca(au.c.length);
             if (!aa) { avisos.push("acabou o espaço livre da ROM"); }
-            else { for (const [k, rel] of au.fx) { const w = u32(aa + rel); for (let j = 0; j < 4; j++) au.c[k + j] = w[j]; } escritas.push([aa, au.c]); autos.push([v, aa]); }
+            else {
+              for (const [k, rel] of au.fx) { const w = u32(aa + rel); for (let j = 0; j < 4; j++) au.c[k + j] = w[j]; }
+              escritas.push([aa, au.c]); autos.push([v, 0, aa]);
+              if (au.voaFim) {   // modo solto + voar: quando ele chega no fim, o site (worker) põe a var em 2 e esta parte roda
+                const ml = [0x25, 0xFE], ma = aloca(ml.length), c2 = [0x69, 0x4F, ...u16(id), ...u32(ma || 0), 0x51, 0x00, 0x00,
+                  0x28, 0x32, 0x00, 0x9D, 0x00, 0x01, 0x00, 0x9C, 0x1E, 0x00, 0x28, 0x0F, 0x00, 0x53, ...u16(id), 0x9E, 0x1E, 0x00,
+                  0x16, ...u16(v), 0x03, 0x00, 0x6B, 0x02];
+                const a2 = aloca(c2.length);
+                if (!ma || !a2) avisos.push("acabou o espaço livre da ROM");
+                else { escritas.push([ma, ml], [a2, c2]); autos.push([v, 2, a2]); vigias.push({ mapa: chave, id, v, x: tr.fim.x, y: tr.fim.y }); }
+              }
+            }
           }
         }
         else if (e.acao === "lutar") {   // treinador existente: luta uma vez (a marca é a do próprio treinador)
@@ -412,7 +439,7 @@ const EditorQZ = (() => {
         else if (velho) l.push(0x03, ...u32(velho[1]));
         if (autos.length) {   // tabela ON_FRAME: as nossas cenas primeiro, depois as do mapa ({var, valor, script}, fim = var 0)
           const tq = [];
-          for (const [v, p] of autos) tq.push(...u16(v), 0, 0, ...u32(p));
+          for (const [v, val, p] of autos) tq.push(...u16(v), ...u16(val), ...u32(p));
           if (velhoQ && ok(velhoQ[1])) for (let k = 0; k < 32; k++) { const q = velhoQ[1] + 8 * k, v = bus.r16(q); if (!v) break; for (let j = 0; j < 8; j++) tq.push(bus.r8(q + j)); }
           tq.push(0, 0);
           const ta = aloca(tq.length); if (!ta) { avisos.push("acabou o espaço livre da ROM"); break; }
@@ -425,7 +452,7 @@ const EditorQZ = (() => {
         (ev.origScr = ev.origScr || {})[chave] = scr0;
       }
     }
-    return { escritas, avisos, usado: LIVRE.slice(0, fat).reduce((s, [a, b]) => s + b - a, 0) + (pos - (LIVRE[fat] || [pos])[0]) };
+    return { escritas, avisos, vigias, usado: LIVRE.slice(0, fat).reduce((s, [a, b]) => s + b - a, 0) + (pos - (LIVRE[fat] || [pos])[0]) };
   }
   // desfaz (volta os cabeçalhos e limpa as faixas livres)
   function desfazer(bus, orig, origScr) {
@@ -441,6 +468,25 @@ const EditorQZ = (() => {
     for (const [a, b] of LIVRE) escritas.push([a, new Array(b - a).fill(0xFF)]);
     return escritas;
   }
-  return { local, cabecalho, desenhaMapa, objetos, trajeto, dadosMapa, desenhaSprite, infoSprite, catalogo, treinadores, itens, texto, montar, desfazer, MOV, LIVRE, MARCAS };
+  // modo "você anda junto" + voar no fim: quando o personagem chegou no ponto final e parou, põe a var da cena em 2
+  // (a tabela ON_FRAME do mapa roda então a 2ª parte: pulinho e o pássaro do Fly). Vars temporárias: SaveBlock1 + 0x1D4.
+  function vigiaVoo(ram, vigias) {
+    if (!vigias || !vigias.length) return;
+    const s1 = ram.r32(0x030055BC);
+    if (s1 < 0x02000000 || s1 >= 0x02040000 - 0x2000) return;
+    const aqui = ram.r8(s1 + 0x474) + "." + ram.r8(s1 + 0x475);
+    for (const g of vigias) {
+      if (g.mapa !== aqui) continue;
+      const va = s1 + 0x1D4 + (g.v - 0x4000) * 2;
+      if (ram.r16(va) !== 1) continue;
+      for (let i = 0; i < 16; i++) {
+        const o = 0x02038D10 + 0x24 * i;
+        if (!(ram.r8(o) & 1) || ram.r8(o + 8) !== g.id) continue;
+        if (ram.r16(o + 0x10) - 7 === g.x && ram.r16(o + 0x12) - 7 === g.y && !(ram.r8(o) & 2)) ram.w16(va, 2);
+        break;
+      }
+    }
+  }
+  return { local, cabecalho, desenhaMapa, objetos, trajeto, dadosMapa, desenhaSprite, infoSprite, catalogo, treinadores, itens, texto, montar, vigiaVoo, desfazer, MOV, LIVRE, MARCAS };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = EditorQZ;

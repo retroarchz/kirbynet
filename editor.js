@@ -286,6 +286,19 @@ const Editor = {
   novoId() { return Math.random().toString(36).slice(2, 10); },
   garanteIds() { for (const l of Object.values(this.dados.mapas)) for (const e of l) if (!e.id) e.id = this.novoId(); },
   // nome curto de um evento para listas: o primeiro texto que ele fala + onde fica
+  // todas as partes ligadas a este evento por "só depois de o seu evento … terminar" (para os dois lados)
+  historia(ev) {
+    const todos = Object.values(this.dados.mapas || {}).flat(), dentro = new Set([ev]);
+    for (let mudou = true; mudou;) {
+      mudou = false;
+      for (const e of todos) {
+        if (dentro.has(e)) continue;
+        const pai = e.cond && e.cond.evento, liga = (pai && [...dentro].some((d) => d.id === pai)) || [...dentro].some((d) => d.cond && d.cond.evento === e.id);
+        if (liga) { dentro.add(e); mudou = true; }
+      }
+    }
+    return [...dentro];
+  },
   nomeEvento(e, k) {
     const t = e.acao === "sequencia" ? ((e.passos || []).find((p) => p.texto) || {}).texto : e.texto;
     const quem = this.favs[e.sprite] ? this.favs[e.sprite] + (e.parte ? ` — parte ${e.parte}` : "") + " " : (e.parte ? `parte ${e.parte} ` : "");
@@ -437,8 +450,9 @@ const Editor = {
     if (s.acao === "sequencia") {
       if (!s.passos || !s.passos.length) s.passos = [{ t: "falar", texto: s.texto || "Olá!" }];
       const opItem = (v) => li.map(([i, n]) => `<option value="${i}"${i === v ? " selected" : ""}>${esc(n)}</option>`).join("");
-      h += `<label>Quando começa</label><select id="ed-comeca">${op({ falar: "Quando você fala com ele", sozinho: "Sozinho, assim que você chega no lugar (cena)" }, s.comeca || "falar")}</select>
+      h += `<label>Quando começa</label><select id="ed-comeca">${op({ falar: "Quando você fala com ele", sozinho: "Sozinho ao chegar (cena: você fica parado)", solto: "Sozinho ao chegar, e você anda junto" }, s.comeca || "falar")}</select>
         ${s.comeca === "sozinho" ? `<div class="dica">Cena: ao entrar no lugar, tudo para e ele faz os passos sozinho (se ele estiver valendo e ainda não tiver ido embora).</div>` : ""}
+        ${s.comeca === "solto" ? `<div class="dica">Ao entrar no lugar ele começa sozinho e você continua livre para andar. Falas, itens e esperas só valem <b>antes</b> dele começar a andar; "Sumir" no fim faz ele desaparecer; "Voar" no fim: quando ele chega, dá o pulinho e o pássaro do Fly leva ele.</div>` : ""}
         <label>Passos (nessa ordem)</label><div id="ed-passos">` + s.passos.map((p, i) => {
         let campo = "";
         if (p.t === "falar") campo = `<textarea data-i="${i}" data-k="texto">${esc(p.texto)}</textarea>`;
@@ -460,7 +474,9 @@ const Editor = {
       h += `<div class="dica">O caminho aparece no mapa: ✖ = parede ou alguém (ele para antes), 🚪 = sai pela porta e some. Se não for "Some", ele volta ao lugar quando você sai do mapa e volta.</div>`;
     }
     if (s.acao === "sequencia" || s.acao === "item") h += `<button id="ed-continua" class="ghost" style="width:100%;margin-top:16px">➡️ Continuar a história em outro lugar (mesmo personagem)</button>`;
-    h += `<div class="linha" style="margin-top:8px"><button id="ed-reset" class="ghost" title="O jogo esquece que ele já sumiu, já deu o item ou já fez tudo">↺ Começar de novo${s.reset ? " ✓" : ""}</button><button id="ed-apaga" class="ghost perigo">🗑️ Apagar evento</button></div>`;
+    const hist = this.historia(s);
+    if (hist.length > 1) h += `<button id="ed-resetall" class="ghost" style="width:100%;margin-top:8px" title="Todas as partes voltam ao começo: dá para testar a história de novo do início">↺ Começar a história inteira de novo (${hist.length} partes)${hist.every((e) => e.reset) ? " ✓" : ""}</button>`;
+    h += `<div class="linha" style="margin-top:8px"><button id="ed-reset" class="ghost" title="O jogo esquece que ele já sumiu, já deu o item ou já fez tudo">↺ ${hist.length > 1 ? "Só este" : "Começar de novo"}${s.reset ? " ✓" : ""}</button><button id="ed-apaga" class="ghost perigo">🗑️ Apagar evento</button></div>`;
     p.innerHTML = h;
     const pv = this.sprites.get(s.sprite); if (pv) { const k = document.createElement("canvas"); k.width = pv.width; k.height = pv.height; k.getContext("2d").drawImage(pv, 0, 0); k.style.cssText = "image-rendering:pixelated;max-width:64px;max-height:64px;width:" + pv.width * 2 + "px"; $("ed-pv").appendChild(k); }
     // mudou uma sequência: ao salvar ela começa do zero (o save esquece que ele já sumiu/já fez tudo)
@@ -479,7 +495,7 @@ const Editor = {
       this.status("✓ Condição escolhida. Não esqueça de apertar 💾 Salvar.");
     });
     liga("ed-fim", (el) => { s.fim = el.value; this.desenhaPainel(); }, "change");
-    liga("ed-comeca", (el) => { if (el.value === "sozinho") s.comeca = "sozinho"; else delete s.comeca; this.mudou = true; this.desenhaPainel(); }, "change");
+    liga("ed-comeca", (el) => { if (el.value === "falar") delete s.comeca; else s.comeca = el.value; this.mudou = true; this.desenhaPainel(); }, "change");
     const ps = $("ed-passos");
     if (ps) {
       const muda = (el) => { const p = s.passos[+el.dataset.i]; if (!p) return; const k = el.dataset.k; p[k] = ["item", "qtd", "n"].includes(k) ? +el.value || 0 : el.value; this.mudou = true; zera(); this.desenha(); };
@@ -511,6 +527,7 @@ const Editor = {
       this.continuar = { id: s.id, sprite: s.sprite, nome: this.favs[s.sprite] || "o personagem " + s.sprite, parte: s.parte + 1 };
       this.mudou = true; this.desenhaPainel(); this.salvar().then(() => this.avisaContinuar());   // salva já: dá para fechar e ir até o outro lugar
     };
+    if ($("ed-resetall")) $("ed-resetall").onclick = () => { for (const e of hist) e.reset = true; this.mudou = true; this.desenhaPainel(); this.status(`Ao salvar, as ${hist.length} partes começam do zero. Vá até o lugar da parte 1 para jogar de novo.`); };
     $("ed-reset").onclick = () => { s.reset = true; this.mudou = true; this.desenhaPainel(); this.status("Ao salvar, esse evento começa do zero (volta a aparecer, dá o item de novo…). Saia e entre no lugar para ver."); };
     $("ed-troca").onclick = () => { this.sel.trocar = true; this.aba("cat"); this.status("Toque no sprite novo na lista."); };
     $("ed-apaga").onclick = () => { const l = this.lista(); l.splice(l.indexOf(s), 1); this.sel = null; this.mudou = true; this.desenha(); this.desenhaPainel(); };
