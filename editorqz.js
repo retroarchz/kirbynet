@@ -526,11 +526,18 @@ const EditorQZ = (() => {
         const b = SPRS + 0x44 * g.ave, w = SPRS + 0x44 * g.sw;
         for (const i of g.outras || []) { const f = SPRS + 0x44 * i + 0x3E; if (ram.r16(f) & 1) w16(f, ram.r16(f) | 4); }   // reflexo/poça escondidos
         if (!(ram.r16(b + 0x3E) & 1)) { g.fase = 0; continue; }   // o pássaro acabou: o script tira ele
-        const t = Math.max(64, (ram.r16(b + 0x32) & 0xFF) - 2); w16(b + 0x32, t);   // metade da velocidade
+        if (g.n === 0) { g.dir = g.px < 120 ? 1 : -1; if (g.dir > 0) w16(b + 0x3E, ram.r16(b + 0x3E) | 0x100); }   // voa para o meio da tela (virado para lá)
+        if (g.dir > 0) w16(b + 2, ram.r16(b + 2) | 0x1000);   // espelha o desenho (bit de virar do atributo 1 da OAM do sprite)
         g.n++;
-        const tx = g.px + 2.5 * g.n, ty = g.py - 1.5 * g.n - 0.12 * g.n * g.n, ang = t * Math.PI / 128;
+        let t = Math.max(64, (ram.r16(b + 0x32) & 0xFF) - 3);   // o efeito soma 4: anda 1 por quadro (voo longo)
+        // atravessa a tela: vai para uma altura boa de ver (nem colado no topo) e sobe devagar; sai pela lateral
+        const yAlvo = Math.max(48, g.py - 24), tx = g.px + g.dir * 4.5 * g.n, ty = g.py + (yAlvo - g.py) * (1 - Math.exp(-g.n / 8)) - 0.3 * g.n;
+        if (tx < -40 || tx > 280 || ty < -40) t = 0x80;   // saiu da tela: acaba (sem dar a volta e aparecer embaixo)
+        w16(b + 0x32, t);
+        const ang = t * Math.PI / 128;
         w16(b + 0x20, Math.round(tx - 140 * Math.cos(ang))); w16(b + 0x22, Math.round(ty - 72 * Math.sin(ang)));
-        if (ram.r16(w + 0x3E) & 1) { w16(w + 0x24, Math.round(tx - g.px + 12)); w16(w + 0x26, Math.round(ty - g.py - 10)); }   // +12: centro do desenho do pássaro; -10: sentado nas costas
+        if (ram.r16(w + 0x3E) & 1) w16(w + 4, (ram.r16(w + 4) & ~0xC00) | (ram.r16(b + 4) & 0xC00));   // mesma prioridade do pássaro (não some atrás de telhado)
+        if (ram.r16(w + 0x3E) & 1) { w16(w + 0x24, Math.round(tx - g.px - 12 * g.dir)); w16(w + 0x26, Math.round(ty - g.py - 10)); }   // nas costas (o desenho do pássaro fica 12 px para trás)
       }
     }
     return ativo;
