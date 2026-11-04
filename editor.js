@@ -134,6 +134,7 @@ const Editor = {
     this.pedeSprites([...new Set([...m.objs.map((o) => o.gfx), ...this.lista().map((e) => e.sprite)])]);
     $("ed-titulo").textContent = `🛠️ Eventos — mapa ${m.local.grupo}.${m.local.num}`;
     this.status(`Você está em ${m.local.x}, ${m.local.y}. Arraste um personagem da lista para o mapa.`);
+    if (this.continuar) { this.aba("painel"); this.avisaContinuar(); }
     this.desenha(); this.desenhaPainel();
   },
   lista() { if (!this.mapa) return []; const k = this.mapa.local.grupo + "." + this.mapa.local.num; return this.dados.mapas[k] || (this.dados.mapas[k] = []); },
@@ -284,8 +285,15 @@ const Editor = {
   // nome curto de um evento para listas: o primeiro texto que ele fala + onde fica
   nomeEvento(e, k) {
     const t = e.acao === "sequencia" ? ((e.passos || []).find((p) => p.texto) || {}).texto : e.texto;
-    return `${this.ACOES[e.acao] ? this.ACOES[e.acao].split(" ")[0] : ""} “${String(t || "evento").slice(0, 28)}” (mapa ${k}, ${e.x},${e.y})`;
+    const quem = this.favs[e.sprite] ? this.favs[e.sprite] + (e.parte ? ` — parte ${e.parte}` : "") + " " : (e.parte ? `parte ${e.parte} ` : "");
+    return `${this.ACOES[e.acao] ? this.ACOES[e.acao].split(" ")[0] : ""} ${quem}“${String(t || "evento").slice(0, 28)}” (mapa ${k}, ${e.x},${e.y})`;
   },
+  // "Continuar a história em outro lugar" (pedido 03/11: aproveitar o mesmo Wally): o próximo toque no mapa (neste ou em
+  // outro lugar, mesmo depois de fechar o editor) cria a parte seguinte: mesmo sprite, aparece só depois desta terminar.
+  // Por dentro são dois eventos (cada mapa tem os seus personagens); a parte anterior passa a sumir no fim.
+  get continuar() { try { return JSON.parse(localStorage.getItem("kirbynet.ed.continuar")); } catch (e) { return null; } },
+  set continuar(v) { try { v ? localStorage.setItem("kirbynet.ed.continuar", JSON.stringify(v)) : localStorage.removeItem("kirbynet.ed.continuar"); } catch (e) {} },
+  avisaContinuar() { const c = this.continuar; if (c) this.status(`➡️ Toque no mapa onde ${c.nome} vai aparecer depois (parte ${c.parte}). Pode ser em outro lugar: feche, ande até lá e abra o editor. Para desistir, aperte Fechar duas vezes.`); },
   novo(gfx, q) {
     if (this.ocupado(q)) return this.status("Já tem alguém nesse quadrado.");
     const e = { id: this.novoId(), x: q.x, y: q.y, sprite: gfx, olhar: "baixo", acao: gfx === 59 ? "chao" : "falar", texto: "Olá!", item: 1, qtd: 1 };
@@ -296,6 +304,15 @@ const Editor = {
   aperta(e) {
     const q = this.quadrado(e); if (!q) return;
     if (this.escolhendoDestino) { const ev = this.escolhendoDestino; ev.destino = { grupo: this.mapa.local.grupo, num: this.mapa.local.num, x: q.x, y: q.y }; this.escolhendoDestino = null; this.mudou = true; this.desenhaPainel(); this.status(`Destino: ${q.x}, ${q.y} deste mapa.`); return; }
+    const cont = this.continuar;
+    if (cont) {
+      if (this.ocupado(q)) return this.status("Já tem alguém nesse quadrado.");
+      const e = { id: this.novoId(), x: q.x, y: q.y, sprite: cont.sprite, olhar: "baixo", acao: "sequencia", parte: cont.parte, fim: "repete",
+                  passos: [{ t: "falar", texto: "Oi de novo!" }], cond: { quando: "depois", evento: cont.id } };
+      this.lista().push(e); this.continuar = null; this.sel = { ev: e }; this.mudou = true;
+      this.pedeSprites([cont.sprite]); this.aba("painel"); this.desenha(); this.desenhaPainel();
+      return this.status(`✅ ${cont.nome} — parte ${cont.parte} aqui em ${q.x}, ${q.y}. Ele só aparece depois da parte ${cont.parte - 1}. Monte o que ele faz e aperte 💾 Salvar.`);
+    }
     if (this.colocar != null) return this.novo(this.colocar, q);
     const ev = this.eventoEm(q);
     if (ev) { this.sel = { ev }; this.arrasto = { ev, de: q }; $("ed-cv").setPointerCapture(e.pointerId); this.aba("painel"); }
@@ -356,11 +373,16 @@ const Editor = {
   desenhaPainel() {
     const p = $("ed-painel"); if (!p) return;
     const s = this.sel && this.sel.ev;
+    const esc = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
     // topo: novo evento + os eventos deste mapa (um clique seleciona)
     const L = this.lista(), nm = this.mapa ? this.mapa.local.grupo + "." + this.mapa.local.num : "";
-    const topo = `<button id="ed-novo" style="width:100%">＋ Novo evento (escolher personagem)</button>
+    const cont = this.continuar;
+    const topo = (cont ? `<div class="passo" style="border-color:#ffd166"><b>➡️ Escolhendo onde ${esc(cont.nome)} aparece (parte ${cont.parte})</b>
+      <div class="dica">Toque no mapa, aqui ou em outro lugar (feche, ande até lá e abra o editor).</div><button id="ed-desiste" class="ghost mini" style="margin-top:6px">✖ Desistir</button></div>` : "") +
+      `<button id="ed-novo" style="width:100%">＋ Novo evento (escolher personagem)</button>
       ${L.length ? `<div class="dica" style="margin-top:8px">Seus eventos neste lugar:</div><div class="evs">${L.map((e, i) => `<button class="ghost ev${e === s ? " on" : ""}" data-ev="${i}">${this.nomeEvento(e, nm).replace(/ \(mapa[^)]*\)/, "")} <span class="dica">${e.x},${e.y}</span></button>`).join("")}</div>` : ""}`;
     const ligaTopo = () => {
+      if ($("ed-desiste")) $("ed-desiste").onclick = () => { this.continuar = null; this.status("Ok, sem continuação."); this.desenhaPainel(); };
       $("ed-novo").onclick = () => { this.sel = null; this.aba("cat"); this.status("Escolha um personagem e arraste para o mapa (ou toque nele e depois no lugar)."); this.desenha(); };
       p.querySelectorAll("[data-ev]").forEach((b) => b.onclick = () => { this.sel = { ev: L[+b.dataset.ev] }; this.desenha(); this.desenhaPainel(); });
     };
@@ -372,7 +394,6 @@ const Editor = {
       Ficam guardados na nuvem com o seu nome e valem sempre que você jogar, sozinho ou no coop (só no seu jogo).</div>`; ligaTopo(); return; }
     const op = (o, v) => Object.entries(o).map(([k, n]) => `<option value="${k}"${k === v ? " selected" : ""}>${n}</option>`).join("");
     const lt = this.listas ? this.listas.treinadores : [], li = this.listas ? this.listas.itens : [];
-    const esc = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
     let h = topo + `<div class="secao"></div><div class="linha"><div id="ed-pv" style="flex:0 0 72px;height:72px;background:#1f2230;border-radius:8px;display:flex;align-items:center;justify-content:center"></div>
       <div><div><b>${esc(this.nomeSprite(s.sprite))}</b> em <b>${s.x}, ${s.y}</b></div><button id="ed-troca" class="ghost" style="margin-top:6px">Trocar sprite</button></div></div>
       <label>Como fica parado</label><select id="ed-olhar">${op(this.OLHAR, s.olhar || "baixo")}</select>
@@ -432,7 +453,8 @@ const Editor = {
       if (s.fim === "uma") h += `<label>O que diz depois (já fez tudo)</label><textarea id="ed-texto2">${esc(s.texto2 || "Boa sorte na sua jornada!")}</textarea>`;
       h += `<div class="dica">O caminho aparece no mapa: ✖ = parede ou alguém (ele para antes), 🚪 = sai pela porta e some. Se não for "Some", ele volta ao lugar quando você sai do mapa e volta.</div>`;
     }
-    h += `<div class="linha" style="margin-top:16px"><button id="ed-reset" class="ghost" title="O jogo esquece que ele já sumiu, já deu o item ou já fez tudo">↺ Começar de novo${s.reset ? " ✓" : ""}</button><button id="ed-apaga" class="ghost perigo">🗑️ Apagar evento</button></div>`;
+    if (s.acao === "sequencia" || s.acao === "item") h += `<button id="ed-continua" class="ghost" style="width:100%;margin-top:16px">➡️ Continuar a história em outro lugar (mesmo personagem)</button>`;
+    h += `<div class="linha" style="margin-top:8px"><button id="ed-reset" class="ghost" title="O jogo esquece que ele já sumiu, já deu o item ou já fez tudo">↺ Começar de novo${s.reset ? " ✓" : ""}</button><button id="ed-apaga" class="ghost perigo">🗑️ Apagar evento</button></div>`;
     p.innerHTML = h;
     const pv = this.sprites.get(s.sprite); if (pv) { const k = document.createElement("canvas"); k.width = pv.width; k.height = pv.height; k.getContext("2d").drawImage(pv, 0, 0); k.style.cssText = "image-rendering:pixelated;max-width:64px;max-height:64px;width:" + pv.width * 2 + "px"; $("ed-pv").appendChild(k); }
     // mudou uma sequência: ao salvar ela começa do zero (o save esquece que ele já sumiu/já fez tudo)
@@ -470,6 +492,12 @@ const Editor = {
     if ($("ed-daqui")) $("ed-daqui").onclick = () => { this.escolhendoDestino = s; this.status("Toque no mapa no quadrado de chegada."); };
     if ($("ed-onde")) $("ed-onde").onclick = () => { const L = this.mapa.local; s.destino = { grupo: L.grupo, num: L.num, x: L.x, y: L.y }; this.mudou = true; this.desenhaPainel(); };
     ligaTopo();
+    if ($("ed-continua")) $("ed-continua").onclick = () => {
+      if (!s.parte) s.parte = 1;
+      if (s.acao === "sequencia" && (!s.fim || s.fim === "repete")) s.fim = "some";   // a parte anterior vai embora (nunca dois ao mesmo tempo)
+      this.continuar = { id: s.id, sprite: s.sprite, nome: this.favs[s.sprite] || "o personagem " + s.sprite, parte: s.parte + 1 };
+      this.mudou = true; this.desenhaPainel(); this.salvar().then(() => this.avisaContinuar());   // salva já: dá para fechar e ir até o outro lugar
+    };
     $("ed-reset").onclick = () => { s.reset = true; this.mudou = true; this.desenhaPainel(); this.status("Ao salvar, esse evento começa do zero (volta a aparecer, dá o item de novo…). Saia e entre no lugar para ver."); };
     $("ed-troca").onclick = () => { this.sel.trocar = true; this.aba("cat"); this.status("Toque no sprite novo na lista."); };
     $("ed-apaga").onclick = () => { const l = this.lista(); l.splice(l.indexOf(s), 1); this.sel = null; this.mudou = true; this.desenha(); this.desenhaPainel(); };
