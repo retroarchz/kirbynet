@@ -178,6 +178,9 @@ const EditorQZ = (() => {
   // ev = { mapas: { "grupo.num": [ { x, y, sprite, olhar:'baixo'|'cima'|'esq'|'dir'|'anda', acao, texto, texto2, item, qtd,
   //        treinador, destino:{grupo,num,x,y}, marca } ] } }
   const MOV = { baixo: 8, cima: 7, esq: 9, dir: 10, anda: 2, gira: 1 };
+  // movimentos (applymovement): virar 0x00-0x03, andar 0x08-0x0B (baixo, cima, esquerda, direita; no Quetzal, medido:
+  // 0x10-0x13 do Emerald não anda, 0x0C+ desliza/corre), fim 0xFE
+  const DIRS = { baixo: 0, cima: 1, esq: 2, dir: 3 };
   function montar(bus, ev) {
     const escritas = [], avisos = [];
     let fat = 0, pos = LIVRE[0][0];
@@ -201,13 +204,15 @@ const EditorQZ = (() => {
       const novos = [], trans = [];
       for (const e of lista) {
         if (n0 + novos.length >= 64) { avisos.push("mapa " + chave + ": no máximo 64 pessoas"); break; }
+        const id = ++maxId === 0xD1 ? ++maxId : maxId;
         const s = [];   // script
         const msg = (t) => { const a = poeTexto(t); s.push(0x0F, 0x00, ...u32(a), 0x09, 0x02); };   // loadword 0, texto; callstd MSGBOX_NPC
         let marcaObj = 0;
-        if (e.acao === "item" || e.acao === "chao") { if (!e.marca) e.marca = novaMarca(); if (!e.marca) { avisos.push("acabaram as marcas livres"); continue; } }
+        const somePego = e.acao === "chao" || (e.acao === "sequencia" && e.fim === "some");
+        if (e.acao === "item" || e.acao === "chao" || (e.acao === "sequencia" && e.fim !== "repete")) { if (!e.marca) e.marca = novaMarca(); if (!e.marca) { avisos.push("acabaram as marcas livres"); continue; } }
         const cond = e.cond && (e.cond.quando === "depois" || e.cond.quando === "antes") && e.cond.flag ? e.cond : null;
         if (cond) { if (!e.marcaVis) e.marcaVis = novaMarca(); if (!e.marcaVis) { avisos.push("acabaram as marcas livres"); continue; }
-                    trans.push({ F: e.marcaVis, C: cond.flag, depois: cond.quando === "depois", pego: e.acao === "chao" ? e.marca : 0 }); }
+                    trans.push({ F: e.marcaVis, C: cond.flag, depois: cond.quando === "depois", pego: somePego ? e.marca : 0 }); }
         if (e.acao === "falar") { msg(e.texto || "…"); s.push(0x02); }
         else if (e.acao === "item") {   // dá o item uma vez; depois diz o texto2
           s.push(0x6A, 0x5A, 0x2B, ...u16(e.marca));                  // lock, faceplayer, checkflag
@@ -232,6 +237,32 @@ const EditorQZ = (() => {
           const fim = s.length; s.push(0x6C, 0x02);
           s.__fix = [[cheia + 2, fim]];
         }
+        else if (e.acao === "sequencia") {   // vários passos em ordem: falar, dar item, andar, virar, esperar
+          if (somePego) marcaObj = e.marca;   // some de vez: removeobject liga a marca do objeto
+          s.push(0x6A, 0x5A);                                          // lock, faceplayer
+          let desvio = -1;
+          if (e.fim === "uma") { s.push(0x2B, ...u16(e.marca)); desvio = s.length; s.push(0x06, 0x01, 0, 0, 0, 0); }
+          const movs = [];
+          for (const p of e.passos || []) {
+            if (p.t === "falar") { const a = poeTexto(p.texto || "…"); s.push(0x0F, 0x00, ...u32(a), 0x09, 0x04); }
+            else if (p.t === "item") s.push(0x1A, 0x00, 0x80, ...u16(p.item | 0), 0x1A, 0x01, 0x80, ...u16(Math.max(1, p.qtd | 0)), 0x09, 0x00);
+            else if (p.t === "andar" || p.t === "virar") {
+              const d = DIRS[p.dir] ?? 0, n = p.t === "andar" ? Math.max(1, Math.min(30, p.n | 0)) : 1;
+              const ml = new Array(n).fill(p.t === "andar" ? 0x08 + d : d); ml.push(0xFE);
+              movs.push([s.length + 3, ml]); s.push(0x4F, ...u16(id), 0, 0, 0, 0, 0x51, 0x00, 0x00);   // applymovement id, lista; waitmovement 0
+            }
+            else if (p.t === "esperar") s.push(0x28, ...u16(Math.max(1, Math.min(600, (p.n | 0) * 60))));   // delay em quadros (n segundos)
+          }
+          if (e.fim === "uma") s.push(0x29, ...u16(e.marca));
+          if (e.fim === "some") s.push(0x29, ...u16(e.marca), 0x53, ...u16(id));   // setflag, removeobject id
+          s.push(0x6C, 0x02);
+          if (e.fim === "uma") {
+            const ja = s.length, a2 = poeTexto(e.texto2 || "Boa sorte na sua jornada!");
+            s.push(0x0F, 0x00, ...u32(a2), 0x09, 0x04, 0x6C, 0x02);
+            s.__fix = [[desvio + 2, ja]];
+          }
+          for (const [k, ml] of movs) { const a = aloca(ml.length); if (!a) { avisos.push("acabou o espaço livre da ROM"); break; } escritas.push([a, ml]); const v = u32(a); for (let j = 0; j < 4; j++) s[k + j] = v[j]; }
+        }
         else if (e.acao === "lutar") {   // treinador existente: luta uma vez (a marca é a do próprio treinador)
           const a1 = poeTexto(e.texto || "Vamos lutar!"), a2 = poeTexto(e.texto2 || "Você venceu!"), a3 = poeTexto(e.texto3 || e.texto2 || "Foi uma boa luta!");
           s.push(0x5C, 0x00, ...u16(e.treinador | 0), 0x00, 0x00, ...u32(a1), ...u32(a2));   // trainerbattle_single
@@ -248,7 +279,6 @@ const EditorQZ = (() => {
         if (!sa) { avisos.push("acabou o espaço livre da ROM"); break; }
         for (const [k, rel] of s.__fix || []) { const v = u32(sa + rel); for (let j = 0; j < 4; j++) s[k + j] = v[j]; }
         escritas.push([sa, s.slice()]);
-        const id = ++maxId === 0xD1 ? ++maxId : maxId;
         const lay = bus.r32(h), lw = bus.r32(lay), bl = bus.r32(lay + 0xC);
         const alt = e.alt || (e.x >= 0 && e.y >= 0 && e.x < lw ? bus.r16(bl + 2 * (e.y * lw + e.x)) >> 12 : 0) || 3;
         const mov = MOV[e.olhar] ?? 8, alc = e.olhar === "anda" ? 0x11 : 0;

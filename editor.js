@@ -18,7 +18,10 @@ const Editor = {
     brilhantes: ["Pokémon brilhantes", (g) => g >= 5257 && g <= 6462],
     outros: ["Outros", (g) => (g > 1462 && g < 5257) || (g > 6462 && g < 10000) || g >= 15000],
   },
-  ACOES: { falar: "💬 Falar", item: "🎁 Dar item (uma vez)", chao: "📦 Item no chão", lutar: "⚔️ Lutar", teleporte: "🌀 Teleporte" },
+  ACOES: { falar: "💬 Falar", item: "🎁 Dar item (uma vez)", chao: "📦 Item no chão", lutar: "⚔️ Lutar", teleporte: "🌀 Teleporte",
+           sequencia: "📜 Sequência (falar, dar item, andar…)" },
+  PASSOS: { falar: "💬 Falar", item: "🎁 Dar item", andar: "🚶 Andar", virar: "↪️ Virar", esperar: "⏳ Esperar" },
+  DIRS: { baixo: "para baixo", cima: "para cima", esq: "para a esquerda", dir: "para a direita" },
   // marcas que o jogo liga: insígnia N = 0xA7F + N - 1 (achado nos scripts dos ginásios), treinador vencido = 0x500 + id
   INSIGNIAS: ["ganhar a 1ª insígnia (Roxanne, Rustboro)", "ganhar a 2ª insígnia (Brawly, Dewford)", "ganhar a 3ª insígnia (Wattson, Mauville — Raio)",
     "ganhar a 4ª insígnia (Flannery, Lavaridge)", "ganhar a 5ª insígnia (Norman, Petalburg)", "ganhar a 6ª insígnia (Winona, Fortree)",
@@ -134,7 +137,8 @@ const Editor = {
 #ed select,#ed input,#ed textarea{width:100%;box-sizing:border-box;background:#1f2230;color:#eee;border:1px solid #333a4a;border-radius:6px;padding:6px}
 #ed textarea{min-height:70px;resize:vertical}
 #ed .linha{display:flex;gap:6px;align-items:center}
-#ed .linha > *{flex:1}
+#ed .linha > *{flex:1;min-width:0}
+#ed .linha input[type=number]{flex:0 0 64px}
 #ed .dica{color:#889;font-size:12px;margin-top:4px}
 #ed .perigo{background:#5a1f2a !important}
 #ed-pag{display:flex;gap:6px;align-items:center;margin-top:8px}
@@ -322,6 +326,23 @@ const Editor = {
       <div class="linha"><input id="ed-dg" type="number" placeholder="grupo" value="${d.grupo ?? ""}"><input id="ed-dn" type="number" placeholder="número" value="${d.num ?? ""}"><input id="ed-dx" type="number" placeholder="x" value="${d.x ?? ""}"><input id="ed-dy" type="number" placeholder="y" value="${d.y ?? ""}"></div>
       <div class="linha" style="margin-top:6px"><button id="ed-daqui" class="ghost">📍 Escolher neste mapa</button><button id="ed-onde" class="ghost">🧍 Onde estou</button></div>
       <div class="dica">Para mandar para outro lugar: vá até lá no jogo, abra o editor, aperte "🔄 Ler este lugar" e use "Onde estou".</div>`; }
+    if (s.acao === "sequencia") {
+      if (!s.passos || !s.passos.length) s.passos = [{ t: "falar", texto: s.texto || "Olá!" }];
+      const opItem = (v) => li.map(([i, n]) => `<option value="${i}"${i === v ? " selected" : ""}>${esc(n)}</option>`).join("");
+      h += `<label>Passos (nessa ordem, quando você fala com ele)</label><div id="ed-passos">` + s.passos.map((p, i) => {
+        let campo = "";
+        if (p.t === "falar") campo = `<textarea data-i="${i}" data-k="texto">${esc(p.texto)}</textarea>`;
+        if (p.t === "item") campo = `<div class="linha"><select data-i="${i}" data-k="item" style="flex:3">${opItem(p.item)}</select><input data-i="${i}" data-k="qtd" type="number" min="1" max="99" value="${p.qtd || 1}"></div>`;
+        if (p.t === "andar") campo = `<div class="linha"><select data-i="${i}" data-k="dir">${op(this.DIRS, p.dir || "baixo")}</select><input data-i="${i}" data-k="n" type="number" min="1" max="30" value="${p.n || 1}" title="quantos quadrados"><span class="dica" style="flex:0">quadrados</span></div>`;
+        if (p.t === "virar") campo = `<select data-i="${i}" data-k="dir">${op(this.DIRS, p.dir || "baixo")}</select>`;
+        if (p.t === "esperar") campo = `<div class="linha"><input data-i="${i}" data-k="n" type="number" min="1" max="10" value="${p.n || 1}"><span class="dica" style="flex:0">segundo(s)</span></div>`;
+        return `<div style="border:1px solid #2a2e38;border-radius:8px;padding:6px;margin:6px 0"><div class="linha"><b style="flex:3">${i + 1}. ${this.PASSOS[p.t]}</b>
+          <button class="ghost" data-mv="${i}" data-d="-1" title="subir">↑</button><button class="ghost" data-mv="${i}" data-d="1" title="descer">↓</button><button class="ghost perigo" data-rm="${i}" title="tirar">✕</button></div>${campo}</div>`;
+      }).join("") + `</div><div class="linha" style="flex-wrap:wrap">${Object.entries(this.PASSOS).map(([k, n]) => `<button class="ghost" data-add="${k}">+ ${n}</button>`).join("")}</div>
+        <label>No fim</label><select id="ed-fim">${op({ repete: "Repete toda vez que falar com ele", uma: "Só a primeira vez (depois diz outra coisa)", some: "Some e não volta mais" }, s.fim || "repete")}</select>`;
+      if (s.fim === "uma") h += `<label>O que diz depois (já fez tudo)</label><textarea id="ed-texto2">${esc(s.texto2 || "Boa sorte na sua jornada!")}</textarea>`;
+      h += `<div class="dica">Ao andar, ele para se tiver alguém ou algo no caminho. Se não for "Some", ele volta ao lugar quando você sai do mapa e volta.</div>`;
+    }
     h += `<div class="linha" style="margin-top:16px"><button id="ed-apaga" class="ghost perigo">🗑️ Apagar evento</button></div>`;
     p.innerHTML = h;
     const pv = this.sprites.get(s.sprite); if (pv) { const k = document.createElement("canvas"); k.width = pv.width; k.height = pv.height; k.getContext("2d").drawImage(pv, 0, 0); k.style.cssText = "image-rendering:pixelated;max-width:64px;max-height:64px;width:" + pv.width * 2 + "px"; $("ed-pv").appendChild(k); }
@@ -333,6 +354,24 @@ const Editor = {
     liga("ed-trein", (el) => s.treinador = +el.value, "change");
     liga("ed-quando", (el) => { if (el.value === "sempre") delete s.cond; else s.cond = { quando: el.value, flag: (s.cond && s.cond.flag) || 0xA7F + 2 }; this.desenhaPainel(); }, "change");
     liga("ed-marco", (el) => { s.cond.flag = +el.value; }, "change");
+    liga("ed-fim", (el) => { s.fim = el.value; this.desenhaPainel(); }, "change");
+    const ps = $("ed-passos");
+    if (ps) {
+      const muda = (el) => { const p = s.passos[+el.dataset.i]; if (!p) return; const k = el.dataset.k; p[k] = ["item", "qtd", "n"].includes(k) ? +el.value || 0 : el.value; this.mudou = true; };
+      ps.addEventListener("input", (e) => e.target.dataset.k && muda(e.target));
+      ps.addEventListener("change", (e) => e.target.dataset.k && muda(e.target));
+      ps.addEventListener("click", (e) => {
+        const b = e.target.closest("button"); if (!b) return;
+        if (b.dataset.rm) s.passos.splice(+b.dataset.rm, 1);
+        if (b.dataset.mv) { const i = +b.dataset.mv, j = i + +b.dataset.d; if (j >= 0 && j < s.passos.length) [s.passos[i], s.passos[j]] = [s.passos[j], s.passos[i]]; }
+        this.mudou = true; this.desenhaPainel();
+      });
+      p.querySelectorAll("[data-add]").forEach((b) => b.onclick = () => {
+        const t = b.dataset.add, novo = { t };
+        if (t === "falar") novo.texto = "…"; if (t === "item") { novo.item = 1; novo.qtd = 1; } if (t === "andar") { novo.dir = "baixo"; novo.n = 2; } if (t === "virar") novo.dir = "baixo"; if (t === "esperar") novo.n = 1;
+        s.passos.push(novo); this.mudou = true; this.desenhaPainel();
+      });
+    }
     const filtra = (bid, sid) => { const b = $(bid), sel = $(sid); if (!b) return; b.oninput = () => { const t = b.value.toLowerCase(); for (const o of sel.options) o.hidden = t && !o.text.toLowerCase().includes(t); }; };
     filtra("ed-itemb", "ed-item"); filtra("ed-treinb", "ed-trein"); filtra("ed-marcob", "ed-marco");
     const dest = () => { s.destino = { grupo: +$("ed-dg").value || 0, num: +$("ed-dn").value || 0, x: +$("ed-dx").value || 0, y: +$("ed-dy").value || 0 }; };
