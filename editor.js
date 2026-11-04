@@ -134,6 +134,9 @@ const Editor = {
 #ed .addpassos button{padding:8px 6px;font-size:13px;white-space:nowrap;border-radius:8px}
 #ed .passo textarea{min-height:52px}
 #ed .secao{margin-top:14px;padding-top:10px;border-top:1px solid #2a2e38}
+#ed .evs{display:flex;flex-direction:column;gap:4px;margin-top:4px;max-height:150px;overflow:auto}
+#ed .evs .ev{text-align:left;padding:6px 8px;font-size:13px;display:flex;justify-content:space-between;gap:8px}
+#ed .evs .ev.on{border-color:#ff5fa2;background:#2a1f2a}
 #ed-abas{display:flex;border-bottom:1px solid #2a2e38}
 #ed-abas button{flex:1;border-radius:0;background:none;border:0;padding:9px;color:#aab;cursor:pointer}
 #ed-abas button.on{color:#fff;box-shadow:inset 0 -2px #ff5fa2}
@@ -320,15 +323,24 @@ const Editor = {
   desenhaPainel() {
     const p = $("ed-painel"); if (!p) return;
     const s = this.sel && this.sel.ev;
-    if (!s) { p.innerHTML = `<div class="dica">Toque num evento seu no mapa (moldura rosa) para mudar o que ele faz.<br><br>
-      Você tem ${this.lista().length} evento(s) neste mapa e ${this.total()} no total.<br><br>
-      Como funciona: escolha um personagem na aba 🧍, arraste para o mapa, diga o que ele faz e aperte 💾 Salvar.
+    // topo: novo evento + os eventos deste mapa (um clique seleciona)
+    const L = this.lista(), nm = this.mapa ? this.mapa.local.grupo + "." + this.mapa.local.num : "";
+    const topo = `<button id="ed-novo" style="width:100%">＋ Novo evento (escolher personagem)</button>
+      ${L.length ? `<div class="dica" style="margin-top:8px">Seus eventos neste lugar:</div><div class="evs">${L.map((e, i) => `<button class="ghost ev${e === s ? " on" : ""}" data-ev="${i}">${this.nomeEvento(e, nm).replace(/ \(mapa[^)]*\)/, "")} <span class="dica">${e.x},${e.y}</span></button>`).join("")}</div>` : ""}`;
+    const ligaTopo = () => {
+      $("ed-novo").onclick = () => { this.sel = null; this.aba("cat"); this.status("Escolha um personagem e arraste para o mapa (ou toque nele e depois no lugar)."); this.desenha(); };
+      p.querySelectorAll("[data-ev]").forEach((b) => b.onclick = () => { this.sel = { ev: L[+b.dataset.ev] }; this.desenha(); this.desenhaPainel(); });
+    };
+    if (!s) { p.innerHTML = topo + `<div class="dica" style="margin-top:12px">${L.length ? "Toque num evento acima ou no mapa (moldura rosa) para mudar o que ele faz.<br><br>" : ""}
+      Você tem ${L.length} evento(s) neste lugar e ${this.total()} no total.<br><br>
+      Como funciona: ＋ Novo evento, arraste o personagem para o mapa, diga o que ele faz e aperte 💾 Salvar.
+      Para pôr eventos em outro lugar: vá até lá no jogo e abra o 🛠️ Eventos de novo.
       Os eventos aparecem quando você entra no lugar (se já estiver nele, entre numa casa e saia).
-      Ficam guardados na nuvem com o seu nome e valem sempre que você jogar, sozinho ou no coop (só no seu jogo).</div>`; return; }
+      Ficam guardados na nuvem com o seu nome e valem sempre que você jogar, sozinho ou no coop (só no seu jogo).</div>`; ligaTopo(); return; }
     const op = (o, v) => Object.entries(o).map(([k, n]) => `<option value="${k}"${k === v ? " selected" : ""}>${n}</option>`).join("");
     const lt = this.listas ? this.listas.treinadores : [], li = this.listas ? this.listas.itens : [];
     const esc = (t) => String(t ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
-    let h = `<div class="linha"><div id="ed-pv" style="flex:0 0 72px;height:72px;background:#1f2230;border-radius:8px;display:flex;align-items:center;justify-content:center"></div>
+    let h = topo + `<div class="secao"></div><div class="linha"><div id="ed-pv" style="flex:0 0 72px;height:72px;background:#1f2230;border-radius:8px;display:flex;align-items:center;justify-content:center"></div>
       <div><div>Sprite <b>${s.sprite}</b> em <b>${s.x}, ${s.y}</b></div><button id="ed-troca" class="ghost" style="margin-top:6px">Trocar sprite</button></div></div>
       <label>Como fica parado</label><select id="ed-olhar">${op(this.OLHAR, s.olhar || "baixo")}</select>
       <label>O que ele faz</label><select id="ed-acao">${op(this.ACOES, s.acao)}</select>
@@ -424,6 +436,7 @@ const Editor = {
     ["ed-dg", "ed-dn", "ed-dx", "ed-dy"].forEach((id) => liga(id, dest));
     if ($("ed-daqui")) $("ed-daqui").onclick = () => { this.escolhendoDestino = s; this.status("Toque no mapa no quadrado de chegada."); };
     if ($("ed-onde")) $("ed-onde").onclick = () => { const L = this.mapa.local; s.destino = { grupo: L.grupo, num: L.num, x: L.x, y: L.y }; this.mudou = true; this.desenhaPainel(); };
+    ligaTopo();
     $("ed-reset").onclick = () => { s.reset = true; this.mudou = true; this.desenhaPainel(); this.status("Ao salvar, esse evento começa do zero (volta a aparecer, dá o item de novo…). Saia e entre no lugar para ver."); };
     $("ed-troca").onclick = () => { this.sel.trocar = true; this.aba("cat"); this.status("Toque no sprite novo na lista."); };
     $("ed-apaga").onclick = () => { const l = this.lista(); l.splice(l.indexOf(s), 1); this.sel = null; this.mudou = true; this.desenha(); this.desenhaPainel(); };
