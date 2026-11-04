@@ -68,7 +68,7 @@ const Editor = {
       // as marcas "uma vez só" escolhidas no worker ficam guardadas no evento (senão o item seria dado de novo)
       if (m.marcas) for (const [k, l] of Object.entries(m.marcas)) (l || []).forEach((e, i) => { const d = (this.dados.mapas[k] || [])[i]; if (d && e.marca && !d.marca) d.marca = e.marca; if (d && e.marcaVis && !d.marcaVis) d.marcaVis = e.marcaVis; });
       this.gravarLocal();
-      if (!m.silencioso) this.status(m.avisos && m.avisos.length ? "⚠️ " + m.avisos.join(" · ") : "✅ Salvo! Os eventos aparecem quando você entra no lugar: se já estiver nele, entre numa casa e saia (ou vá a outro mapa e volte).");
+      if (!m.silencioso) this.status("✅ Salvo! Os eventos aparecem quando você entra no lugar: se já estiver nele, entre numa casa e saia (ou vá a outro mapa e volte)." + (m.avisos && m.avisos.length ? "  ⚠️ " + m.avisos.join(" · ") : ""));
       else if (m.avisos && m.avisos.length) toast("Eventos: " + m.avisos.join(" · "));
     }
     else if (m.t === "ed-erro") this.status("⚠️ " + m.msg);
@@ -100,7 +100,7 @@ const Editor = {
   },
   chegouMapa(m) {
     const base = this.canvasDe(m.w * 16, m.h * 16, new Uint8ClampedArray(m.rgba));
-    this.mapa = { local: m.local, w: m.w, h: m.h, base, info: m.info, objs: m.objs };
+    this.mapa = { local: m.local, w: m.w, h: m.h, base, info: m.info, objs: m.objs, portas: m.portas || [] };
     this.sel = null;
     this.pedeSprites([...new Set([...m.objs.map((o) => o.gfx), ...this.lista().map((e) => e.sprite)])]);
     $("ed-titulo").textContent = `🛠️ Eventos — mapa ${m.local.grupo}.${m.local.num}`;
@@ -289,6 +289,18 @@ const Editor = {
       ctx.strokeStyle = this.sel && this.sel.ev === e ? "#ffd166" : "#ff5fa2"; ctx.lineWidth = 2;
       ctx.strokeRect(a.x * 16 * Z + 1, a.y * 16 * Z + 1, 16 * Z - 2, 16 * Z - 2);
     }
+    // caminho do evento selecionado (sequência): pontos por onde anda, X onde a parede para, 🚪 onde sai pela porta
+    const sel = this.sel && this.sel.ev;
+    if (sel && sel.acao === "sequencia" && typeof EditorQZ !== "undefined") {
+      const tr = EditorQZ.trajeto(M, sel, this.lista()), c = (q) => [(q.x * 16 + 8) * Z, (q.y * 16 + 8) * Z];
+      ctx.strokeStyle = "rgba(255,209,102,.9)"; ctx.lineWidth = Math.max(2, Z); ctx.setLineDash([4 * Z, 3 * Z]); ctx.beginPath(); ctx.moveTo(...c(sel));
+      for (const q of tr.pontos) ctx.lineTo(...c(q));
+      ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = "#ffd166"; for (const q of tr.pontos) { const [px, py] = c(q); ctx.beginPath(); ctx.arc(px, py, 2.5 * Z, 0, 7); ctx.fill(); }
+      ctx.font = `${Math.round(12 * Z)}px sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      for (const p of tr.passos) if (p.parou && !p.porta) { const [px, py] = c(p.parou); ctx.fillStyle = "rgba(220,40,60,.85)"; ctx.fillText("✖", px, py); }
+      if (tr.saiu && tr.pontos.length) { const [px, py] = c(tr.fim); ctx.fillText("🚪", px, py); }
+    }
     if (this.hover) {
       ctx.strokeStyle = "rgba(255,255,255,.7)"; ctx.lineWidth = 1; ctx.strokeRect(this.hover.x * 16 * Z + .5, this.hover.y * 16 * Z + .5, 16 * Z - 1, 16 * Z - 1);
       if (this.colocar != null) this.desenhaSprite(ctx, this.colocar, this.hover.x, this.hover.y, .6);
@@ -355,14 +367,14 @@ const Editor = {
       }).join("") + `</div><div class="dica">Acrescentar passo:</div><div class="addpassos">${Object.entries(this.PASSOS).map(([k, n]) => `<button class="ghost" data-add="${k}">+ ${n}</button>`).join("")}</div>
         <label>No fim</label><select id="ed-fim">${op({ repete: "Repete toda vez que falar com ele", uma: "Só a primeira vez (depois diz outra coisa)", some: "Some e não volta mais" }, s.fim || "repete")}</select>`;
       if (s.fim === "uma") h += `<label>O que diz depois (já fez tudo)</label><textarea id="ed-texto2">${esc(s.texto2 || "Boa sorte na sua jornada!")}</textarea>`;
-      h += `<div class="dica">Ao andar, ele para se tiver alguém ou algo no caminho. Se não for "Some", ele volta ao lugar quando você sai do mapa e volta.</div>`;
+      h += `<div class="dica">O caminho aparece no mapa: ✖ = parede ou alguém (ele para antes), 🚪 = sai pela porta e some. Se não for "Some", ele volta ao lugar quando você sai do mapa e volta.</div>`;
     }
     h += `<div class="linha" style="margin-top:16px"><button id="ed-apaga" class="ghost perigo">🗑️ Apagar evento</button></div>`;
     p.innerHTML = h;
     const pv = this.sprites.get(s.sprite); if (pv) { const k = document.createElement("canvas"); k.width = pv.width; k.height = pv.height; k.getContext("2d").drawImage(pv, 0, 0); k.style.cssText = "image-rendering:pixelated;max-width:64px;max-height:64px;width:" + pv.width * 2 + "px"; $("ed-pv").appendChild(k); }
     const liga = (id, f, ev = "input") => { const el = $(id); if (el) el.addEventListener(ev, () => { f(el); this.mudou = true; }); };
     liga("ed-olhar", (el) => s.olhar = el.value, "change");
-    liga("ed-acao", (el) => { s.acao = el.value; if (s.acao === "lutar" && !s.treinador && lt.length) s.treinador = lt[0][0]; this.desenhaPainel(); }, "change");
+    liga("ed-acao", (el) => { s.acao = el.value; if (s.acao === "lutar" && !s.treinador && lt.length) s.treinador = lt[0][0]; this.desenhaPainel(); this.desenha(); }, "change");
     liga("ed-texto", (el) => s.texto = el.value); liga("ed-texto2", (el) => s.texto2 = el.value); liga("ed-texto3", (el) => s.texto3 = el.value);
     liga("ed-item", (el) => s.item = +el.value, "change"); liga("ed-qtd", (el) => s.qtd = Math.max(1, Math.min(99, +el.value || 1)));
     liga("ed-trein", (el) => s.treinador = +el.value, "change");
@@ -371,19 +383,19 @@ const Editor = {
     liga("ed-fim", (el) => { s.fim = el.value; this.desenhaPainel(); }, "change");
     const ps = $("ed-passos");
     if (ps) {
-      const muda = (el) => { const p = s.passos[+el.dataset.i]; if (!p) return; const k = el.dataset.k; p[k] = ["item", "qtd", "n"].includes(k) ? +el.value || 0 : el.value; this.mudou = true; };
+      const muda = (el) => { const p = s.passos[+el.dataset.i]; if (!p) return; const k = el.dataset.k; p[k] = ["item", "qtd", "n"].includes(k) ? +el.value || 0 : el.value; this.mudou = true; this.desenha(); };
       ps.addEventListener("input", (e) => e.target.dataset.k && muda(e.target));
       ps.addEventListener("change", (e) => e.target.dataset.k && muda(e.target));
       ps.addEventListener("click", (e) => {
         const b = e.target.closest("button"); if (!b) return;
         if (b.dataset.rm) s.passos.splice(+b.dataset.rm, 1);
         if (b.dataset.mv) { const i = +b.dataset.mv, j = i + +b.dataset.d; if (j >= 0 && j < s.passos.length) [s.passos[i], s.passos[j]] = [s.passos[j], s.passos[i]]; }
-        this.mudou = true; this.desenhaPainel();
+        this.mudou = true; this.desenhaPainel(); this.desenha();
       });
       p.querySelectorAll("[data-add]").forEach((b) => b.onclick = () => {
         const t = b.dataset.add, novo = { t };
         if (t === "falar") novo.texto = "…"; if (t === "item") { novo.item = 1; novo.qtd = 1; } if (t === "andar") { novo.dir = "baixo"; novo.n = 2; } if (t === "virar") novo.dir = "baixo"; if (t === "esperar") novo.n = 1;
-        s.passos.push(novo); if (t === "voar" && (s.fim || "repete") === "repete") s.fim = "some"; this.mudou = true; this.desenhaPainel();
+        s.passos.push(novo); if (t === "voar" && (s.fim || "repete") === "repete") s.fim = "some"; this.mudou = true; this.desenhaPainel(); this.desenha();
       });
     }
     const filtra = (bid, sid) => { const b = $(bid), sel = $(sid); if (!b) return; b.oninput = () => { const t = b.value.toLowerCase(); for (const o of sel.options) o.hidden = t && !o.text.toLowerCase().includes(t); }; };

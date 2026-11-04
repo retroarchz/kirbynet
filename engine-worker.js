@@ -535,9 +535,9 @@ function edMsg(m) {
     if (!M || !h || !L.confere) return postMessage({ t: "ed-erro", msg: "Não consegui ler o mapa agora (está numa tela de menu, batalha ou trocando de lugar?). Feche, ande um pouco e abra de novo." });
     // objetos do jogo (sem os nossos: os nossos vêm do editor)
     const orig = edOrig && edOrig[L.grupo + "." + L.num] || bus.r32(h + 4);
-    const objs = EditorQZ.objetos(bus, orig);
+    const objs = EditorQZ.objetos(bus, orig), portas = EditorQZ.dadosMapa(bus, h, orig).portas;
     const buf = M.rgba.buffer;
-    postMessage({ t: "ed-mapa", local: L, w: M.w, h: M.h, rgba: buf, info: Array.from(M.info), objs }, [buf]);
+    postMessage({ t: "ed-mapa", local: L, w: M.w, h: M.h, rgba: buf, info: Array.from(M.info), objs, portas }, [buf]);
   } else if (m.t === "ed-sprites") {
     const lista = [], bufs = [];
     for (const g of m.ids || []) { const sp = EditorQZ.desenhaSprite(bus, g); if (sp) { lista.push({ gfx: g, w: sp.w, h: sp.h, rgba: sp.rgba.buffer }); bufs.push(sp.rgba.buffer); } }

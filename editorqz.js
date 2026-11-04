@@ -178,6 +178,45 @@ const EditorQZ = (() => {
     return out;
   }
 
+  // ---------- caminho das sequências (pedido 03/11: "o Wally passou da parede, podia respeitar portas") ----------
+  // applymovement do jogo não confere parede: quem confere somos nós. mapa = { w, h, info (u16 do layout: colisão em
+  // (v>>10)&3, altura em v>>12), objs [{x,y}], portas [{x,y}] }. Cada "andar" para antes de parede/altura diferente/pessoa;
+  // se pisa numa porta, sai por ela (some). Devolve os passos ajustados e o trajeto (para desenhar).
+  const PASSO_XY = { baixo: [0, 1], cima: [0, -1], esq: [-1, 0], dir: [1, 0] };
+  function trajeto(mapa, e, outros) {
+    const ocupado = (x, y) => mapa.objs.some((o) => o.x === x && o.y === y) || (outros || []).some((o) => o !== e && o.x === x && o.y === y);
+    const porta = (x, y) => (mapa.portas || []).some((p) => p.x === x && p.y === y);
+    const bloq = (x, y, alt) => {
+      if (x < 0 || y < 0 || x >= mapa.w || y >= mapa.h) return true;
+      const v = mapa.info[y * mapa.w + x];
+      if ((v >> 10) & 3) return true;
+      const z = v >> 12; if (z && z !== 15 && alt && z !== alt) return true;
+      return ocupado(x, y);
+    };
+    let x = e.x, y = e.y, saiu = false; const alt0 = mapa.info[y * mapa.w + x] >> 12 || 3;
+    const pontos = [], passos = [];
+    for (const p of e.passos || []) {
+      if (saiu && (p.t === "andar" || p.t === "virar" || p.t === "voar")) continue;   // já foi embora
+      if (p.t !== "andar") { passos.push(p); if (p.t === "voar") saiu = true; continue; }
+      const [dx, dy] = PASSO_XY[p.dir] || [0, 1], quer = Math.max(1, Math.min(30, p.n | 0)); let foi = 0, parou = null;
+      for (let k = 0; k < quer; k++) {
+        const nx = x + dx, ny = y + dy;
+        if (!porta(nx, ny) && bloq(nx, ny, alt0)) { parou = { x: nx, y: ny }; break; }
+        x = nx; y = ny; foi++; pontos.push({ x, y });
+        if (porta(x, y)) { saiu = true; break; }
+      }
+      passos.push({ ...p, n: foi, quer, parou, porta: saiu });
+    }
+    return { passos, pontos, fim: { x, y }, saiu };
+  }
+  function dadosMapa(bus, h, orig) {
+    const lay = bus.r32(h), w = bus.r32(lay), hh = bus.r32(lay + 4), bl = bus.r32(lay + 0xC), info = [];
+    for (let i = 0; i < w * hh; i++) info.push(bus.r16(bl + 2 * i));
+    const objs = objetos(bus, orig), portas = [], nw = bus.r8(orig + 1), wp = bus.r32(orig + 8);
+    if (ok(wp)) for (let i = 0; i < nw && i < 64; i++) portas.push({ x: bus.r16(wp + 8 * i) << 16 >> 16, y: bus.r16(wp + 8 * i + 2) << 16 >> 16 });
+    return { w, h: hh, info, objs, portas };
+  }
+
   // ---------- montagem: eventos -> escritas na ROM ----------
   // ev = { mapas: { "grupo.num": [ { x, y, sprite, olhar:'baixo'|'cima'|'esq'|'dir'|'anda', acao, texto, texto2, item, qtd,
   //        treinador, destino:{grupo,num,x,y}, marca } ] } }
@@ -205,7 +244,7 @@ const EditorQZ = (() => {
       const orig = ev.orig && ev.orig[chave] ? ev.orig[chave] : bus.r32(h + 4);
       const n0 = bus.r8(orig), arr0 = bus.r32(orig + 4);
       let maxId = 0; for (let i = 0; i < n0; i++) maxId = Math.max(maxId, bus.r8(arr0 + 24 * i));
-      const novos = [], trans = [];
+      const novos = [], trans = [], mapaD = dadosMapa(bus, h, orig);
       for (const e of lista) {
         if (n0 + novos.length >= 64) { avisos.push("mapa " + chave + ": no máximo 64 pessoas"); break; }
         const id = ++maxId === 0xD1 ? ++maxId : maxId;
@@ -246,14 +285,18 @@ const EditorQZ = (() => {
           s.push(0x6A, 0x5A);                                          // lock, faceplayer
           let desvio = -1;
           if (e.fim === "uma") { s.push(0x2B, ...u16(e.marca)); desvio = s.length; s.push(0x06, 0x01, 0, 0, 0, 0); }
-          const movs = [];
-          for (const p of e.passos || []) {
+          const movs = [], tr = trajeto(mapaD, e, lista);
+          for (const p of tr.passos) if (p.t === "andar" && p.n < p.quer && !p.porta) avisos.push(`evento em ${e.x},${e.y}: andou ${p.n} de ${p.quer} (tem parede ou alguém no caminho)`);
+          for (const p of tr.passos) {
             if (p.t === "falar") { const a = poeTexto(p.texto || "…"); s.push(0x0F, 0x00, ...u32(a), 0x09, 0x04); }
             else if (p.t === "item") s.push(0x1A, 0x00, 0x80, ...u16(p.item | 0), 0x1A, 0x01, 0x80, ...u16(Math.max(1, p.qtd | 0)), 0x09, 0x00);
             else if (p.t === "andar" || p.t === "virar") {
-              const d = DIRS[p.dir] ?? 0, n = p.t === "andar" ? Math.max(1, Math.min(30, p.n | 0)) : 1;
-              const ml = new Array(n).fill(p.t === "andar" ? 0x08 + d : d); ml.push(0xFE);
-              movs.push([s.length + 3, ml]); s.push(0x4F, ...u16(id), 0, 0, 0, 0, 0x51, 0x00, 0x00);   // applymovement id, lista; waitmovement 0
+              const d = DIRS[p.dir] ?? 0, n = p.t === "andar" ? p.n : 1;
+              if (n > 0) {
+                const ml = new Array(n).fill(p.t === "andar" ? 0x08 + d : d); ml.push(0xFE);
+                movs.push([s.length + 3, ml]); s.push(0x4F, ...u16(id), 0, 0, 0, 0, 0x51, 0x00, 0x00);   // applymovement id, lista; waitmovement 0
+              }
+              if (p.porta) s.push(0x2F, 0x09, 0x00, 0x53, ...u16(id));   // pisou na porta: som de saída (playse 9) e some
             }
             else if (p.t === "esperar") s.push(0x28, ...u16(Math.max(1, Math.min(600, (p.n | 0) * 60))));   // delay em quadros (n segundos)
             else if (p.t === "voar") {   // sai voando como nas cenas do jogo (0x082C72D2): pulinho, o pássaro passa e leva
@@ -349,6 +392,6 @@ const EditorQZ = (() => {
     for (const [a, b] of LIVRE) escritas.push([a, new Array(b - a).fill(0xFF)]);
     return escritas;
   }
-  return { local, cabecalho, desenhaMapa, objetos, desenhaSprite, infoSprite, catalogo, treinadores, itens, texto, montar, desfazer, MOV, LIVRE, MARCAS };
+  return { local, cabecalho, desenhaMapa, objetos, trajeto, dadosMapa, desenhaSprite, infoSprite, catalogo, treinadores, itens, texto, montar, desfazer, MOV, LIVRE, MARCAS };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = EditorQZ;
