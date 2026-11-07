@@ -158,7 +158,11 @@ const LinkHLE = (() => {
     // outros com o COOP aberto vêm em ordem de vaga. Quem está na sala sem abrir o COOP (ou saiu sem a sala
     // perceber ainda) não atrapalha ninguém.
     const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
-    const openPeers = () => [...peers].filter(([s, p]) => p.open && !dead.has(s) && now() - p.t < DEAD_MS).map(([s]) => s).sort((a, b) => a - b);
+    // ordem de quem manda (coop automático): o primeiro de uma lista é o mestre. prio = vaga -> posição (pedido do usuário em
+    // 07/11: André, depois Sandro, depois os outros, Luan por último). Sem prio (sala comum) vale a ordem das vagas
+    let prio = null;
+    const ordem = (a, b) => (prio ? (prio[a] ?? 9) - (prio[b] ?? 9) : 0) || a - b;
+    const openPeers = () => [...peers].filter(([s, p]) => p.open && !dead.has(s) && now() - p.t < DEAD_MS).map(([s]) => s).sort(ordem);
     const status = () => send({ k: "st", open, master: role === "m" });
 
     function setSio(id, n) {
@@ -335,7 +339,7 @@ const LinkHLE = (() => {
           if (pedido) { const l = pedido.ids; pedido = null; conecta(l); }
           else if (t > pausa) {
             // só comanda quem vê a mesma lista há 1 s: chegando juntos, cada um ainda enxerga só parte do grupo
-            const l = [me, ...comNivel(1, t)].sort((a, b) => a - b), chave = l.join();
+            const l = [me, ...comNivel(1, t)].sort(ordem), chave = l.join();
             if (chave !== grupo) { grupo = chave; grupoT = t; }
             else if (l.length > 1 && l[0] === me && t - grupoT >= AUTO_CALMA && conecta(l)) send({ k: "vem", ids: l });
           }
@@ -449,7 +453,7 @@ const LinkHLE = (() => {
           if (go && go.includes(me)) { establish(go); go = null; }
           else {
             const others = linkPeers(), n = 1 + others.length;
-            const slaves = [me, ...others].filter(s => !(peers.get(s) || {}).master && !(s === me && role === "m")).sort((a, b) => a - b);
+            const slaves = [me, ...others].filter(s => !(peers.get(s) || {}).master && !(s === me && role === "m")).sort(ordem);
             const id = role === "m" ? 0 : Math.min(3, 1 + Math.max(0, slaves.indexOf(me)));
             setSio(id, 2);   // SD ligado: o cabo está plugado nos outros (a sala)
             w8(LOCAL_ID, id); w8(COUNT, n); w8(FIELD_F, n > 1 ? 1 : 0); ram.w8(G.vbl + HS_COUNT, n);
@@ -588,6 +592,8 @@ const LinkHLE = (() => {
       // para a linha de baixo da tela: quantos ligados no cabo, meu nível, e quem da sala está em que nível
       get resumo() { const t = now(); return { ligados: ids ? ids.length : 0, n: nivel(), fase, desligou, acel, me, outros: [...avisados].map(([s, v]) => [s, t - v.t < AUTO_VALE ? v.n : -1]) }; },
       get desligou() { return desligou; },
+      // posição de cada vaga na ordem de quem manda (todos recebem a mesma lista de nomes da sala, então todos concordam)
+      set prioridade(v) { prio = Array.isArray(v) ? v.slice() : null; },
       // acelerar (só com o cabo solto): enquanto acelera, fica de fora do coop automático
       set acelerando(v) { acel = !!v; },
       // log de atraso (1 vez por segundo): por jogador ligado, comandos dele esperando agora, o máximo no último segundo e há

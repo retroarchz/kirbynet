@@ -372,6 +372,7 @@ function tick() {
             if (b) postMessage({ t: "cabo", bytes: b }, [b.buffer]);
           });
           if (run.hle && run.caboAuto) run.hle.autoLiga();
+          if (run.hle && run.caboPrio) run.hle.prioridade = run.caboPrio;
           if (run.hle && run.s.romWrite) run.hle.aoCaixas = (at, b) => run.s.romWrite(at, b);
           if (run.hle) { run.hle.aoCapacete = (v) => postMessage({ t: "capOutro", v }); if (run.capV != null) run.hle.capacete(run.capV); }
           if (run.hle) for (const d of run.caboEarly.splice(0)) d.left != null ? run.hle.left(d.left) : run.hle.recv(d.from, d.m);
@@ -646,7 +647,8 @@ onmessage = async (ev) => {
     if (d) { if (run.hle) run.hle.recv(d.from, d.m); else if (run.caboEarly.length < 500) run.caboEarly.push(d); }
   }
   else if (m.t === "caboLeft") { if (run && run.cabo) { if (run.hle) run.hle.left(m.from); else run.caboEarly.push({ left: m.from }); } }
-  else if (m.t === "caboMe") { if (run && run.cabo) run.meNovo = m.me; }      // coop automático: vaga na sala nova
+  else if (m.t === "caboMe") { if (run && run.cabo) run.meNovo = m.me; }
+  else if (m.t === "caboPrio") { if (run && run.cabo) { run.caboPrio = m.v; if (run.hle) run.hle.prioridade = m.v; } }   // quem manda no coop automático      // coop automático: vaga na sala nova
   else if (m.t === "caboFim") { if (run && run.hle) run.hle.soltaTodos(); }   // coop automático: a sala acabou
   else if (m.t === "kc") {   // retrato/aviso de outro jogador (Kirby, mundos separados): quem ainda não trocou, troca já
     if (run && run.kc) run.kc.recv(new Uint8Array(m.bytes));

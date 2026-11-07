@@ -375,12 +375,22 @@ const AutoCoop = {
         run.link = net; this.motivo = "";
         net.onCabo = (u8) => { const b = u8.slice(); run.worker.postMessage({ t: "cabo", bytes: b.buffer }, [b.buffer]); };
         run.worker.postMessage({ t: "caboMe", me: net.slot });
+        this.prioridade(run, info.names);
         run.names = info.names; this.antes = info.names.slice();
         const outros = info.names.filter((n, i) => n != null && i !== net.slot);
         if (outros.length) toast(`🎮 ${outros.join(" e ")} no seu Wi-Fi!`);
       },
       onError: (msg) => this.caiu(gen, net, msg),
     });
+  },
+  // quem é o host (mestre do cabo) quando estão juntos: André (internet por cabo), depois Sandro, depois qualquer outro, e o
+  // Luan por último (pedido do usuário em 07/11/2026). Mesmo nome de sala em todos = mesma ordem em todos
+  HOSTS: ["andre", "sandro"], ULTIMOS: ["luan"],
+  prioridade(run, names) {
+    if (!run || !Array.isArray(names)) return;
+    const norm = (n) => String(n || "").normalize("NFD").replace(/\p{M}/gu, "").trim().toLowerCase();
+    const v = names.map((n) => { const k = norm(n), i = this.HOSTS.indexOf(k); return i >= 0 ? i : this.ULTIMOS.includes(k) ? 8 : 5; });
+    run.worker.postMessage({ t: "caboPrio", v });
   },
   // linha de baixo da tela: o que está acontecendo, em palavras. Sem isso, coop que não liga parece defeito sem motivo
   texto(c) {
@@ -405,6 +415,7 @@ const AutoCoop = {
     if (j.left != null) toast(`${(this.antes && this.antes[j.left]) || "Alguém"} saiu.`);
     else { const novo = j.names.find((n, i) => n != null && !(this.antes || [])[i]); if (novo && novo !== this.nome) toast(`🎮 ${novo} no seu Wi-Fi!`); }
     this.antes = j.names.slice();
+    this.prioridade(run, j.names);
   },
   // a sala acabou (o host saiu, a internet caiu): os outros seguem jogando sozinhos e procuram de novo
   caiu(gen, net, msg) {
