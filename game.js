@@ -743,6 +743,7 @@ function startRun(opts) {
   const mkSala = !!run.net && !run.free && SYS.id === "gba" && Cheats.game === "B8KE" && amMetaKnight(roms) === 1;
   run.mkSala = mkSala;
   quetzalTipos(roms);   // ajustes fixos do Quetzal: valem sempre (também online, todos iguais)
+  quetzalMato(roms);   // Cubchoo no mato da Rota 117 (antes de quetzalNuvem: vale mesmo se o hack não entrar)
   run.moto = quetzalNuvem(roms);   // deu certo: a tecla 0 pode trocar o desenho da moto
   worker.postMessage({ t: "start", module: Play.mod, n: run.n, rom: roms, saves: opts.saves,
                        net: !!run.net && !run.free, free: !!run.free || run.auto, auto: run.auto, me: run.slot | 0, slot: run.free ? 0 : run.slot,
@@ -1384,6 +1385,16 @@ const Relogio = {
   enviar(run) { if (run && run.moto) run.worker.postMessage({ t: "relogio", modo: this.modo(), min: +this.ler("kn-relogio-min", "720") }); },
   troca() { this.gravar("kn-relogio", this.modo() === "jogo" ? "real" : "jogo"); this.rotulo(); this.enviar(Play.run); },
 };
+// Encontros no mato mudados a pedido (07/11/2026): o Cubchoo também aparece no mato da Rota 117 (onde fica a história do
+// Wally), no lugar do Drowzee (vaga 2 da tabela = 10% dos encontros), níveis 13-14. Lista de mato da 0.32 em 0x0917A2A0
+// (4 bytes por vaga: nível mín., máx., espécie u16); igual na Alpha 9 e na Coop 3. Muda na memória ao abrir o jogo, então o
+// arquivo da ROM (e o sha1 dos saves) continua o mesmo. Só troca se a vaga ainda for o Drowzee original.
+const QZ_MATO = [[0x117A2A0 + 4 * 2, "0e0e6000", "0d0e6502"]];   // [onde, original, novo] — 0x265 = 613 = Cubchoo
+function quetzalMato(rom) {
+  if (String.fromCharCode(...rom.subarray(0xA0, 0xAB)) !== "PKM QUETZAL") return;
+  const hex = (h) => Uint8Array.from(h.match(/../g), (b) => parseInt(b, 16));
+  for (const [at, orig, novo] of QZ_MATO) { const o = hex(orig); if (o.every((b, i) => rom[at + i] === b)) rom.set(hex(novo), at); }
+}
 function quetzalNuvem(rom) {
   if (String.fromCharCode(...rom.subarray(0xA0, 0xAB)) !== "PKM QUETZAL") return 0;
   const hex = (h) => Uint8Array.from(h.match(/../g), (b) => parseInt(b, 16));
