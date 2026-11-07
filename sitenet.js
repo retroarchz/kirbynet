@@ -377,6 +377,7 @@ const AutoCoop = {
         run.worker.postMessage({ t: "caboMe", me: net.slot });
         this.prioridade(run, info.names);
         run.names = info.names; this.antes = info.names.slice();
+        this.topo(info.names);
         const outros = info.names.filter((n, i) => n != null && i !== net.slot);
         if (outros.length) toast(`🎮 ${outros.join(" e ")} no seu Wi-Fi!`);
       },
@@ -391,6 +392,14 @@ const AutoCoop = {
     const norm = (n) => String(n || "").normalize("NFD").replace(/\p{M}/gu, "").trim().toLowerCase();
     const v = names.map((n) => { const k = norm(n), i = this.HOSTS.indexOf(k); return i >= 0 ? i : this.ULTIMOS.includes(k) ? 8 : 5; });
     run.worker.postMessage({ t: "caboPrio", v });
+  },
+  // nomes no topo da tela: eu primeiro (você) e quem está agora no meu Wi-Fi. Antes ficavam os da sala velha depois que ela
+  // acabava (07/11: o Luan e o André saíram e continuavam lá, com o Luan como P1)
+  topo(names) {
+    const run = this.run; if (!run || typeof S === "undefined" || typeof renderGame !== "function") return;
+    const eu = this.net ? this.net.slot : -1;
+    S.players = [this.nome, ...(names || []).filter((n, i) => n != null && i !== eu)]; S.my = 0; S.auto = true;
+    renderGame(S, false);
   },
   // linha de baixo da tela: o que está acontecendo, em palavras. Sem isso, coop que não liga parece defeito sem motivo
   texto(c) {
@@ -416,6 +425,7 @@ const AutoCoop = {
     else { const novo = j.names.find((n, i) => n != null && !(this.antes || [])[i]); if (novo && novo !== this.nome) toast(`🎮 ${novo} no seu Wi-Fi!`); }
     this.antes = j.names.slice();
     this.prioridade(run, j.names);
+    this.topo(j.names);
   },
   // a sala acabou (o host saiu, a internet caiu): os outros seguem jogando sozinhos e procuram de novo
   caiu(gen, net, msg) {
@@ -423,6 +433,7 @@ const AutoCoop = {
     const run = this.run;
     this.net = null;
     if (run) { run.link = null; run.worker.postMessage({ t: "caboFim" }); }
+    this.topo([]);   // sala acabou: no topo fica só eu até achar alguém de novo
     if (SiteRoom.on && SiteRoom.auto) SiteRoom.close();
     // recusado (outra casa na mesma internet, sala cheia, site antigo): nada a fazer agora, só olha de novo de vez em quando.
     // Nem chegou a abrir (sem sala ou sem servidor): tenta sem pressa, pode virar o host

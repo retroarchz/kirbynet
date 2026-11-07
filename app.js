@@ -337,7 +337,7 @@ function badges(el, names, my, total) {
     if (i < names.length) {
       b.className = "badge";
       b.style.background = COLORS[i];
-      b.textContent = `P${i + 1}  ${names[i] || "(saiu)"}${i === my && S.mode === "net" ? " (você)" : ""}`;
+      b.textContent = `P${i + 1}  ${names[i] || "(saiu)"}${i === my && (S.mode === "net" || S.auto) ? " (você)" : ""}`;
       if (!names[i]) b.style.opacity = ".45";
     } else { b.className = "badge free"; b.textContent = `P${i + 1}  livre`; }
     el.appendChild(b);
