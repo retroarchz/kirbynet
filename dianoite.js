@@ -31,8 +31,8 @@
     if (m < 420) return [0, 1 - sobe(330, 420)];                 // 05:30 a 07:00, amanhecer
     if (m < 840) return [0, 0];                                  // dia
     if (m < 930) return [sobe(840, 930), 0];                     // 14:00 a 15:30, a tarde chega
-    if (m < 990) return [1, 0];                                  // 15:30 a 16:30, tarde
-    if (m < 1080) { const n = sobe(990, 1080); return [1 - n, n]; }    // 16:30 a 18:00, anoitece
+    if (m < 1020) return [1, 0];                                 // 15:30 a 17:00, tarde
+    if (m < 1110) { const n = sobe(1020, 1110); return [1 - n, n]; }   // 17:00 a 18:30, anoitece
     return [0, 1];
   }
   // Luz única sobre a cena, para o céu e o chão combinarem: tira um pouco da cor, multiplica pela luz e puxa as sombras para o frio.
