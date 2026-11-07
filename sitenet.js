@@ -368,7 +368,7 @@ const AutoCoop = {
   },
   entra(gen, sock) {
     const run = this.run;
-    const net = this.net = netJoin(sock, { name: this.nome, rom: run.romSha1, save: "", eng: SYS.engineV }, {
+    const net = this.net = netJoin(sock, { name: this.nome, rom: run.romSha1, save: "", eng: SYS.engineV, site: typeof ASSET_V !== "undefined" ? ASSET_V : "" }, {
       onLobby: () => { if (gen === this.gen && SiteRoom.on && SiteRoom.auto && !SiteRoom.running) SiteRoom.handle({ t: "start", delay: 1, rtc: false }); },
       onStart: (info) => {
         if (gen !== this.gen) return;
@@ -504,6 +504,11 @@ const SiteRoom = {
     pc.on("error", () => this.gone(c));
   },
   // o próprio host: um objeto que se comporta como WebSocket, ligado direto na sala
+  // eu (dono da sala) estou com o site antigo: alguém mais novo tentou entrar. Aviso uma vez a cada 30 s
+  avisoVelho(quem) {
+    const t = Date.now(); if (t - (this.velhoT || 0) < 30000) return; this.velhoT = t;
+    if (typeof toast === "function") toast(`🔄 ${quem} está com o site novo e o seu está desatualizado: recarregue a página para jogar junto.`);
+  },
   localSocket() {
     const t = { readyState: 0, binaryType: "arraybuffer", onopen: null, onmessage: null, onclose: null };
     const c = { closed: false, local: true };
@@ -559,6 +564,12 @@ const SiteRoom = {
         : "A sua ROM é diferente da do host. Todos precisam da MESMA ROM.");
       // motor diferente (alguém com o site antigo guardado no navegador) dessincronizaria no meio do jogo
       else if ((info.eng || "1") !== SYS.engineV) fail("O site foi atualizado: recarregue a página (puxe a tela para baixo ou Ctrl+F5) e entre de novo.");
+      // coop automático: versões diferentes do site podiam discordar de quem é o host e travar (07/11). Avisa quem está atrás
+      else if (this.auto && info.site && typeof ASSET_V !== "undefined" && info.site !== ASSET_V && !c.local) {
+        const host = (this.players[0] || {}).name || "Quem está no seu Wi-Fi", eu = String(info.name || "Alguém").slice(0, 16);
+        if (info.site < ASSET_V) fail("🔄 Seu site está desatualizado: recarregue a página (puxe a tela para baixo ou Ctrl+F5) para jogar junto.");
+        else { fail(`🔄 O site de ${host} está desatualizado: peça para recarregar a página.`); this.avisoVelho(eu); }
+      }
       else if (this.players.filter(Boolean).length >= SYS.roomMax) fail(`A sala está cheia (${SYS.roomMax} jogadores).`);
       else if (slot < 0 && this.running) this.lateJoin(c, info);   // Mundo livre: entra com a partida rolando
       else if (slot < 0) {
