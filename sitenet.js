@@ -271,6 +271,12 @@ const CaboLog = {
     const e = Object.entries(this.est);
     return e.length ? " · ⏱ " + e.map(([s, ms]) => this.nome(run, s) + " " + ms + " ms" + (ms > 250 ? " ⚠️" : "")).join(", ") : "";
   },
+  // estado do coop automático (a linha 🔗 de baixo) e avisos da tela: só quando mudam
+  estado(txt, c) {
+    const k = txt + (c && c.ids ? " · cabo " + c.ids.map(s => this.nome(Play.run, s)).join(">") : "");
+    if (k !== this.ultEstado) { this.ultEstado = k; this.linhas.push(`${this.hora()} ${k}`); }
+  },
+  evento(msg) { this.linhas.push(`${this.hora()} ${msg}`); },
   texto() { return "Log do coop (atraso) — " + new Date().toLocaleString("pt-BR") + "\n≈ = atraso estimado entre ele andar e você ver\n\n" + this.linhas.join("\n") + "\n"; },
   baixa() {
     const url = URL.createObjectURL(new Blob([this.texto()], { type: "text/plain" }));
@@ -280,6 +286,29 @@ const CaboLog = {
     setTimeout(() => URL.revokeObjectURL(url), 5000);
   },
 };
+// Log do coop na nuvem (pedido 07/11/2026: ler o log de todos sem pedir aos amigos). A cada 30 s, se tem linha nova, e ao
+// fechar a página: as últimas 900 linhas vão para saves/<chave do nome>/<sha1("kirbynet-log-coop")> no formato que a nuvem
+// aceita ({d, t, dev}). Só com o cabo do Quetzal; nada aqui pode atrapalhar o jogo.
+const NuvemLog = {
+  enviadas: -1, chave: null,
+  url() { if (!this.chave) this.chave = sha1Hex(enc("kirbynet-log-coop")); return `${CLOUD_DB}/saves/${Cloud.key(Cloud.who)}/${this.chave}.json`; },
+  corpo() {
+    const run = Play.run, nl = String.fromCharCode(10);
+    const cab = `quem: ${Cloud.who} · site ${typeof ASSET_V !== "undefined" ? ASSET_V : "?"} · rom ${run && run.romSha1 ? run.romSha1.slice(0, 8) : "?"} · aparelho ${Cloud.dev} · ${navigator.userAgent.slice(0, 120)}`;
+    return JSON.stringify({ d: [cab, "Log do coop — " + new Date().toLocaleString("pt-BR"), ...CaboLog.linhas.slice(-900)].join(nl) + nl, t: Date.now(), dev: Cloud.dev });
+  },
+  pode() { return typeof Cloud !== "undefined" && Cloud.who && Play.run && Play.run.cabo && CaboLog.linhas.length; },
+  manda(fim) {
+    if (!this.pode()) return;
+    const n = CaboLog.linhas.length + "|" + CaboLog.linhas[CaboLog.linhas.length - 1];
+    if (n === this.enviadas) return;
+    this.enviadas = n;
+    try { fetch(this.url(), { method: "PUT", body: this.corpo(), keepalive: !!fim }).catch(() => {}); } catch (e) {}
+  },
+};
+setInterval(() => NuvemLog.manda(false), 30000);
+addEventListener("pagehide", () => NuvemLog.manda(true));
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") NuvemLog.manda(true); });
 // Log do Kirby em mundos separados (kirbycoop.js): uma linha por segundo com quantos retratos de cada um chegaram
 // (o normal é ~60), quantos foram pulados por chegarem juntos, avisos de inimigo mandados/recebidos e a sala de cada
 // Kirby na MINHA tela. Mesmo botão "📋 Log do coop". No console: KcLog.texto().

@@ -423,6 +423,7 @@ function showStatus(st) {
   if (Play.run && Play.run.free && !Play.run.cabo) t += " · 🌍 " + ghostSummary(Play.run);   // onde estão os outros
   // cabo pela internet (GBA): quem está na sala; o coop em si se liga pelo menu do jogo (START > COOP)
   if (Play.run && Play.run.cabo) { CaboLog.anota(st, Play.run); if (Play.run.auto && st.cabo && st.cabo.ligados) t += CaboLog.curto(Play.run); }
+  if (Play.run && Play.run.cabo && Play.run.auto) CaboLog.estado(AutoCoop.texto(st.coop), st.coop);
   if (Play.run && Play.run.cabo) t += Play.run.auto ? " · " + AutoCoop.texto(st.coop) : " · 🔗 cabo: " + (Play.run.names || []).map((n, i) => n != null ? `P${i + 1} ${n}` : null).filter(Boolean).join(", ");
   // rollback: quantas vezes no último segundo o jogo voltou para corrigir botões que chegaram atrasados
   if (st.rb && st.rb.count) t += ` · ↺ ${st.rb.count}`;
@@ -442,6 +443,7 @@ function showStatus(st) {
 
 let toastTimer = null;
 function toast(msg) {
+  if (typeof CaboLog !== "undefined" && Play.run && Play.run.cabo) CaboLog.evento("aviso: " + msg);
   const t = $("toast");
   t.textContent = msg;
   t.classList.remove("hidden");
