@@ -77,6 +77,14 @@ const LinkHLE = (() => {
     [0x8A4D8, [0x78, 0x47, 0xC0, 0x46, 0x00, 0xC0, 0x9F, 0xE5, 0x1C, 0xFF, 0x2F, 0xE1, 0x41, 0xA3, 0xFF, 0x09]],
     [0x995CE, [0xF0, 0xF7, 0x83, 0xFF]],
     [0x9978C, [0xF0, 0xF7, 0xA4, 0xFE]],
+    // Luta dos 3 contra treinador com 3+ Pokémon (07/11, teste no ginásio do Wattson): o inimigo mandava 3 (6 lugares) e a
+    // memória de vídeo das figuras acabava (4 treinadores + 6 caixas de vida + 6 Pokémon): os Pokémon do inimigo nasciam sem
+    // figura, a bola deles "animava" para sempre e as três telas paravam em "mandou X e Y!". Agora o inimigo manda 2 por vez
+    // (3 contra 2, como contra treinador de 2 Pokémon): o lugar 5 fica sempre ausente e a batalha tem 5 lugares.
+    // 0x09FF0544: strb r6,[ABSENT]; movs r0,#0x20; tst r6,r0; beq -> movs r0,#0x20; orrs r6,r0; strb r6,[ABSENT]; nop
+    [0x1FF0544, [0x20, 0x20, 0x06, 0x43, 0x16, 0x70, 0xC0, 0x46]],
+    // envio3 (0x09FF0640): "cmp r4,#1" (envio do lugar 1 manda o 5) -> "cmp r4,#0xFF": o lado do treinador não manda o lugar 5
+    [0x1FF065A, [0xFF, 0x2C]],
   ];
   GAMES["cee4fb273fd301762c2dc29d65d83db08f1d68ca"] = { ...GAMES.a9162e75a98631c4d31541bf1168fcee62770ec9, tela: TELA_COOP3 };   // 30/10: IA sem laço infinito, texto do 3º jogador
   // struct Link
@@ -590,7 +598,7 @@ const LinkHLE = (() => {
       soltaTodos() { for (const s of [...(ids || [])]) if (s !== me) this.left(s); peers.clear(); avisados.clear(); },
       get fase() { return fase; },
       // para a linha de baixo da tela: quantos ligados no cabo, meu nível, e quem da sala está em que nível
-      get resumo() { const t = now(); return { ligados: ids ? ids.length : 0, n: nivel(), fase, desligou, acel, me, outros: [...avisados].map(([s, v]) => [s, t - v.t < AUTO_VALE ? v.n : -1]) }; },
+      get resumo() { const t = now(); return { ligados: ids ? ids.length : 0, ids: ids ? ids.slice() : null, n: nivel(), fase, desligou, acel, me, outros: [...avisados].map(([s, v]) => [s, t - v.t < AUTO_VALE ? v.n : -1]) }; },
       get desligou() { return desligou; },
       // posição de cada vaga na ordem de quem manda (todos recebem a mesma lista de nomes da sala, então todos concordam)
       set prioridade(v) { prio = Array.isArray(v) ? v.slice() : null; },
