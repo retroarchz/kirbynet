@@ -390,7 +390,8 @@ const AutoCoop = {
     const nomes = (run.names || []).filter((n, i) => n != null && i !== net.slot);
     if (!nomes.length) return "🔗 sozinho no Wi-Fi";
     if (!c) return "🔗 " + nomes.join(", ") + " no Wi-Fi";
-    if (c.desligou) return "🔗 você desconectou: abra o COOP no menu para voltar";
+    if (c.desligou) return "🔗 você desconectou: abra o COOP no menu para voltar" + (c.acel ? " · ⏩ acelerando" : "");
+    if (c.acel && !c.ligados) return "🔗 ⏩ acelerando: o coop liga quando você parar";
     if (c.fase) return "🔗 conectando…";
     const fora = (run.names || []).map((n, i) => ({ n, i })).filter(x => x.n != null && x.i !== net.slot && !(c.outros.find(o => o[0] === x.i) && c.outros.find(o => o[0] === x.i)[1] === (c.ligados ? 2 : 1)));
     if (c.ligados && c.ligados >= nomes.length + 1) return "🔗 ligado: " + nomes.join(", ");

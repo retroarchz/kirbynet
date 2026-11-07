@@ -597,6 +597,7 @@ onmessage = async (ev) => {
   else if (m.t === "speed") {   // acelerar: só fora da rede (em sala, todos andam no mesmo passo)
     if (run && !run.net && m.speed !== (run.speed || 1)) {
       run.speed = m.speed;
+      if (run.hle) run.hle.acelerando = m.speed > 1;   // coop automático: acelerando, não liga o cabo
       run.t0 = performance.now() - run.frames / (FPS * m.speed) * 1000;   // continua do quadro atual
     }
   }

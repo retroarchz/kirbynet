@@ -805,17 +805,18 @@ function cycleTurboSpeed() {
   const run = Play.run;
   if (run && run.ff) { run.ff = Turbo.speed; run.worker.postMessage({ t: "speed", speed: Turbo.speed }); }
 }
-// em coop automático o turbo só para enquanto houver outra pessoa ligada
-const emGrupo = (run) => !!run.net || !!(run.link && run.link.nPeers > 0);
+// em coop automático o turbo só para enquanto o cabo estiver ligado (ou ligando) com alguém: desconectou, cada um acelera
+// o seu. run.coop = último resumo do cabo (linkhle.resumo), chega no status 1 vez por segundo
+const emGrupo = (run) => !!run.net || !!(run.link && run.link.nPeers > 0 && run.coop && (run.coop.ligados > 1 || run.coop.fase));
 function toggleTurbo() {
-  if (Play.run && emGrupo(Play.run)) return toast("⏩ Acelerar só funciona jogando sozinho.");
+  if (Play.run && emGrupo(Play.run)) return toast("⏩ Acelerar não funciona com o cabo ligado: desconecte no COOP do menu.");
   Turbo.locked = !Turbo.locked; updateTurboButton();
   if (Play.run) sendKeys(Play.run);
 }
 function sendKeys(run) {
   const want = !cheatsOpen() && turboHeld();   // Espaço digitado no código não acelera
   if (emGrupo(run)) {
-    if (want && down.has("Space") && !Turbo.warned) { Turbo.warned = true; toast("⏩ Acelerar só funciona jogando sozinho."); }
+    if (want && down.has("Space") && !Turbo.warned) { Turbo.warned = true; toast("⏩ Acelerar não funciona com o cabo ligado: desconecte no COOP do menu."); }
     if (run.ff) { run.ff = 0; run.worker.postMessage({ t: "speed", speed: 1 }); }
   } else if ((want ? Turbo.speed : 0) !== (run.ff || 0)) {
     run.ff = want ? Turbo.speed : 0;
@@ -1509,6 +1510,8 @@ function onWorker(run, m) {
   else if (m.t === "kills") { if (run.net) for (const k of m.list) run.net.send("K", JSON.stringify(k)); }
   else if (m.t === "gbmp") ghostBmpOut(run, m);
   else if (m.t === "status") {
+    run.coop = m.coop;
+    if (run.ff && emGrupo(run)) { Turbo.locked = false; updateTurboButton(); sendKeys(run); }   // o cabo ligou: para de acelerar
     // carga da página: parte do tempo gasta pelo kirbynet na linha principal (desenho, som, botões)
     const now = performance.now();
     m.page = Math.round(run.pageBusy / Math.max(1, now - run.pageT) * 100);

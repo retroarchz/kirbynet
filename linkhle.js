@@ -143,6 +143,7 @@ const LinkHLE = (() => {
     // auto: fase 0 = jogando, 1 = abrindo o cabo, 2 = conectando, 3 = desistindo (B da própria tarefa do jogo)
     let auto = false, fase = 0, lista = null, tarefa = 0, faseT = 0, pedido = null, pausa = 0, avisos = 0;
     // desligou: o jogador usou DESCONECTAR, então fica sozinho até abrir o COOP de novo. saindo/expulso: a saída não foi dele
+    let acel = false;   // acelerando: o automático não liga ninguém até parar
     let desligou = false, saindo = false, expulso = false, meuBye = false, grupo = "", grupoT = 0, assenta = 0;
     const evita = new Map();      // vaga -> até quando fica de fora: quem fez a ligação falhar não derruba os outros
     const avisados = new Map();   // vaga -> { n: nível (0 ocupado, 1 livre e sozinho, 2 parado no coop), t }
@@ -267,7 +268,7 @@ const LinkHLE = (() => {
     // 1 = sozinho no mapa, 2 = no coop no mapa; sem menu, script ou transição. 0 = ocupado. Andando conta como livre:
     // a conexão só espera acabar o passo (entrePassos), senão quem nunca para de andar nunca entraria
     function nivel() {
-      if (desligou || fase || saindo || sub || duo) return 0;
+      if (desligou || acel || fase || saindo || sub || duo) return 0;
       if (ram.r32(AUTO.cb2) !== AUTO.field || ram.r8(AUTO.lock) || ram.r8(AUTO.ctx) !== AUTO.ctxLivre) return 0;
       if (ram.r8(AUTO.fade) & 0x80) return 0;
       const cb1 = ram.r32(AUTO.cb1);
@@ -585,8 +586,10 @@ const LinkHLE = (() => {
       soltaTodos() { for (const s of [...(ids || [])]) if (s !== me) this.left(s); peers.clear(); avisados.clear(); },
       get fase() { return fase; },
       // para a linha de baixo da tela: quantos ligados no cabo, meu nível, e quem da sala está em que nível
-      get resumo() { const t = now(); return { ligados: ids ? ids.length : 0, n: nivel(), fase, desligou, me, outros: [...avisados].map(([s, v]) => [s, t - v.t < AUTO_VALE ? v.n : -1]) }; },
+      get resumo() { const t = now(); return { ligados: ids ? ids.length : 0, n: nivel(), fase, desligou, acel, me, outros: [...avisados].map(([s, v]) => [s, t - v.t < AUTO_VALE ? v.n : -1]) }; },
       get desligou() { return desligou; },
+      // acelerar (só com o cabo solto): enquanto acelera, fica de fora do coop automático
+      set acelerando(v) { acel = !!v; },
       // log de atraso (1 vez por segundo): por jogador ligado, comandos dele esperando agora, o máximo no último segundo e há
       // quantos ms não chega nada dele; linhas na fila do jogo; BEBE velhos descartados no último segundo. Zera os máximos
       medidas() {
