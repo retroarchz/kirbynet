@@ -363,15 +363,25 @@ const EditorQZ = (() => {
               if (cond) { c.push(0x2B, ...u16(cond.flag)); fimCedo.push(c.length + 2); c.push(0x06, cond.quando === "depois" ? 0x00 : 0x01, 0, 0, 0, 0); }   // ainda não vale
               c.push(LOCK);
               if (auto.vem) {   // gatilho: ❗ na SUA cabeça (som 0x15 + mov. pronto 0x083601C3) e ele vem até o seu lado e te olha
+                // o jogo só mantém carregada quem está perto da tela (pedido 08/11: "a pessoa não está indo até mim", ela estava
+                // 10 quadrados longe): ele reaparece no 1º ponto do caminho que fica dentro da sua tela e vem andando dali.
+                const g = auto.g, P = [{ x: e.x, y: e.y }, ...auto.vem.pontos];
+                let i0 = P.findIndex((q) => Math.abs(q.x - g.x) <= 6 && Math.abs(q.y - g.y) <= 4); if (i0 < 0) i0 = P.length - 1;
+                const F = cond ? e.marcaVis : marcaObj;
+                c.push(0x53, ...u16(id)); if (F) c.push(0x2A, ...u16(F));                                   // removeobject (onde estiver); a marca dele continua desligada
+                c.push(0x63, ...u16(id), ...u16(P[i0].x), ...u16(P[i0].y), 0x55, ...u16(id));                 // setobjectxyperm no ponto da beirada, addobject
                 c.push(0x2F, 0x15, 0x00, 0x4F, 0xFF, 0x00, ...u32(0x083601C3), 0x51, 0xFF, 0x00, 0x28, 0x0A, 0x00);
-                mv.push([c.length + 3, [...auto.vem.dirs.map((d) => 0x08 + d), auto.vem.face, 0xFE]]); c.push(0x4F, ...u16(id), 0, 0, 0, 0, 0x51, ...u16(id));
+                mv.push([c.length + 3, [...auto.vem.dirs.slice(i0).map((d) => 0x08 + d), auto.vem.face, 0xFE]]); c.push(0x4F, ...u16(id), 0, 0, 0, 0, 0x51, ...u16(id));
                 mv.push([c.length + 3, [[1, 0, 3, 2][auto.vem.face], 0xFE]]); c.push(0x4F, 0xFF, 0x00, 0, 0, 0, 0, 0x51, 0xFF, 0x00);   // você vira para ele
               }
             } else {
               c.push(LOCK, 0x5A);                                                            // lock, faceplayer
               if (e.fim === "uma") { c.push(0x2B, ...u16(e.marca)); desvio = c.length; c.push(0x06, 0x01, 0, 0, 0, 0); }
             }
+            let pulaExcl = !!(auto && auto.vem);
             for (const p of tr.passos) {
+              if (pulaExcl && p.t === "exclamar" && p.quem !== "ele") continue;   // a ❗ em você já foi (automática)
+              pulaExcl = false;
               if (solto && (p.t === "andar" || p.t === "virar" || p.t === "sumir" || p.t === "voar")) {
                 soltou = true;
                 if (p.t === "andar" || p.t === "virar") { const d = DIRS[p.dir] ?? 0, n = p.t === "andar" ? p.n : 1; for (let k = 0; k < n; k++) ml2.push(p.t === "andar" ? 0x08 + d : d); if (p.porta) ml2.push(INVIS()); }
@@ -452,7 +462,7 @@ const EditorQZ = (() => {
             for (const g of e.gats || (e.gat ? [e.gat] : [])) {
               const vem = e.vem === false ? null : caminhoAte(mapaD, e, g, lista);
               if (vem && !vem.achou) avisos.push(`ele não acha caminho até o quadrado ${g.x}, ${g.y} (só a ❗)`);
-              const au = montaSeq({ var: 0, vem }), aa = aloca(au.c.length);
+              const au = montaSeq({ var: 0, vem, g }), aa = aloca(au.c.length);
               if (!aa) { avisos.push("acabou o espaço livre da ROM"); break; }
               for (const [k, rel] of au.fx) { const w = u32(aa + rel); for (let j = 0; j < 4; j++) au.c[k + j] = w[j]; }
               escritas.push([aa, au.c]); gats.push([g.x | 0, g.y | 0, aa]);
