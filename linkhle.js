@@ -270,7 +270,7 @@ const LinkHLE = (() => {
   // Tudo no cabo virtual e na memória: a ROM não muda. Mesmos endereços na Alpha 9 e na Coop 3.
   const AUTO = { cb1: 0x03002660, cb2: 0x03002664, field: 0x080C2965, over: 0x080C28E1, coop: 0x080C5761,
                  tasks: 0x03005640, objetos: 0x02038D10, batalha: 0x0803F431, mons: 0x0202305C, lock: 0x03000FDC, ctx: 0x03000EE8, ctxLivre: 2, fade: 0x02039AC3, avatar: 0x02039070,
-                 linkType: 0x020229C6, tipo: 2, abre: 0x0825FD45, passo: 0x0825FD8D, mestre: 0x0825FEB1, escravo: 0x0825FFA1 };
+                 linkType: 0x020229C6, equipe: 0x0822FC69, tipo: 2, abre: 0x0825FD45, passo: 0x0825FD8D, mestre: 0x0825FEB1, escravo: 0x0825FFA1 };
   const AUTO_B = 2, AUTO_AVISO = 30, AUTO_VALE = 1500, AUTO_PEDIDO = 4000, AUTO_LIMITE = 8000, AUTO_FORA = 30000, AUTO_REVE = 1500, AUTO_CALMA = 1000, AUTO_ASSENTA = 30, AUTO_CAPACETE = 120, AUTO_LIMITE_NIVEL = 3000, MOTO_DONO = 10657;
   // Protetor Glacial: estado por lugar (16 bytes, +0 fase) e a tarefa do jogo que desenha os escudos (protetor.py)
   // Caixas de vida na batalha de 3 (Coop 3): as três do jogador cobriam os inimigos. Jogador à esquerda, na ordem dos Pokémon
@@ -280,6 +280,7 @@ const LinkHLE = (() => {
   const ESCUDO = { base: 0x0203FF80, tarefa: 0x09FFAB41, lugares: 6, aviso: 12, repete: 120 };
 
   const DEAD_MS = 15000;   // ligado comigo e sem dar notícia há tanto tempo: caiu (o jogo recebe o "desconectar")
+  const FOTO_QUADROS = 60, LUTA_CALMA = 120;   // foto antes da luta: 1 por segundo; a luta acaba com 2 s seguidos livres no mapa
 
   // ram: KnCore game.ram(i). me: número do jogador na sala (vaga). send(msg): manda para todos da sala.
   function create(romSha1, ram, me, send) {
@@ -318,6 +319,12 @@ const LinkHLE = (() => {
     const evita = new Map();      // vaga -> até quando fica de fora: quem fez a ligação falhar não derruba os outros
     const avisados = new Map();   // vaga -> { n: nível (0 ocupado, 1 livre e sozinho, 2 parado no coop), t }
     let cap = 0, capOutro = null, aoCap = null;   // capacete: o meu; o último que recebi do dono da moto; quem aplica
+    // Volta para antes da luta (08/11, pedido do usuário: alguém sair no meio da luta pelo cabo derrubava o jogo de quem ficou).
+    // Ligados no mapa, sem script nem menu, guarda uma foto da memória inteira do motor a cada FOTO_QUADROS (aoFoto). Da espera
+    // do treinador até voltar ao mapa depois da luta (luta), quem estava na luta comigo sair = cada um que ficou volta para a
+    // foto (aoVolta), como se o treinador não tivesse aceitado, solta o cabo e o automático religa quem ficou; aí podem falar
+    // com o treinador de novo. foto = { snap, ids, role, mestre } do momento da foto
+    let foto = null, fotoQ = 0, luta = false, lutaCalma = 0, voltar = null, aoFoto = null, aoVolta = null;
 
     const r8 = (o) => ram.r8(L + o), w8 = (o, v) => ram.w8(L + o, v);
     const r16 = (o) => ram.r16(L + o), w16 = (o, v) => ram.w16(L + o, v);
@@ -599,6 +606,54 @@ const LinkHLE = (() => {
       if (algum && !tarefaExiste(ESCUDO.tarefa)) criaTarefa(ESCUDO.tarefa);
     }
     const tarefaExiste = (f) => { for (let t = 0; t < 16; t++) { const b = AUTO.tasks + 40 * t; if (ram.r8(b + 4) && ram.r32(b) === f) return true; } return false; };
+    // foto antes da luta e quando a luta começa/acaba (depois de cada quadro)
+    // lutaViu: a batalha já começou. lutaCabo: passou pela escolha de equipe, que só a luta pelo cabo tem (com R na espera a luta
+    // é só minha e o cabo continua com todos: quem sair não desfaz ela; o "desconectar" dele fica guardado até eu voltar ao mapa)
+    let lutaViu = false, lutaCabo = false;
+    const adiados = new Set();
+    function fotoPasso(st) {
+      if (!C || !aoFoto || voltar != null) return;
+      const cb2 = ram.r32(AUTO.cb2);
+      if (luta) {
+        if (cb2 === AUTO.batalha) lutaViu = true;
+        if (cb2 === AUTO.equipe) lutaCabo = true;
+        // acabou a batalha e voltou ao mapa: daqui em diante sair não desfaz a luta (nem a vitória)
+        if (lutaViu && cb2 === AUTO.field) { luta = false; lutaViu = false; lutaCabo = false; lutaCalma = 0; foto = null; entregaAdiados(); return; }
+        // desistiu da espera sem lutar: 2 s seguidos livres no mapa
+        const livre = cb2 === AUTO.field && !ram.r8(AUTO.lock) && ram.r8(AUTO.ctx) === AUTO.ctxLivre && !waiting() && !duo;
+        if (!lutaViu && livre) { if (++lutaCalma >= LUTA_CALMA) { luta = false; lutaCabo = false; lutaCalma = 0; entregaAdiados(); } } else lutaCalma = 0;
+        return;
+      }
+      if (st !== ST_CONN || !ids || ids.length < 2) return;
+      if (waiting()) { if (foto) { luta = true; lutaViu = lutaCabo = false; lutaCalma = 0; } return; }
+      if (++fotoQ >= FOTO_QUADROS && nivel() === 2 && entrePassos()) {
+        fotoQ = 0;
+        try { foto = { snap: aoFoto(foto && foto.snap), ids: ids.slice(), role, mestre }; } catch (e) { foto = null; }
+      }
+    }
+    // quem estava na luta comigo saiu: volta para a foto e solta o cabo (o jogo de cada um sai do coop no mapa, como no "sai")
+    function fazVolta() {
+      const f = foto, quem = voltar;
+      voltar = null; luta = false; lutaViu = lutaCabo = false; lutaCalma = 0; foto = null; adiados.clear();
+      aoVolta(f.snap, quem);
+      sub = null; subSave = null; duo = null; duoBattle = false; semHost = false; savedBackup = null;
+      ask = null; liberar = null; go = null; pedido = null; fase = 0; lista = null;
+      busy.clear(); rejoin.clear(); dead.clear(); echo.length = 0;
+      for (const q of inbox.values()) q.length = 0;
+      escudoFases = null; escudoUlt = null; zArmado = false;
+      caixasTri = !caixasTri;   // a ROM pode estar com as caixas da tripla: o próximo quadro escreve as certas
+      ids = f.ids.slice(); role = f.role; mestre = f.mestre;
+      armed = true; open = true; lastSt = ST_CONN;
+      solta();
+    }
+    // cabo fechado na luta = luta sozinho (R na espera): quem sair não desfaz a minha luta. Aberto sem lista ainda = o jogo
+    // reabrindo o cabo para a batalha, com quem estava ligado na foto
+    const naLutaComigo = (s) => ids ? cur().includes(s) : open && foto.ids.includes(s);
+    const lutaSo = () => lutaViu && !lutaCabo;
+    function entregaAdiados() {
+      for (const s of adiados) if (ids && ids.includes(s) && !dead.has(s) && G.bye) { expulso = true; byeDe(s); }
+      adiados.clear();
+    }
     function release(list, t) {
       if (t === 2) {
         if (duo) return;   // os dois apertaram Z ao mesmo tempo
@@ -617,6 +672,10 @@ const LinkHLE = (() => {
       modo(v) { const k = (ids || []).indexOf(me); if (k >= 0) ram.w8(MODO.players + k * MODO.size + MODO.cheat, v); send({ k: "md", v }); },
       // antes de rodar o quadro
       pre() {
+        if (voltar != null) {
+          if (foto && aoVolta) { fazVolta(); return; }
+          voltar = null;
+        }
         if (!armed) return;
         const st = r8(STATE);
         if (st === ST_HANDSHAKE) {
@@ -680,6 +739,7 @@ const LinkHLE = (() => {
             // cabo solto: espera todos dizerem como estão, senão cada um religaria por conta própria com quem viu primeiro
             avisados.clear(); pausa = Math.max(pausa, now() + AUTO_REVE);
             reset(); dead.clear();
+            if (!luta) foto = null;   // a foto é de um cabo que não existe mais (na luta o jogo fecha e reabre o cabo)
           }
           status();
         }
@@ -739,6 +799,7 @@ const LinkHLE = (() => {
         if (ids && ram.r32(AUTO.cb2) === AUTO.batalha) {
           if (cur()[0] === me) escudoEnvia(); else if (escudoFases) escudoAplica();
         } else if (escudoFases || escudoUlt !== null) { escudoFases = null; escudoUlt = null; }
+        fotoPasso(st);
         if (auto) autoPasso();
       },
       // o jogador trocou o capacete: quem está no cabo vê a mesma moto (só vale para o dono dela)
@@ -747,6 +808,11 @@ const LinkHLE = (() => {
       set aoCaixas(f) { aoCaixas = f; if (f && G.tela) for (const [at, b] of G.tela) f(at, new Uint8Array(b)); },   // f(endereço na ROM, bytes): quem sabe escrever na ROM da partida
       // tem um dono da moto no cabo e não sou eu: a tecla 0 não mexe na moto dele
       get motoAlheia() { return capOutro != null && !souDono(); },
+      // foto da partida para voltar antes da luta: f(reaproveitar) devolve a foto; v(foto, quem saiu) volta para ela
+      set aoFoto(f) { aoFoto = f; },
+      set aoVolta(f) { aoVolta = f; },
+      get luta() { return luta; },
+      get temFoto() { return !!foto; },
       // liga o coop automático neste aparelho
       autoLiga() { auto = true; },
       // entrou em outra sala: nova vaga. Só com o cabo fechado (quem estava no coop sai antes)
@@ -792,6 +858,8 @@ const LinkHLE = (() => {
         if (m.k === "au") avisados.set(from, { n: m.n, t: now() });
         else if (m.k === "vem") { if (auto && !fase && !open && Array.isArray(m.ids) && m.ids[0] === from && m.ids.includes(me)) pedido = { ids: m.ids, t: now() }; }
         else if (m.k === "sai") { if (auto && ids && from === ids[0] && !saindo) solta(); }
+        // alguém da luta viu outro sair antes de mim (ou só ele viu): volto também, senão eu ficaria na luta sozinho
+        else if (m.k === "vt") { if (luta && foto && aoVolta && voltar == null && !lutaSo() && naLutaComigo(from)) voltar = m.s; }
         else if (m.k === "esc") { if (ids && from === cur()[0] && Array.isArray(m.v)) escudoFases = m.v; }
         else if (m.k === "cap") { if (m.v !== capOutro && !souDono()) { capOutro = m.v; if (aoCap) aoCap(m.v); } }
         else if (m.k === "st") {
@@ -844,6 +912,11 @@ const LinkHLE = (() => {
       // alguém saiu da sala: se estava no coop comigo, o meu jogo recebe o "desconectar" dele
       left(from) {
         peers.delete(from); avisados.delete(from);
+        // no meio da luta: em vez do "desconectar" (que derrubava o jogo), todos que estavam nela voltam para antes dela
+        if (luta && foto && aoVolta && voltar == null && naLutaComigo(from)) {
+          if (lutaSo()) { adiados.add(from); return; }
+          voltar = from; send({ k: "vt", s: from }); return;
+        }
         if (ids && ids.includes(from) && !dead.has(from) && G.bye) { expulso = true; byeDe(from); }
         else inbox.delete(from);
       },
@@ -853,7 +926,7 @@ const LinkHLE = (() => {
   //   1 = comando (8 números de 16 bits), 2 = cabo aberto/fechado + se é o mestre, 3 = "começar" (vagas de quem entra)
   //   coop de teste: 4 = pedido do host (tipo, vagas), 5/6 = aceito/recusado, 7 = entrei na dupla (vagas), 8 = saí da dupla
   //   coop automático: 10 = nível (0 ocupado, 1 livre, 2 parado no coop), 11 = largada (vagas), 12 = soltem o cabo, 13 = capacete,
-  //   14 = fase do escudo do Protetor Glacial em cada lugar
+  //   14 = fase do escudo do Protetor Glacial em cada lugar, 15 = alguém da luta saiu: voltem para antes dela (vaga de quem saiu)
   // Pokémon Quetzal, tecla Alt: alterna o valor de trapaça do save (embaralhado com o ID de treinador) entre 1 e 0.
   // Sem trapaça, os personagens de fim de jogo também somem: eles entregariam a visita à Fronteira de Batalha.
   // É ele que a troca compara. Só vale para quem começou com cheats: save+0x2CE fica marcado, mesmo com o valor em 0.
@@ -914,6 +987,7 @@ const LinkHLE = (() => {
     if (m.k === "sai") return new Uint8Array([from, 12]);
     if (m.k === "cap") return new Uint8Array([from, 13, m.v ? 1 : 0]);
     if (m.k === "esc") return new Uint8Array([from, 14, ...m.v]);
+    if (m.k === "vt") return new Uint8Array([from, 15, m.s]);
     return null;
   }
   function decode(b) {
@@ -933,6 +1007,7 @@ const LinkHLE = (() => {
     if (b[1] === 12) return { from, m: { k: "sai" } };
     if (b[1] === 13 && b.length >= 3) return { from, m: { k: "cap", v: b[2] } };
     if (b[1] === 14 && b.length >= 8) return { from, m: { k: "esc", v: Array.from(b.subarray(2, 8)) } };
+    if (b[1] === 15 && b.length >= 3) return { from, m: { k: "vt", s: b[2] } };
     return null;
   }
   return { supports, create, encode, decode, trocaModo, semRocket, GAMES };

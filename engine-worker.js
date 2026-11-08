@@ -374,6 +374,11 @@ function tick() {
           if (run.hle && run.caboAuto) run.hle.autoLiga();
           if (run.hle && run.caboPrio) run.hle.prioridade = run.caboPrio;
           if (run.hle && run.s.romWrite) run.hle.aoCaixas = (at, b) => run.s.romWrite(at, b);
+          // alguém saiu no meio da luta pelo cabo: volta para a foto de antes da luta (memória inteira do motor, sem a ROM)
+          if (run.hle && run.s.canSnapshot && run.n === 1) {
+            run.hle.aoFoto = (reuse) => run.s.snapshot(reuse);
+            run.hle.aoVolta = (snap, quem) => { run.s.restore(snap); postMessage({ t: "caboVolta", quem }); };
+          }
           if (run.hle) { run.hle.aoCapacete = (v) => postMessage({ t: "capOutro", v }); if (run.capV != null) run.hle.capacete(run.capV); }
           if (run.hle) for (const d of run.caboEarly.splice(0)) d.left != null ? run.hle.left(d.left) : run.hle.recv(d.from, d.m);
         }

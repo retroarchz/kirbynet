@@ -1552,6 +1552,11 @@ function onWorker(run, m) {
   else if (m.t && m.t.startsWith("ed-") && typeof Editor !== "undefined") Editor.recebe(m);   // editor de eventos (editor.js)
   else if (m.t === "moto") { if (!m.remoto) Moto.feito(m.v); }
   else if (m.t === "capOutro") Moto.aplica(run, !!m.v, true);
+  else if (m.t === "caboVolta") {   // alguém saiu no meio da luta pelo cabo: o jogo voltou para antes dela
+    const quem = typeof CaboLog !== "undefined" ? CaboLog.nome(run, m.quem) : "Alguém";
+    if (typeof CaboLog !== "undefined") CaboLog.linhas.push(`${CaboLog.hora()} ↩ ${quem} saiu no meio da luta: voltei para antes de falar com o treinador`);
+    if (Play.run === run) toast(`↩ ${quem} saiu da luta. Voltaram para antes dela: falem com o treinador de novo.`);
+  }
   else if (m.t === "relogio") Relogio.gravar("kn-relogio-min", String(m.min));
   else if (m.t === "started") { Relogio.enviar(run); if (Moto.ligado()) Moto.aplica(run, true); }   // volta com o capacete escolhido
   else if (m.t === "snap") persistSaves(run, m.saves, false);   // o jogo gravou algo novo
