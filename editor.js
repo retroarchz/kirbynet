@@ -16,7 +16,7 @@ const Editor = {
   // 0x087896F4 (o mesmo de todos os fundos do jogo). Entradas = peças onde o jogo põe as portas das cavernas embaixo d'água
   // (0x224, 0x22E, 0x26E) e os buracos escuros parecidos; o resto vem do uso nos fundos do jogo (parede ou não) e da cor.
   TS_FUNDO: 0x087896F4,
-  CATS_FUNDO: [["tudo", "Tudo"], ["entradas", "🕳️ Entradas e buracos"], ["pedras", "🪨 Pedras"], ["paredoes", "⛰️ Paredões e rampas"], ["algas", "🌿 Algas"],
+  CATS_FUNDO: [["objetos", "🧩 Objetos prontos"], ["tudo", "Tudo"], ["entradas", "🕳️ Entradas e buracos"], ["pedras", "🪨 Pedras"], ["paredoes", "⛰️ Paredões e rampas"], ["algas", "🌿 Algas"],
     ["claro", "⬜ Areia clara"], ["chao", "🟪 Chão"], ["escuro", "🌑 Fendas (fundo escuro)"], ["submarino", "🚢 Submarino"], ["gerais", "🧱 Peças gerais"]],
   FUNDO_FIXO: { entradas: [0x224, 0x226, 0x22C, 0x22E, 0x265, 0x266, 0x267, 0x26D, 0x26E, 0x26F, 0x2A7], pedras: [0x227, 0x22F, 0x270, 0x284, 0x285, 0x286, 0x28D, 0x28E, 0x294, 0x295, 0x296, 0x297, 0x29E, 0x29F],
     algas: [0x201, 0x281], submarino: [0x2E0, 0x2E1, 0x2E2, 0x2E3, 0x2E4, 0x2E5, 0x2E6, 0x2E7] },
@@ -24,7 +24,16 @@ const Editor = {
   FUNDO_PAREDE: [0x202,0x203,0x206,0x207,0x208,0x209,0x20a,0x20b,0x20c,0x20d,0x20e,0x20f,0x210,0x211,0x212,0x213,0x214,0x215,0x217,0x218,0x219,0x21a,0x21b,0x21c,0x21d,0x21e,0x21f,
     0x220,0x221,0x222,0x223,0x226,0x229,0x22b,0x22c,0x22d,0x22f,0x230,0x231,0x238,0x239,0x260,0x261,0x265,0x266,0x267,0x26d,0x26f,0x270,0x27c,0x27d,0x27e,0x284,0x285,0x286,0x28d,0x28e,
     0x2e0,0x2e1,0x2e2,0x2e3,0x2e4,0x2e5,0x2e6,0x2e7],
-  catFundo: "tudo",
+  catFundo: "objetos",
+  // objetos do fundo do mar montados a partir da folha em 8 colunas (o jogo monta os paredões peça por peça, então não dá
+  // para achar sozinho): [nome, primeira peça, largura, altura]; peça (x,y) = primeira + y*8 + x
+  OBJS_FUNDO: [["Pedra pontuda", 0x208, 2, 3], ["Pedra grande", 0x20A, 3, 3], ["Cratera de pedra", 0x20D, 3, 3],
+    ["Pedra pontuda (fundo)", 0x230, 2, 3], ["Pedra grande (fundo)", 0x232, 3, 3], ["Cratera (fundo)", 0x235, 3, 3],
+    ["Pedra grande (bem fundo)", 0x24A, 3, 3], ["Cratera com buraco", 0x24D, 3, 3], ["Pedra pontuda baixa", 0x260, 2, 2],
+    ["Pedra baixa (fundo)", 0x262, 3, 2], ["Entrada de caverna", 0x265, 3, 2], ["Entrada pequena", 0x226, 1, 2], ["Buraco de luz", 0x22B, 3, 1],
+    ["Pedrinha", 0x227, 1, 2], ["Algas no chão", 0x278, 3, 3], ["Pedra cinza", 0x294, 2, 1], ["Pedras cinza", 0x296, 2, 2],
+    ["Pedra escura", 0x2B2, 3, 3], ["Pedra escura 2", 0x2B5, 3, 3], ["Pedra muito escura", 0x2CA, 3, 3], ["Cratera escura com buraco", 0x2CD, 3, 3],
+    ["Submarino", 0x2E0, 8, 1]],
   abaAtual: "cat", pecas: null, pc: { id: -1, parede: false, v: 0, ferr: "pincel", tam: 1 }, traco: null, pilha: [], verParedes: false,
   // favoritos com nome: { sprite: "nome" }, neste aparelho e na nuvem (saves/<chave>/<sha1('kirbynet-favoritos:'+rom)>)
   favs: {}, favsT: 0,
@@ -114,7 +123,8 @@ const Editor = {
     else if (m.t === "ed-pecas") {
       const atlas = this.canvasDe(m.w, m.h, new Uint8ClampedArray(m.rgba)), pos = new Map();
       m.ids.forEach((id, k) => pos.set(id, k));
-      this.pecas = { ids: m.ids, beh: m.beh, atlas, pos, fundo: m.ts2 === this.TS_FUNDO };
+      this.pecas = { ids: m.ids, beh: m.beh, atlas, pos, fundo: m.ts2 === this.TS_FUNDO, tip: new Map(m.tip || []), objs: m.objs || [] };
+      if (this.pecas.fundo) this.pecas.objs = this.OBJS_FUNDO.map(([nome, b, w, h]) => { const ids = []; for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) ids.push(b + y * 8 + x); return { nome, w, h, ids }; });
       if (this.pecas.fundo) {   // tipo de cada peça do fundo do mar
         const px = atlas.getContext("2d").getImageData(0, 0, atlas.width, atlas.height).data, cat = new Map(), fixo = new Map();
         for (const [c, L] of Object.entries(this.FUNDO_FIXO)) for (const id of L) fixo.set(id, c);
@@ -317,11 +327,13 @@ const Editor = {
     const M = this.mapa, cont = new Map();
     for (const v of M.info) if ((v & 0x3FF) === id) cont.set(v >> 10, (cont.get(v >> 10) || 0) + 1);
     if (cont.size) return [...cont.entries()].sort((a, b) => b[1] - a[1])[0][0] << 10 | id;
+    if (this.pecas && this.pecas.tip.has(id)) return this.pecas.tip.get(id);   // como o jogo usa
     const k = this.pecas && this.pecas.pos.get(id), b = k !== undefined ? this.pecas.beh[k] : 0;
     if (this.pecas && this.pecas.cat) { const c = this.pecas.cat.get(id); if (c === "paredoes" || c === "pedras" || c === "submarino" || this.FUNDO_PAREDE.includes(id)) return 0x0400 | id; }   // rocha do jogo: colisão 1, altura 0
     return (b >= 0x10 && b <= 0x15 ? 1 : 3) << 12 | id;
   },
   escolhePeca(id, v) {
+    this.pc.carimbo = null;
     const vv = v !== undefined ? v : this.padrao(id);
     this.pc.id = id; this.pc.v = vv; this.pc.parede = !!((vv >> 10) & 3);
     if (this.pc.ferr !== "pincel") this.pc.ferr = "pincel";
@@ -336,8 +348,21 @@ const Editor = {
     if (this.tamMudou && this.novoAqui()) return this.status("📐 O tamanho mudou: salve, suba e mergulhe de novo para continuar pintando aqui.");
     const M = this.mapa, P = this.pintKey(), t = this.pc.tam || 1, o = -Math.floor((t - 1) / 2);
     if (this.pc.ferr === "gotas") { const v = M.info[q.y * M.w + q.x]; this.escolhePeca(v & 0x3FF, v); this.status(`Peça ${(v & 0x3FF).toString(16)} pega do mapa${(v >> 10) & 3 ? " (parede)" : ""}. Agora pinte.`); return; }
-    if (this.pc.ferr === "pincel" && this.pc.id < 0) return this.status("Escolha uma peça na lista ao lado primeiro.");
+    if (this.pc.ferr === "pincel" && this.pc.id < 0 && !this.pc.carimbo) return this.status("Escolha uma peça na lista ao lado primeiro.");
     if (!this.pecas) return this.status("Carregando as peças…");
+    const cb = this.pc.ferr === "pincel" && this.pc.carimbo;
+    if (cb) {   // objeto inteiro de uma vez, centrado onde tocou
+      const ox = -Math.floor((cb.w - 1) / 2), oy = -Math.floor((cb.h - 1) / 2);
+      cb.ids.forEach((id, j) => {
+        if (id < 0) return;
+        const x = q.x + ox + (j % cb.w), y = q.y + oy + ((j / cb.w) | 0); if (x < 0 || y < 0 || x >= M.w || y >= M.h) return;
+        const i = y * M.w + x, novo = this.padrao(id); if (M.info[i] === novo) return;
+        if (this.traco && !this.traco.has(i)) this.traco.set(i, [P[i], M.info[i]]);
+        if (novo === M.orig[i]) delete P[i]; else P[i] = novo;
+        M.info[i] = novo; this.pecaNoMapa(x, y, novo); this.mudou = true;
+      });
+      return this.desenha();
+    }
     for (let dy = 0; dy < t; dy++) for (let dx = 0; dx < t; dx++) {
       const x = q.x + o + dx, y = q.y + o + dy; if (x < 0 || y < 0 || x >= M.w || y >= M.h) continue;
       const i = y * M.w + x, novo = this.pc.ferr === "borracha" ? M.orig[i] : this.valorPincel();
@@ -362,7 +387,7 @@ const Editor = {
     const pintados = Object.keys((this.dados.pint || {})[k] || {}).length;
     const temFunda = P && !P.fundo && P.beh.some((b) => b === 0x11 || b === 0x12 || b === 0x14);
     const f = (id, n) => `<button class="ghost${this.pc.ferr === id ? " on" : ""}" data-ferr="${id}">${n}</button>`;
-    const sel = this.pc.id >= 0 ? `peça <b>${this.pc.id.toString(16).toUpperCase()}</b>` : "nenhuma peça escolhida";
+    const sel = this.pc.carimbo ? `🧩 <b>${this.pc.carimbo.nome || "objeto"}</b> ${this.pc.carimbo.w}×${this.pc.carimbo.h}` : this.pc.id >= 0 ? `peça <b>${this.pc.id.toString(16).toUpperCase()}</b>` : "nenhuma peça escolhida";
     let h = `<div class="dica">Escolha uma peça (lista abaixo) e pinte no mapa; arraste para pintar vários. Vale ao 💾 Salvar. Se você estiver neste lugar, entre numa casa e saia para ver no jogo.</div>
       ${P && temFunda ? `<div class="fundo" style="margin-top:8px"><b>🤿 Água funda (dá para mergulhar)</b><div class="ferr" id="ed-fundas">${P.beh.map((b, i) => b === 0x11 || b === 0x12 || b === 0x14 ? `<canvas data-k="${i}" width="16" height="16" title="peça ${P.ids[i].toString(16).toUpperCase()}" style="width:44px;height:44px;image-rendering:pixelated;cursor:pointer;border:2px solid ${P.ids[i] === this.pc.id ? "#ff5fa2" : "#4fc3ff"};border-radius:6px"></canvas>` : "").join("")}</div><div class="dica">É o azul mais escuro. Toque numa e pinte no mar onde quer mergulhar.</div></div>` : ""}
       <div class="ferr">${f("pincel", "✏️ Pincel")}${f("gotas", "💧 Pegar do mapa")}${f("borracha", "🧽 Voltar ao original")}</div>
@@ -371,11 +396,18 @@ const Editor = {
         <div><div>${sel}</div><label style="display:flex;gap:6px;align-items:center;margin:4px 0 0"><input type="checkbox" id="ed-parede" style="width:auto"${this.pc.parede ? " checked" : ""}> 🚧 Parede (não dá para passar)</label></div></div>
       <div class="ferr"><button class="ghost" id="ed-volta">↶ Voltar traço (Ctrl+Z)</button><button class="ghost${this.verParedes ? " on" : ""}" id="ed-verpar">👁️ Ver paredes</button></div>
       <div class="dica">${pintados} quadrado(s) pintado(s) neste lugar.${this.espaco ? ` Espaço usado: ${Math.round(this.espaco[0] / 1024)} de ${Math.round(this.espaco[1] / 1024)} KB.` : ""} Casas iguais por dentro usam o mesmo desenho: pintar uma muda todas.</div>`;
-    const vis = P ? (P.cat && this.catFundo !== "tudo" ? P.ids.filter((id) => P.cat.get(id) === this.catFundo) : P.cat ? P.ids.filter((id) => P.cat.get(id) !== "vazia") : P.ids) : [];
+    if (P && !P.cat && !this.catOutros) this.catOutros = "objetos";
+    const catAq = P && P.cat ? this.catFundo : this.catOutros || "objetos";
+    const verObjs = P && catAq === "objetos" && P.objs.length;
+    const vis = P ? (P.cat && !["tudo", "objetos"].includes(catAq) ? P.ids.filter((id) => P.cat.get(id) === catAq) : P.ids) : [];
     h += P ? `<div class="dica" style="margin-top:8px">Peças deste lugar${temFunda ? " (🤿 = água funda, onde dá para mergulhar)" : ""}:</div>
-      ${P.cat ? `<div class="ferr">${this.CATS_FUNDO.map(([c, n]) => `<button class="ghost${this.catFundo === c ? " on" : ""}" data-catf="${c}">${n}</button>`).join("")}</div>
-      ${this.catFundo === "entradas" ? `<div class="dica">Entrada é só o desenho: para ela levar a algum lugar, ponha uma 🕳️ Saída em cima dela (lá embaixo).</div>` : ""}` : ""}
-      <canvas id="ed-atlas"></canvas>` : `<div class="dica" style="margin-top:8px">Carregando as peças…</div>`;
+      ${P.cat ? `<div class="ferr">${this.CATS_FUNDO.map(([c, n]) => `<button class="ghost${catAq === c ? " on" : ""}" data-catf="${c}">${n}</button>`).join("")}</div>`
+        : `<div class="ferr"><button class="ghost${catAq === "objetos" ? " on" : ""}" data-catf="objetos">🧩 Objetos prontos (${P.objs.length})</button><button class="ghost${catAq === "tudo" ? " on" : ""}" data-catf="tudo">Todas as peças</button></div>`}
+      ${catAq === "entradas" ? `<div class="dica">Entrada é só o desenho: para ela levar a algum lugar, ponha uma 🕳️ Saída em cima dela (lá embaixo).</div>` : ""}
+      ${verObjs ? `<div class="dica">Toque num objeto e depois no mapa: ele vai inteiro, com as paredes como no jogo (achados nos mapas do jogo).</div><div id="ed-objs" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px"></div>`
+        : catAq === "objetos" ? `<div class="dica">Nenhum objeto achado para estas peças. Use "Todas as peças".</div>`
+        : `${catAq === "tudo" ? `<div class="dica">Arraste o dedo na lista para pegar várias peças juntas (um carimbo).</div>` : ""}<canvas id="ed-atlas" style="max-width:384px;margin:6px auto 0"></canvas>`}`
+      : `<div class="dica" style="margin-top:8px">Carregando as peças…</div>`;
     // fundo do mar
     h += `<div class="fundo"><b>🤿 Fundo do mar</b>`;
     const nv = aqui || meu;
@@ -409,17 +441,49 @@ const Editor = {
     if (P && this.pc.id >= 0) { const kk = P.pos.get(this.pc.id); if (kk !== undefined) $("ed-pcsel").getContext("2d").drawImage(P.atlas, (kk % 16) * 16, (kk >> 4) * 16, 16, 16, 0, 0, 16, 16); }
     p.querySelectorAll("#ed-fundas canvas").forEach((c) => { const i = +c.dataset.k; c.getContext("2d").drawImage(P.atlas, (i % 16) * 16, (i >> 4) * 16, 16, 16, 0, 0, 16, 16);
       c.onclick = () => { this.escolhePeca(P.ids[i]); this.status(`🤿 Água funda escolhida (peça ${P.ids[i].toString(16).toUpperCase()}). Pinte no mar onde quer mergulhar.`); }; });
-    p.querySelectorAll("[data-catf]").forEach((b) => b.onclick = () => { this.catFundo = b.dataset.catf; const rol = $("ed-pincel").scrollTop; this.desenhaPincel(); $("ed-pincel").scrollTop = rol; });
+    p.querySelectorAll("[data-catf]").forEach((b) => b.onclick = () => { if (P.cat) this.catFundo = b.dataset.catf; else this.catOutros = b.dataset.catf; const rol = $("ed-pincel").scrollTop; this.desenhaPincel(); $("ed-pincel").scrollTop = rol; });
+    const oc = $("ed-objs");
+    if (oc) P.objs.forEach((o, n) => {   // cada objeto desenhado inteiro
+      const c = document.createElement("canvas"); c.width = o.w * 16; c.height = o.h * 16;
+      const k2 = c.getContext("2d"); o.ids.forEach((id, j) => { const k = P.pos.get(id); if (id >= 0 && k !== undefined) k2.drawImage(P.atlas, (k % 16) * 16, (k >> 4) * 16, 16, 16, (j % o.w) * 16, ((j / o.w) | 0) * 16, 16, 16); });
+      const on = this.pc.carimbo && this.pc.carimbo.ids.join() === o.ids.join();
+      c.style.cssText = `width:${Math.min(o.w * 32, 160)}px;image-rendering:pixelated;cursor:pointer;background:#1f2230;border:2px solid ${on ? "#ff5fa2" : "#333a4a"};border-radius:6px;padding:2px`;
+      c.title = (o.nome ? o.nome + " " : "") + `${o.w}×${o.h}`;
+      c.onclick = () => { this.pc.carimbo = { nome: o.nome, w: o.w, h: o.h, ids: o.ids }; this.pc.ferr = "pincel"; const rol = $("ed-pincel").scrollTop; this.desenhaPincel(); $("ed-pincel").scrollTop = rol;
+        this.status(`🧩 ${o.nome || "Objeto"} (${o.w}×${o.h}) escolhido. Toque no mapa onde ele vai ficar (o meio dele fica onde você tocar).`); };
+      const caixa = document.createElement("div"); caixa.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:2px;max-width:170px";
+      caixa.appendChild(c);
+      if (o.nome) { const t = document.createElement("span"); t.className = "dica"; t.style.margin = "0"; t.textContent = o.nome; caixa.appendChild(t); }
+      oc.appendChild(caixa);
+    });
     const at = $("ed-atlas");
-    if (at && P) {   // a lista mostra só as peças do tipo escolhido (vis), em 16 colunas
-      at.width = 256; at.height = Math.max(16, Math.ceil(vis.length / 16) * 16);
+    const C = 8;   // 8 colunas, como o jogo organiza: as peças de um objeto ficam juntas
+    if (at && P) {   // a lista mostra só as peças do tipo escolhido (vis)
+      at.width = C * 16; at.height = Math.max(16, Math.ceil(vis.length / C) * 16);
       const c = at.getContext("2d");
-      vis.forEach((id, j) => { const k = P.pos.get(id); c.drawImage(P.atlas, (k % 16) * 16, (k >> 4) * 16, 16, 16, (j % 16) * 16, (j >> 4) * 16, 16, 16); });
+      vis.forEach((id, j) => { const k = P.pos.get(id); c.drawImage(P.atlas, (k % 16) * 16, (k >> 4) * 16, 16, 16, (j % C) * 16, ((j / C) | 0) * 16, 16, 16); });
       c.font = "9px sans-serif"; c.textBaseline = "top";
-      vis.forEach((id, i) => { const b = P.fundo ? 0 : P.beh[P.pos.get(id)]; if (b === 0x11 || b === 0x12 || b === 0x14) { c.strokeStyle = "#4fc3ff"; c.lineWidth = 1; c.strokeRect((i % 16) * 16 + .5, (i >> 4) * 16 + .5, 15, 15); c.fillStyle = "rgba(0,0,0,.55)"; c.fillRect((i % 16) * 16, (i >> 4) * 16, 9, 9); c.fillStyle = "#fff"; c.fillText("🤿", (i % 16) * 16, (i >> 4) * 16); } });
-      const ks = vis.indexOf(this.pc.id); if (ks >= 0) { c.strokeStyle = "#ff5fa2"; c.lineWidth = 2; c.strokeRect((ks % 16) * 16 + 1, (ks >> 4) * 16 + 1, 14, 14); }
-      at.onclick = (e) => { const r = at.getBoundingClientRect(), x = Math.floor((e.clientX - r.left) * at.width / r.width / 16), y = Math.floor((e.clientY - r.top) * at.height / r.height / 16), i = y * 16 + x;
-        if (x < 16 && i >= 0 && i < vis.length) { const rol = $("ed-pincel").scrollTop; this.escolhePeca(vis[i]); $("ed-pincel").scrollTop = rol; this.status(`Peça ${vis[i].toString(16).toUpperCase()} escolhida${this.pc.parede ? " (parede)" : ""}. Pinte no mapa.`); } };
+      vis.forEach((id, i) => { const b = P.fundo ? 0 : P.beh[P.pos.get(id)]; if (b === 0x11 || b === 0x12 || b === 0x14) { const x = (i % C) * 16, y = ((i / C) | 0) * 16; c.strokeStyle = "#4fc3ff"; c.lineWidth = 1; c.strokeRect(x + .5, y + .5, 15, 15); c.fillStyle = "rgba(0,0,0,.55)"; c.fillRect(x, y, 9, 9); c.fillStyle = "#fff"; c.fillText("🤿", x, y); } });
+      const ks = vis.indexOf(this.pc.id); if (ks >= 0 && !this.pc.carimbo) { c.strokeStyle = "#ff5fa2"; c.lineWidth = 2; c.strokeRect((ks % C) * 16 + 1, ((ks / C) | 0) * 16 + 1, 14, 14); }
+      const celula = (e) => { const r = at.getBoundingClientRect(); return [Math.max(0, Math.min(C - 1, Math.floor((e.clientX - r.left) * at.width / r.width / 16))), Math.max(0, Math.floor((e.clientY - r.top) * at.height / r.height / 16))]; };
+      let ini = null;
+      const marca = (a, b) => { const g = at.getContext("2d"); g.clearRect(0, 0, at.width, at.height);
+        vis.forEach((id, j) => { const k = P.pos.get(id); g.drawImage(P.atlas, (k % 16) * 16, (k >> 4) * 16, 16, 16, (j % C) * 16, ((j / C) | 0) * 16, 16, 16); });
+        g.strokeStyle = "#ff5fa2"; g.lineWidth = 2; g.strokeRect(Math.min(a[0], b[0]) * 16 + 1, Math.min(a[1], b[1]) * 16 + 1, (Math.abs(a[0] - b[0]) + 1) * 16 - 2, (Math.abs(a[1] - b[1]) + 1) * 16 - 2); };
+      at.onpointerdown = (e) => { ini = celula(e); at.setPointerCapture(e.pointerId); e.preventDefault(); };
+      at.onpointermove = (e) => { if (ini && catAq === "tudo") marca(ini, celula(e)); };
+      at.onpointerup = (e) => {
+        if (!ini) return; const fim = celula(e), a = ini; ini = null;
+        const x0 = Math.min(a[0], fim[0]), x1 = Math.max(a[0], fim[0]), y0 = Math.min(a[1], fim[1]), y1 = Math.max(a[1], fim[1]);
+        const rol = $("ed-pincel").scrollTop;
+        if ((x0 === x1 && y0 === y1) || catAq !== "tudo") { const i = fim[1] * C + fim[0]; if (i < vis.length) { this.escolhePeca(vis[i]); this.status(`Peça ${vis[i].toString(16).toUpperCase()} escolhida${this.pc.parede ? " (parede)" : ""}. Pinte no mapa.`); } }
+        else {   // carimbo com as peças do retângulo
+          const ids = []; for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { const i = y * C + x; ids.push(i < vis.length ? vis[i] : -1); }
+          this.pc.carimbo = { w: x1 - x0 + 1, h: y1 - y0 + 1, ids }; this.pc.ferr = "pincel"; this.desenhaPincel();
+          this.status(`🧩 Carimbo ${x1 - x0 + 1}×${y1 - y0 + 1}. Toque no mapa onde ele vai ficar.`);
+        }
+        $("ed-pincel").scrollTop = rol;
+      };
     }
     if ($("ed-fundo-cria")) $("ed-fundo-cria").onclick = () => {
       const L = this.dados.novos = this.dados.novos || [];
@@ -571,7 +635,7 @@ const Editor = {
     else { this.sel = null; const o = this.mapa.objs.find((o) => o.x === q.x && o.y === q.y); this.status(o ? `NPC do próprio jogo (sprite ${o.gfx}) em ${q.x}, ${q.y}: esse não dá para mudar.` : `Quadrado ${q.x}, ${q.y}.`); }
     this.desenha(); this.desenhaPainel();
   },
-  mexe(e) { const q = this.quadrado(e); this.hover = q; if (this.traco && q && this.pc.ferr !== "gotas") this.pinta(q); if (this.arrasto && q) this.arrasto.para = q; this.desenha(); },
+  mexe(e) { const q = this.quadrado(e); this.hover = q; if (this.traco && q && this.pc.ferr !== "gotas" && !(this.pc.ferr === "pincel" && this.pc.carimbo)) this.pinta(q); if (this.arrasto && q) this.arrasto.para = q; this.desenha(); },
   solta(e) {
     if (this.traco) { if (this.traco.size) { this.pilha.push({ k: this.chaveAqui(), m: this.traco }); if (this.pilha.length > 50) this.pilha.shift(); } this.traco = null; this.desenhaPincel(); return; }
     const a = this.arrasto; this.arrasto = null; if (!a) return;
@@ -633,7 +697,15 @@ const Editor = {
       ctx.fillStyle = "rgba(230,40,60,.35)";
       for (let i = 0; i < M.info.length; i++) if ((M.info[i] >> 10) & 3) ctx.fillRect((i % M.w) * 16 * Z, ((i / M.w) | 0) * 16 * Z, 16 * Z, 16 * Z);
     }
-    if (this.hover && this.abaAtual === "pincel") {   // onde o pincel vai pintar
+    const cbv = this.abaAtual === "pincel" && this.pc.ferr === "pincel" && this.pc.carimbo, Pp = this.pecas;
+    if (this.hover && cbv && Pp) {   // objeto: aparece clarinho onde vai ficar
+      const ox = -Math.floor((cbv.w - 1) / 2), oy = -Math.floor((cbv.h - 1) / 2);
+      ctx.globalAlpha = .7;
+      cbv.ids.forEach((id, j) => { const k = Pp.pos.get(id); if (id < 0 || k === undefined) return; const x = this.hover.x + ox + (j % cbv.w), y = this.hover.y + oy + ((j / cbv.w) | 0);
+        ctx.drawImage(Pp.atlas, (k % 16) * 16, (k >> 4) * 16, 16, 16, x * 16 * Z, y * 16 * Z, 16 * Z, 16 * Z); });
+      ctx.globalAlpha = 1; ctx.strokeStyle = "#ff5fa2"; ctx.lineWidth = 2;
+      ctx.strokeRect((this.hover.x + ox) * 16 * Z + 1, (this.hover.y + oy) * 16 * Z + 1, cbv.w * 16 * Z - 2, cbv.h * 16 * Z - 2);
+    } else if (this.hover && this.abaAtual === "pincel") {   // onde o pincel vai pintar
       const t = this.pc.ferr === "gotas" ? 1 : this.pc.tam || 1, o = -Math.floor((t - 1) / 2);
       ctx.strokeStyle = this.pc.ferr === "borracha" ? "#4fc3ff" : "#ff5fa2"; ctx.lineWidth = 2;
       ctx.strokeRect((this.hover.x + o) * 16 * Z + 1, (this.hover.y + o) * 16 * Z + 1, t * 16 * Z - 2, t * 16 * Z - 2);

@@ -126,7 +126,51 @@ const EditorQZ = (() => {
       pintaMeta(rgba, W, (k % 16) * 16, (k >> 4) * 16, m, vram, pal);
       beh.push(comportamento(bus, lay, id));
     });
-    return { ids, beh, w: W, h: H, rgba, ts2: ts[1] };
+    const U = usoTileset(bus, ts[0], ts[1]);
+    return { ids, beh, w: W, h: H, rgba, ts2: ts[1], tip: U.tip, objs: U.objs };
+  }
+  // Como o jogo usa estas peças (pedido 08/11: "a pedra tem 6 espaços, podia só clicar nela e ir"): olha todos os mapas
+  // com os mesmos tilesets. tip = valor mais comum de cada peça (colisão e altura do jogo). Objetos: os tilesets são
+  // desenhados em 8 colunas (porymap); duas peças vizinhas na folha (id+1 à direita, id+8 embaixo) que aparecem juntas na
+  // maioria das vezes nos mapas são do mesmo objeto. Objeto = retângulo das peças ligadas (2..30 peças, com alguma parede).
+  function usoTileset(bus, ts1, ts2) {
+    const tipN = new Map(), cont = new Map(), dir = new Map(), baixo = new Map(), vistos = new Set(), grupos = [];
+    for (let g = 0; g < 64; g++) { const l = bus.r32(GRUPOS + 4 * g); if (!ok(l)) break; grupos.push(l); }
+    for (let g = 0; g < grupos.length; g++) {
+      const n = g + 1 < grupos.length && grupos[g + 1] > grupos[g] ? Math.min(255, (grupos[g + 1] - grupos[g]) / 4) : 255;
+      for (let i = 0; i < n; i++) {
+        const h = bus.r32(grupos[g] + 4 * i); if (!ok(h)) break;
+        const L = bus.r32(h); if (!ok(L) || vistos.has(L) || LIVRE.some(([a, b]) => L >= a && L < b)) continue; vistos.add(L);
+        if (bus.r32(L + 0x10) !== ts1 || bus.r32(L + 0x14) !== ts2) continue;
+        const w = bus.r32(L), hh = bus.r32(L + 4), bl = bus.r32(L + 0xC); if (w > 256 || hh > 256 || !ok(bl)) continue;
+        const M = new Uint16Array(w * hh); for (let k = 0; k < w * hh; k++) M[k] = bus.r16(bl + 2 * k);
+        for (let y = 0; y < hh; y++) for (let x = 0; x < w; x++) {
+          const v = M[y * w + x], id = v & 0x3FF;
+          let t = tipN.get(id); if (!t) tipN.set(id, t = new Map()); t.set(v, (t.get(v) || 0) + 1);
+          cont.set(id, (cont.get(id) || 0) + 1);
+          if (x + 1 < w && (M[y * w + x + 1] & 0x3FF) === id + 1 && (id & 7) !== 7) dir.set(id, (dir.get(id) || 0) + 1);
+          if (y + 1 < hh && (M[(y + 1) * w + x] & 0x3FF) === id + 8) baixo.set(id, (baixo.get(id) || 0) + 1);
+        }
+      }
+    }
+    const tip = []; for (const [id, t] of tipN) tip.push([id, [...t.entries()].sort((a, b) => b[1] - a[1])[0][0]]);
+    const tipM = new Map(tip), pai = new Map(), acha = (a) => { while (pai.has(a) && pai.get(a) !== a) a = pai.get(a); return a; };
+    const une = (a, b) => { pai.set(a, a); pai.set(b, b); }, junta = (a, b) => { const ra = acha(a), rb = acha(b); if (ra !== rb) pai.set(rb, ra); };
+    const liga = (m, d) => { for (const [id, n] of m) { const ca = cont.get(id) || 1, cb = cont.get(id + d) || 1; if (n >= 2 && n / ca >= 0.4 && n / cb >= 0.4 && (id < 0x200) === (id + d < 0x200)) { if (!pai.has(id)) pai.set(id, id); if (!pai.has(id + d)) pai.set(id + d, id + d); junta(id, id + d); } } };
+    liga(dir, 1); liga(baixo, 8);
+    const comp = new Map(); for (const id of pai.keys()) { const r = acha(id); if (!comp.has(r)) comp.set(r, []); comp.get(r).push(id); }
+    const objs = [];
+    for (const L of comp.values()) {
+      if (L.length < 2 || L.length > 30) continue;
+      if (!L.some((id) => (tipM.get(id) >> 10) & 3)) continue;   // só chão: textura, não objeto
+      const col = (id) => (id & 0x1FF) % 8, lin = (id) => ((id & 0x1FF) / 8) | 0, base = L[0] & 0x200;
+      const c0 = Math.min(...L.map(col)), c1 = Math.max(...L.map(col)), l0 = Math.min(...L.map(lin)), l1 = Math.max(...L.map(lin));
+      const w = c1 - c0 + 1, h = l1 - l0 + 1, set = new Set(L), ids = [];
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const id = base + (l0 + y) * 8 + c0 + x; ids.push(set.has(id) ? id : -1); }
+      objs.push({ w, h, ids });
+    }
+    objs.sort((a, b) => (a.ids.find((i) => i >= 0)) - (b.ids.find((i) => i >= 0)));
+    return { tip, objs };
   }
   // pintura (ev.pint = { "g.n": { índice: bloco u16 } }) e fundos do mar (ev.novos = [{ num, sup: "g.n" }]).
   // Roda ANTES do montar dos eventos (que lê da ROM os cabeçalhos dos mapas novos): o site grava estas escritas e depois
@@ -782,6 +826,6 @@ const EditorQZ = (() => {
     }
     return ativo;
   }
-  return { pecas, montarMapas, grupo0, comportamento, PAREDE, CHAO, CHAO_SOBE, local, cabecalho, desenhaMapa, objetos, trajeto, caminhoAte, dadosMapa, desenhaSprite, infoSprite, catalogo, treinadores, itens, especies, texto, montar, vigiaVoo, desfazer, MOV, LIVRE, MARCAS };
+  return { usoTileset, pecas, montarMapas, grupo0, comportamento, PAREDE, CHAO, CHAO_SOBE, local, cabecalho, desenhaMapa, objetos, trajeto, caminhoAte, dadosMapa, desenhaSprite, infoSprite, catalogo, treinadores, itens, especies, texto, montar, vigiaVoo, desfazer, MOV, LIVRE, MARCAS };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = EditorQZ;
