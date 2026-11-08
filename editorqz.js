@@ -126,7 +126,7 @@ const EditorQZ = (() => {
       pintaMeta(rgba, W, (k % 16) * 16, (k >> 4) * 16, m, vram, pal);
       beh.push(comportamento(bus, lay, id));
     });
-    return { ids, beh, w: W, h: H, rgba };
+    return { ids, beh, w: W, h: H, rgba, ts2: ts[1] };
   }
   // pintura (ev.pint = { "g.n": { índice: bloco u16 } }) e fundos do mar (ev.novos = [{ num, sup: "g.n" }]).
   // Roda ANTES do montar dos eventos (que lê da ROM os cabeçalhos dos mapas novos): o site grava estas escritas e depois

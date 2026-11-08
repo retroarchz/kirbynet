@@ -587,7 +587,7 @@ function edMsg(m) {
   } else if (m.t === "ed-pecas") {
     const P = EditorQZ.pecas(bus);
     if (!P) return postMessage({ t: "ed-erro", msg: "Não consegui ler as peças deste lugar agora." });
-    postMessage({ t: "ed-pecas", ids: P.ids, beh: P.beh, w: P.w, h: P.h, rgba: P.rgba.buffer }, [P.rgba.buffer]);
+    postMessage({ t: "ed-pecas", ids: P.ids, beh: P.beh, w: P.w, h: P.h, rgba: P.rgba.buffer, ts2: P.ts2 }, [P.rgba.buffer]);
   } else if (m.t === "ed-sprites") {
     const lista = [], bufs = [];
     for (const g of m.ids || []) { const sp = EditorQZ.desenhaSprite(bus, g); if (sp) { lista.push({ gfx: g, w: sp.w, h: sp.h, rgba: sp.rgba.buffer }); bufs.push(sp.rgba.buffer); } }
