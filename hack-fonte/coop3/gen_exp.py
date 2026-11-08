@@ -66,7 +66,10 @@ a.label('t_orig'); a.mov('r4', 0); a.cmpi('r0', 2); a.bc('ls', 't_poe'); a.mov('
 a.label('t_poe')
 a.addi('r2', 0x23); a.ldrb_i('r0', 'r2', 0); a.mov('r1', 0x38); a.alu('bic', 'r0', 'r1'); a.lsl('r4', 'r4', 3); a.alu('orr', 'r0', 'r4'); a.strb_i('r0', 'r2', 0)
 a.ldr_lit('r1', 0x0808BF5D); a.h(0x9101); a.pop(['r4']); a.pop([], pc=True)
-a.label('t_fim'); a.ldr_lit('r1', 0x0808C629); a.h(0x9101); a.pop(['r4']); a.pop([], pc=True)
+a.label('t_fim')
+# devolve o alvo do lugar 4 (gen_alvo.py guardou em 0x0203F3C8): a experiência usa gBattleStruct+0x14 e ele mora ali
+a.ldr_lit('r4', 0x0203F3C8); a.ldrh_i('r4', 'r4', 0); a.ldr_lit('r1', GBS); a.ldr_i('r1', 'r1', 0); a.strh_i('r4', 'r1', 0x14)
+a.ldr_lit('r1', 0x0808C629); a.h(0x9101); a.pop(['r4']); a.pop([], pc=True)
 # --- tarefa: continuar para o próximo Pokémon? (chamada de 0x0808C5F8; r2 = gBattleStruct; volta 0x0808C61A = continua,
 # 0x0808C628 = termina). Coop de 2: espaços 0-2 com o lugar 0, 3-5 com o lugar 2. Luta de 3: mesmo dono (espaço & 6)
 a.label('segue')
