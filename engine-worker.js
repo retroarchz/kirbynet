@@ -495,7 +495,9 @@ function lutaDiag() {
     const ci = m.r32(0x0202320C) >>> 0;
     return "tela " + h(cb2) + " · pendente " + h(m.r32(0x02023040)) + " · ctl " + ctl.join(" ") + " · em campo " +
       [0, 1, 2, 3, 4, 5].map(b => m.r16(0x0203F400 + 2 * b)).join(",") + " · ausentes " + h(m.r8(0x02023209)) +
-      " · script " + h(ci) + " · tarefas " + tk.join(" ") + " · tripla " + m.r8(0x0203FE00);
+      " · script " + h(ci) + " · tarefas " + tk.join(" ") + " · tripla " + m.r8(0x0203FE00) +
+      // figura de cada lugar do nosso lado: número, em uso ("-" livre), tile e paleta; caixa de vida idem (08/11: borrão no meio)
+      " · figuras " + [0, 2, 4].map(b => { const f = (id) => { if (id >= 64) return id + "?"; const a = 0x02020630 + 0x44 * id; return id + ((m.r8(a + 0x3E) & 1) ? "" : "-") + "t" + (m.r16(a + 4) & 0x3FF) + "p" + (m.r8(a + 5) >> 4); }; return "L" + b + " " + f(m.r8(0x0203F664 + b)) + "/cx " + f(m.r8(0x0203F9F8 + b)); }).join(" ");
   } catch (e) { return null; }
 }
 
