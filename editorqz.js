@@ -227,6 +227,42 @@ const EditorQZ = (() => {
     }
     return { passos, pontos, fim: { x, y }, saiu };
   }
+  // caminho do personagem até ficar do lado de quem pisou no gatilho (pedido 08/11: "o personagem novo vem até mim").
+  // Busca em largura pelo mapa (parede, altura diferente e pessoas bloqueiam; o quadrado do jogador também). Devolve as
+  // direções (0 baixo, 1 cima, 2 esq, 3 dir), para onde ele vira no fim (olhando você) e os pontos (para desenhar).
+  const D4 = [[0, 1], [0, -1], [-1, 0], [1, 0]];
+  function caminhoAte(mapa, e, alvo, outros) {
+    const W = mapa.w, H = mapa.h, alt0 = mapa.info[e.y * W + e.x] >> 12 || 3;
+    const ocupado = (x, y) => mapa.objs.some((o) => o.x === x && o.y === y) || (outros || []).some((o) => o !== e && o.x === x && o.y === y);
+    const livre = (x, y) => {
+      if (x < 0 || y < 0 || x >= W || y >= H || (x === alvo.x && y === alvo.y)) return false;
+      const v = mapa.info[y * W + x]; if ((v >> 10) & 3) return false;
+      const z = v >> 12; if (z && z !== 15 && z !== alt0) return false;
+      return !ocupado(x, y);
+    };
+    const lado = (x, y) => Math.abs(x - alvo.x) + Math.abs(y - alvo.y) === 1;
+    if (lado(e.x, e.y)) return { dirs: [], face: faceDe(e.x, e.y, alvo), pontos: [], achou: true };
+    const de = new Map([[e.y * W + e.x, null]]), fila = [[e.x, e.y]];
+    let fim = null;
+    while (fila.length && !fim) {
+      const [x, y] = fila.shift();
+      for (let d = 0; d < 4; d++) {
+        const nx = x + D4[d][0], ny = y + D4[d][1], k = ny * W + nx;
+        if (de.has(k) || !livre(nx, ny)) continue;
+        de.set(k, [y * W + x, d]); fila.push([nx, ny]);
+        if (lado(nx, ny)) { fim = [nx, ny]; break; }
+      }
+      if (de.size > 4000) break;
+    }
+    if (!fim) return { dirs: [], face: faceDe(e.x, e.y, alvo), pontos: [], achou: false };
+    const dirs = [], pontos = []; let k = fim[1] * W + fim[0];
+    while (de.get(k)) { const [ant, d] = de.get(k); dirs.unshift(d); pontos.unshift({ x: k % W, y: (k / W) | 0 }); k = ant; }
+    return { dirs, face: faceDe(fim[0], fim[1], alvo), pontos, achou: true };
+  }
+  function faceDe(x, y, alvo) {   // direção para olhar o alvo
+    const dx = alvo.x - x, dy = alvo.y - y;
+    return Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 3 : 2) : (dy > 0 ? 0 : 1);
+  }
   function dadosMapa(bus, h, orig) {
     const lay = bus.r32(h), w = bus.r32(lay), hh = bus.r32(lay + 4), bl = bus.r32(lay + 0xC), info = [];
     for (let i = 0; i < w * hh; i++) info.push(bus.r16(bl + 2 * i));
@@ -326,6 +362,11 @@ const EditorQZ = (() => {
               if (e.marca && e.fim && e.fim !== "repete") { c.push(0x2B, ...u16(e.marca)); fimCedo.push(c.length + 2); c.push(0x06, 0x01, 0, 0, 0, 0); }   // já aconteceu
               if (cond) { c.push(0x2B, ...u16(cond.flag)); fimCedo.push(c.length + 2); c.push(0x06, cond.quando === "depois" ? 0x00 : 0x01, 0, 0, 0, 0); }   // ainda não vale
               c.push(LOCK);
+              if (auto.vem) {   // gatilho: ❗ na SUA cabeça (som 0x15 + mov. pronto 0x083601C3) e ele vem até o seu lado e te olha
+                c.push(0x2F, 0x15, 0x00, 0x4F, 0xFF, 0x00, ...u32(0x083601C3), 0x51, 0xFF, 0x00, 0x28, 0x0A, 0x00);
+                mv.push([c.length + 3, [...auto.vem.dirs.map((d) => 0x08 + d), auto.vem.face, 0xFE]]); c.push(0x4F, ...u16(id), 0, 0, 0, 0, 0x51, ...u16(id));
+                mv.push([c.length + 3, [[1, 0, 3, 2][auto.vem.face], 0xFE]]); c.push(0x4F, 0xFF, 0x00, 0, 0, 0, 0, 0x51, 0xFF, 0x00);   // você vira para ele
+              }
             } else {
               c.push(LOCK, 0x5A);                                                            // lock, faceplayer
               if (e.fim === "uma") { c.push(0x2B, ...u16(e.marca)); desvio = c.length; c.push(0x06, 0x01, 0, 0, 0, 0); }
@@ -407,12 +448,14 @@ const EditorQZ = (() => {
           };
           const fala = montaSeq(null);
           s.push(...fala.c); s.__fix = fala.fx;
-          if (e.comeca === "pisar" && e.gat) {   // pedido 08/11: cena quando você pisa num quadrado (gatilho como o da menina em 0.9)
-            const au = montaSeq({ var: 0 }), aa = aloca(au.c.length);
-            if (!aa) avisos.push("acabou o espaço livre da ROM");
-            else {
+          if (e.comeca === "pisar") {   // pedido 08/11: pisou num dos quadrados -> ❗ em você e ele vem até você (um script por quadrado)
+            for (const g of e.gats || (e.gat ? [e.gat] : [])) {
+              const vem = e.vem === false ? null : caminhoAte(mapaD, e, g, lista);
+              if (vem && !vem.achou) avisos.push(`ele não acha caminho até o quadrado ${g.x}, ${g.y} (só a ❗)`);
+              const au = montaSeq({ var: 0, vem }), aa = aloca(au.c.length);
+              if (!aa) { avisos.push("acabou o espaço livre da ROM"); break; }
               for (const [k, rel] of au.fx) { const w = u32(aa + rel); for (let j = 0; j < 4; j++) au.c[k + j] = w[j]; }
-              escritas.push([aa, au.c]); gats.push([e.gat.x | 0, e.gat.y | 0, aa]);
+              escritas.push([aa, au.c]); gats.push([g.x | 0, g.y | 0, aa]);
             }
           }
           else if (e.comeca === "sozinho" || e.comeca === "solto") {   // cena: script próprio, ligado pela tabela ON_FRAME do mapa (var temporária == 0)
@@ -584,6 +627,6 @@ const EditorQZ = (() => {
     }
     return ativo;
   }
-  return { local, cabecalho, desenhaMapa, objetos, trajeto, dadosMapa, desenhaSprite, infoSprite, catalogo, treinadores, itens, especies, texto, montar, vigiaVoo, desfazer, MOV, LIVRE, MARCAS };
+  return { local, cabecalho, desenhaMapa, objetos, trajeto, caminhoAte, dadosMapa, desenhaSprite, infoSprite, catalogo, treinadores, itens, especies, texto, montar, vigiaVoo, desfazer, MOV, LIVRE, MARCAS };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = EditorQZ;

@@ -67,6 +67,7 @@ const Editor = {
     else { const n = prompt("Nome para este personagem (ex.: Wally):", ""); if (n === null) return; this.favs[id] = n.trim().slice(0, 24); }
     this.gravarFavs(); this.desenhaCatalogo(); this.desenhaPainel();
   },
+  gatsDe(e) { return e.gats ? e.gats : e.gat ? [e.gat] : []; },
   nomeSprite(id) { return this.favs[id] ? `${this.favs[id]} (${id})` : String(id); },
   chave() { return `kirbynet.eventos.${this.who || "-"}.${this.rom}`; },
   lerLocal() { try { const d = JSON.parse(localStorage.getItem(this.chave())); if (d && d.mapas) return d; } catch (e) {} return { mapas: {} }; },
@@ -126,7 +127,7 @@ const Editor = {
   fechar() {
     if (this.mudou && !confirm("Fechar sem salvar? As mudanças não salvas somem.")) return;
     if (this.mudou) { this.dados = this.lerLocal(); this.mudou = false; }
-    this.aberto = false; $("ed").classList.add("hidden"); this.sel = null; this.colocar = null;
+    this.aberto = false; $("ed").classList.add("hidden"); this.sel = null; this.colocar = null; this.escolhendoGat = null;
   },
   chegouMapa(m) {
     const base = this.canvasDe(m.w * 16, m.h * 16, new Uint8ClampedArray(m.rgba));
@@ -320,7 +321,12 @@ const Editor = {
   },
   aperta(e) {
     const q = this.quadrado(e); if (!q) return;
-    if (this.escolhendoGat) { const ev = this.escolhendoGat; ev.gat = { x: q.x, y: q.y }; this.escolhendoGat = null; this.mudou = true; ev.reset = true; this.desenhaPainel(); this.desenha(); this.status(`Gatilho no quadrado ${q.x}, ${q.y}: quando você pisar ali, a cena começa. Aperte 💾 Salvar.`); return; }
+    if (this.escolhendoGat) {   // marca/desmarca quadrados do gatilho (vários; pedido 08/11)
+      const ev = this.escolhendoGat, L = this.gatsDe(ev), i = L.findIndex((g) => g.x === q.x && g.y === q.y);
+      if (i >= 0) L.splice(i, 1); else L.push({ x: q.x, y: q.y });
+      ev.gats = L; delete ev.gat; this.mudou = true; ev.reset = true; this.desenhaPainel(); this.desenha();
+      this.status(`${L.length} quadrado(s) marcado(s). Toque em outros para marcar/desmarcar; aperte ✓ Pronto quando acabar.`); return;
+    }
     if (this.escolhendoDestino) { const ev = this.escolhendoDestino; ev.destino = { grupo: this.mapa.local.grupo, num: this.mapa.local.num, x: q.x, y: q.y }; this.escolhendoDestino = null; this.mudou = true; this.desenhaPainel(); this.status(`Destino: ${q.x}, ${q.y} deste mapa.`); return; }
     const cont = this.continuar;
     if (cont) {
@@ -372,8 +378,13 @@ const Editor = {
     // caminho do evento selecionado (sequência): pontos por onde anda, X onde a parede para, 🚪 onde sai pela porta
     const sel = this.sel && this.sel.ev;
     // gatilhos "quando você pisa aqui": quadrado laranja com ❗ (o do selecionado mais forte)
-    for (const e of this.lista()) if (e.comeca === "pisar" && e.gat) {
-      const g = e.gat, forte = sel === e;
+    for (const e of this.lista()) if (e.comeca === "pisar") for (const g of this.gatsDe(e)) {
+      const forte = sel === e;
+      if (forte && e.vem !== false && typeof EditorQZ !== "undefined") {   // caminho que ele faz até você (pontilhado laranja)
+        const cm = EditorQZ.caminhoAte(M, e, g, this.lista()), c = (q) => [(q.x * 16 + 8) * Z, (q.y * 16 + 8) * Z];
+        ctx.strokeStyle = cm.achou ? "rgba(255,140,0,.8)" : "rgba(220,40,60,.9)"; ctx.lineWidth = Math.max(2, Z); ctx.setLineDash([2 * Z, 3 * Z]);
+        ctx.beginPath(); ctx.moveTo(...c(e)); for (const q of cm.pontos) ctx.lineTo(...c(q)); ctx.stroke(); ctx.setLineDash([]);
+      }
       ctx.fillStyle = forte ? "rgba(255,140,0,.45)" : "rgba(255,140,0,.2)"; ctx.fillRect(g.x * 16 * Z, g.y * 16 * Z, 16 * Z, 16 * Z);
       ctx.strokeStyle = "#ff8c00"; ctx.lineWidth = 2; ctx.setLineDash([3 * Z, 2 * Z]); ctx.strokeRect(g.x * 16 * Z + 1, g.y * 16 * Z + 1, 16 * Z - 2, 16 * Z - 2); ctx.setLineDash([]);
       ctx.font = `${Math.round(11 * Z)}px sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = "#fff"; ctx.fillText("❗", (g.x * 16 + 8) * Z, (g.y * 16 + 8) * Z);
@@ -465,8 +476,9 @@ const Editor = {
           <select data-i="${i}" data-k="sp" size="5">${opSp(p.sp)}</select>
           <div class="dica">O nível é o jogo que decide, pelo seu time (testado: pedi 30 e 90, veio no nível do seu Pokémon mais forte).</div>`;
       h += `<label>Quando começa</label><select id="ed-comeca">${op({ falar: "Quando você fala com ele", pisar: "Quando você pisa num quadrado (gatilho)", sozinho: "Sozinho ao chegar (cena: você fica parado)", solto: "Sozinho ao chegar, e você anda junto" }, s.comeca || "falar")}</select>
-        ${s.comeca === "pisar" ? `<div class="linha" style="margin-top:6px"><button id="ed-gat" class="ghost">📍 Escolher o quadrado no mapa</button><span class="dica" style="margin:0 0 0 8px;align-self:center">${s.gat ? `Quadrado: <b>${s.gat.x}, ${s.gat.y}</b> (laranja no mapa)` : `<span style="color:#ffd166">Nenhum quadrado escolhido ainda</span>`}</span></div>
-          <div class="dica">Quando você pisar nesse quadrado, tudo para e ele faz os passos. Dica: comece com "❗ Exclamação" em você e depois faça ele "Andar" até perto de você. Com "Só a primeira vez" ou "Some" no fim, só acontece uma vez.</div>` : ""}
+        ${s.comeca === "pisar" ? `<div class="linha" style="margin-top:6px"><button id="ed-gat" class="${this.escolhendoGat === s ? "" : "ghost"}">${this.escolhendoGat === s ? "✓ Pronto" : "📍 Marcar quadrados no mapa"}</button><span class="dica" style="margin:0 0 0 8px;align-self:center">${this.gatsDe(s).length ? `<b>${this.gatsDe(s).length}</b> quadrado(s) marcado(s) (laranja no mapa)` : `<span style="color:#ffd166">Nenhum quadrado marcado ainda</span>`}</span></div>
+          <label style="display:flex;gap:8px;align-items:center;margin-top:8px"><input type="checkbox" id="ed-vem" style="width:auto"${s.vem === false ? "" : " checked"}> ❗ na sua cabeça e ele vem até você</label>
+          <div class="dica">Quando você pisar num desses quadrados, tudo para, aparece a ❗ na sua cabeça e ele vem andando até o seu lado (o pontilhado laranja mostra o caminho; vermelho = não acha caminho). Depois ele faz os passos abaixo (falar, dar item…). Com "Só a primeira vez" ou "Some" no fim, só acontece uma vez.</div>` : ""}
         ${s.comeca === "sozinho" ? `<div class="dica">Cena: ao entrar no lugar, tudo para e ele faz os passos sozinho (se ele estiver valendo e ainda não tiver ido embora).</div>` : ""}
         ${s.comeca === "solto" ? `<div class="dica">Ao entrar no lugar ele começa sozinho e você continua livre para andar. Falas, itens e esperas só valem <b>antes</b> dele começar a andar; "Sumir" no fim faz ele desaparecer; "Voar" no fim: quando ele chega, dá o pulinho e o pássaro do Fly leva ele.</div>` : ""}
         <label>Passos (nessa ordem)</label><div id="ed-passos">` + s.passos.map((p, i) => {
@@ -550,7 +562,12 @@ const Editor = {
     if ($("ed-marcob")) $("ed-marcob").oninput = () => { const t = $("ed-marcob").value.toLowerCase(); for (const b of $("ed-marco").children) b.hidden = t && !b.textContent.toLowerCase().includes(t); };
     const dest = () => { s.destino = { grupo: +$("ed-dg").value || 0, num: +$("ed-dn").value || 0, x: +$("ed-dx").value || 0, y: +$("ed-dy").value || 0 }; };
     ["ed-dg", "ed-dn", "ed-dx", "ed-dy"].forEach((id) => liga(id, dest));
-    if ($("ed-gat")) $("ed-gat").onclick = () => { this.escolhendoGat = s; this.status("Toque no mapa no quadrado onde você vai pisar."); };
+    if ($("ed-gat")) $("ed-gat").onclick = () => {
+      if (this.escolhendoGat === s) { this.escolhendoGat = null; this.status(`${this.gatsDe(s).length} quadrado(s) marcado(s). Aperte 💾 Salvar.`); }
+      else { this.escolhendoGat = s; this.status("Toque no mapa nos quadrados onde você vai pisar (toque de novo para desmarcar). Depois aperte ✓ Pronto."); }
+      this.desenhaPainel();
+    };
+    liga("ed-vem", (el) => { if (el.checked) delete s.vem; else s.vem = false; this.desenha(); }, "change");
     if ($("ed-daqui")) $("ed-daqui").onclick = () => { this.escolhendoDestino = s; this.status("Toque no mapa no quadrado de chegada."); };
     if ($("ed-onde")) $("ed-onde").onclick = () => { const L = this.mapa.local; s.destino = { grupo: L.grupo, num: L.num, x: L.x, y: L.y }; this.mudou = true; this.desenhaPainel(); };
     ligaTopo();
@@ -573,7 +590,7 @@ const Editor = {
     for (const l of Object.values(this.dados.mapas)) for (const e of l) {
       if (e.acao === "lutar" && !e.treinador) return this.status("⚠️ Escolha o treinador do evento de luta.");
       if (e.acao === "teleporte" && !e.destino) return this.status("⚠️ Escolha o destino do teleporte.");
-      if (e.acao === "sequencia" && e.comeca === "pisar" && !e.gat) return this.status("⚠️ Escolha no mapa o quadrado do gatilho (📍 Escolher o quadrado no mapa).");
+      if (e.acao === "sequencia" && e.comeca === "pisar" && !this.gatsDe(e).length) return this.status("⚠️ Marque no mapa os quadrados do gatilho (📍 Marcar quadrados no mapa).");
     }
     this.dados.t = Date.now(); this.mudou = false;
     // "começar do zero" vai só nesta aplicação (o worker apaga as marcas no save); não fica guardado
