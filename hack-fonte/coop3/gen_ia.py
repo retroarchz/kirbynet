@@ -2,7 +2,7 @@
 # do pássaro do meio). A IA do Quetzal pontua alvos só nos lugares 0-3; o do meio é o lugar 4. Quando o inimigo já escolheu
 # golpe e alvo (OpponentHandleChooseMove, 0x08095544, logo antes de mandar a escolha), na tripla e só para golpe de dano com alvo
 # escolhido: calcula a eficácia do tipo do golpe (tabela 20x20 em 0x08538110, u32, 0x1000 = 1x) contra os 3 do nosso lado
-# (lugares 0, 2 e 4, vivos e presentes) e manda no de maior eficácia; empatados, sorteia entre eles (o do meio entra no sorteio).
+# (lugares 0, 2 e 4, vivos e presentes) e sorteia o alvo com peso = eficácia (2x, 1x, 1x -> 50%, 25%, 25%).
 # Uso: python gen_ia.py -> linhas para TELA_COOP3 (linkhle.js); JSON=arquivo grava em json.
 import sys, os, json, struct
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'metaknight'))
@@ -11,7 +11,7 @@ R = 0x08000000
 E = 0x09FF71C0                     # depois da fuga (gen_fuga.py vai até 0x09FF71A4)
 GANCHO = 0x08095544                # ldr r4, =gBattlerTarget; ldrb r1, [r4]  -> bl PONTE
 PONTE = 0x0808A4E8                 # fim da rotina de item antiga (copiada para 0x09FF6E80 em gen_item.py): livre
-FLAG, MONS, TARGET, ABSENT, VBL = 0x0203FE00, 0x0203F424, 0x02023205, 0x02023209, 0x03002680
+FLAG, MONS, TARGET, ABSENT, RANDOM = 0x0203FE00, 0x0203F424, 0x02023205, 0x02023209, 0x080A69D0
 MOVES, TIPOS, NTIPOS = 0x0853AD34, 0x08538110, 20
 ROM = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'roms', 'PokemonQuetzalCoop3Teste.gba')
 d = open(ROM, 'rb').read()
@@ -59,25 +59,23 @@ a.ldrb_i('r5', 'r5', 3)                                                         
 a.h(0xB083)                                                                          # sub sp, #12
 for k, b in enumerate((0, 2, 4)):
     a.mov('r0', b); a.bl('eff'); a.h(0x9000 | k)                                     # str r0, [sp, #4k]
-a.h(0x9C00)                                                                          # ldr r4, [sp, #0] (melhor)
-for k in (1, 2):
-    a.h(0x9900 | k); a.alu('cmp', 'r1', 'r4'); a.bc('le', 'm%d' % k); a.movh('r4', 'r1'); a.label('m%d' % k)
-a.cmpi('r4', 0); a.bc('lt', 'fim2')                                                  # ninguém vivo
+# pesos = eficácia (desmaiado/ausente = 0); sorteio proporcional (pedido do usuário em 08/11: "sempre no mais fraco" parecia
+# marcação: com Thunderbolt contra Voador no meio, 12 de 12 iam nele). Ex.: 2x, 1x, 1x -> 50%, 25%, 25%.
+for k in range(3):
+    a.h(0x9900 | k); a.cmpi('r1', 0); a.bc('ge', 'z%d' % k); a.mov('r1', 0); a.h(0x9100 | k); a.label('z%d' % k)   # str r1, [sp, #4k]
+a.h(0x9C00); a.h(0x9901); a.add_r('r4', 'r4', 'r1'); a.h(0x9902); a.add_r('r4', 'r4', 'r1')                      # r4 = total
+a.cmpi('r4', 0); a.bc('eq', 'fim2')                                                  # ninguém pode levar: fica a IA
 a.ldr_lit('r0', TARGET); a.ldrb_i('r6', 'r0', 0)
 a.mov('r0', 1); a.alu('tst', 'r6', 'r0'); a.bc('ne', 'fim2')                         # alvo atual tem que ser do nosso lado
 a.cmpi('r6', 4); a.bc('hi', 'fim2')
-a.mov('r7', 0)                                                                       # empatados com o melhor
-for k in range(3):
-    a.h(0x9900 | k); a.alu('cmp', 'r1', 'r4'); a.bc('ne', 'c%d' % k); a.addi('r7', 1); a.label('c%d' % k)
-a.ldr_lit('r0', VBL); a.ldr_i('r0', 'r0', 0); a.mov('r1', 0xFF); a.alu('and_', 'r0', 'r1')
-a.label('mod'); a.alu('cmp', 'r0', 'r7'); a.bc('lo', 'modok'); a.h(0x1A00 | (7 << 6) | (0 << 3) | 0); a.b('mod')   # subs r0, r0, r7
-a.label('modok')
-for k in range(3):
-    a.h(0x9900 | k); a.alu('cmp', 'r1', 'r4'); a.bc('ne', 'p%d' % k)
-    a.cmpi('r0', 0); a.bc('ne', 'q%d' % k); a.mov('r6', 2 * k); a.b('escreve')
-    a.label('q%d' % k); a.subi('r0', 1)
-    a.label('p%d' % k)
-a.b('fim2')
+a.ldr_lit('r3', RANDOM | 1); a.bl('c3r')                                             # r0 = Random() (0..65535)
+a.alu('mul', 'r0', 'r4'); a.h(0x0C00)                                                # lsrs r0, r0, #16 -> 0..total-1
+for k in range(2):
+    a.h(0x9900 | k); a.alu('cmp', 'r0', 'r1'); a.bc('lo', 'p%d' % k); a.h(0x1A40)  # subs r0, r0, r1
+a.mov('r6', 4); a.b('escreve')
+for k in range(2):
+    a.label('p%d' % k); a.mov('r6', 2 * k); a.b('escreve')
+a.label('c3r'); a.bx('r3')
 a.label('escreve')
 a.ldr_lit('r0', TARGET); a.strb_i('r6', 'r0', 0)
 a.label('fim2')
