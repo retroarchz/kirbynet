@@ -24,7 +24,7 @@ const Editor = {
   ACOES: { falar: "💬 Falar", item: "🎁 Dar item (uma vez)", chao: "📦 Item no chão", lutar: "⚔️ Lutar", teleporte: "🌀 Teleporte",
            sequencia: "📜 Sequência (falar, dar item, andar…)" },
   PASSOS: { falar: "💬 Falar", item: "🎁 Dar item", pedir: "🤲 Pedir item", andar: "🚶 Andar", virar: "↪️ Virar", esperar: "⏳ Esperar", voar: "🕊️ Sair voando", sumir: "🚪 Entrar e sumir",
-           pokemon: "🐾 Dar Pokémon", capturar: "⚔️ Luta para capturar" },
+           pokemon: "🐾 Dar Pokémon", capturar: "⚔️ Luta para capturar", exclamar: "❗ Exclamação" },
   DIRS: { baixo: "para baixo", cima: "para cima", esq: "para a esquerda", dir: "para a direita" },
   // marcas que o jogo liga: insígnia N = 0xA7F + N - 1 (achado nos scripts dos ginásios), treinador vencido = 0x500 + id
   INSIGNIAS: ["ganhar a 1ª insígnia (Roxanne, Rustboro)", "ganhar a 2ª insígnia (Brawly, Dewford)", "ganhar a 3ª insígnia (Wattson, Mauville — Raio)",
@@ -320,6 +320,7 @@ const Editor = {
   },
   aperta(e) {
     const q = this.quadrado(e); if (!q) return;
+    if (this.escolhendoGat) { const ev = this.escolhendoGat; ev.gat = { x: q.x, y: q.y }; this.escolhendoGat = null; this.mudou = true; ev.reset = true; this.desenhaPainel(); this.desenha(); this.status(`Gatilho no quadrado ${q.x}, ${q.y}: quando você pisar ali, a cena começa. Aperte 💾 Salvar.`); return; }
     if (this.escolhendoDestino) { const ev = this.escolhendoDestino; ev.destino = { grupo: this.mapa.local.grupo, num: this.mapa.local.num, x: q.x, y: q.y }; this.escolhendoDestino = null; this.mudou = true; this.desenhaPainel(); this.status(`Destino: ${q.x}, ${q.y} deste mapa.`); return; }
     const cont = this.continuar;
     if (cont) {
@@ -370,6 +371,13 @@ const Editor = {
     }
     // caminho do evento selecionado (sequência): pontos por onde anda, X onde a parede para, 🚪 onde sai pela porta
     const sel = this.sel && this.sel.ev;
+    // gatilhos "quando você pisa aqui": quadrado laranja com ❗ (o do selecionado mais forte)
+    for (const e of this.lista()) if (e.comeca === "pisar" && e.gat) {
+      const g = e.gat, forte = sel === e;
+      ctx.fillStyle = forte ? "rgba(255,140,0,.45)" : "rgba(255,140,0,.2)"; ctx.fillRect(g.x * 16 * Z, g.y * 16 * Z, 16 * Z, 16 * Z);
+      ctx.strokeStyle = "#ff8c00"; ctx.lineWidth = 2; ctx.setLineDash([3 * Z, 2 * Z]); ctx.strokeRect(g.x * 16 * Z + 1, g.y * 16 * Z + 1, 16 * Z - 2, 16 * Z - 2); ctx.setLineDash([]);
+      ctx.font = `${Math.round(11 * Z)}px sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = "#fff"; ctx.fillText("❗", (g.x * 16 + 8) * Z, (g.y * 16 + 8) * Z);
+    }
     if (sel && sel.acao === "sequencia" && typeof EditorQZ !== "undefined") {
       const tr = EditorQZ.trajeto(M, sel, this.lista()), c = (q) => [(q.x * 16 + 8) * Z, (q.y * 16 + 8) * Z];
       ctx.strokeStyle = "rgba(255,209,102,.9)"; ctx.lineWidth = Math.max(2, Z); ctx.setLineDash([4 * Z, 3 * Z]); ctx.beginPath(); ctx.moveTo(...c(sel));
@@ -456,7 +464,9 @@ const Editor = {
       const campoSp = (p, i) => `<input class="busca-sp" data-i="${i}" placeholder="Procurar Pokémon (★ = não dá para pegar no jogo)…">
           <select data-i="${i}" data-k="sp" size="5">${opSp(p.sp)}</select>
           <div class="dica">O nível é o jogo que decide, pelo seu time (testado: pedi 30 e 90, veio no nível do seu Pokémon mais forte).</div>`;
-      h += `<label>Quando começa</label><select id="ed-comeca">${op({ falar: "Quando você fala com ele", sozinho: "Sozinho ao chegar (cena: você fica parado)", solto: "Sozinho ao chegar, e você anda junto" }, s.comeca || "falar")}</select>
+      h += `<label>Quando começa</label><select id="ed-comeca">${op({ falar: "Quando você fala com ele", pisar: "Quando você pisa num quadrado (gatilho)", sozinho: "Sozinho ao chegar (cena: você fica parado)", solto: "Sozinho ao chegar, e você anda junto" }, s.comeca || "falar")}</select>
+        ${s.comeca === "pisar" ? `<div class="linha" style="margin-top:6px"><button id="ed-gat" class="ghost">📍 Escolher o quadrado no mapa</button><span class="dica" style="margin:0 0 0 8px;align-self:center">${s.gat ? `Quadrado: <b>${s.gat.x}, ${s.gat.y}</b> (laranja no mapa)` : `<span style="color:#ffd166">Nenhum quadrado escolhido ainda</span>`}</span></div>
+          <div class="dica">Quando você pisar nesse quadrado, tudo para e ele faz os passos. Dica: comece com "❗ Exclamação" em você e depois faça ele "Andar" até perto de você. Com "Só a primeira vez" ou "Some" no fim, só acontece uma vez.</div>` : ""}
         ${s.comeca === "sozinho" ? `<div class="dica">Cena: ao entrar no lugar, tudo para e ele faz os passos sozinho (se ele estiver valendo e ainda não tiver ido embora).</div>` : ""}
         ${s.comeca === "solto" ? `<div class="dica">Ao entrar no lugar ele começa sozinho e você continua livre para andar. Falas, itens e esperas só valem <b>antes</b> dele começar a andar; "Sumir" no fim faz ele desaparecer; "Voar" no fim: quando ele chega, dá o pulinho e o pássaro do Fly leva ele.</div>` : ""}
         <label>Passos (nessa ordem)</label><div id="ed-passos">` + s.passos.map((p, i) => {
@@ -470,6 +480,8 @@ const Editor = {
           <label>Se você ainda não tem (ele para aqui)</label><textarea data-i="${i}" data-k="texto">${esc(p.texto)}</textarea>
           <label>Quando você entrega (opcional)</label><textarea data-i="${i}" data-k="texto2">${esc(p.texto2 || "")}</textarea>
           <div class="dica">Com o item na mochila, ele tira o item e segue para os próximos passos.</div>`;
+        if (p.t === "exclamar") campo = `<select data-i="${i}" data-k="quem">${op({ voce: "Em cima da sua cabeça", ele: "Em cima da cabeça dele" }, p.quem || "voce")}</select>
+          <div class="dica">O "❗" com o som de quando um treinador te vê.</div>`;
         if (p.t === "pokemon") campo = campoSp(p, i) + `<div class="dica">Ele entrega o Pokémon (vai para a equipe ou para o PC). Com tudo cheio, o jogo avisa e ele para aqui. Use "Só a primeira vez" ou "Some" no fim para não dar de novo.</div>`;
         if (p.t === "capturar") campo = campoSp(p, i) + `<label>Se você não pegar (ele para aqui)</label><textarea data-i="${i}" data-k="texto">${esc(p.texto || "Ele continua por aqui… fale comigo para tentar de novo!")}</textarea>
           <div class="dica">Luta como as dos lendários do jogo: o Pokémon grita e aparece. Só segue para os próximos passos se você pegar; se fugir ou derrotar, dá para tentar de novo. Dica: use o sprite do próprio Pokémon e "Some e não volta mais" no fim.</div>`;
@@ -529,6 +541,7 @@ const Editor = {
         const t = b.dataset.add, novo = { t };
         if (t === "falar") novo.texto = "…"; if (t === "pedir") { novo.item = 1; novo.qtd = 1; novo.texto = "Preciso de um item. Me traz?"; novo.texto2 = "Obrigado!"; } if (t === "item") { novo.item = 1; novo.qtd = 1; } if (t === "andar") { novo.dir = "baixo"; novo.n = 2; } if (t === "virar") novo.dir = "baixo"; if (t === "esperar") novo.n = 1;
         if (t === "pokemon" || t === "capturar") { novo.sp = 491; novo.nv = 50; novo.nome = "Darkrai"; }
+        if (t === "exclamar") novo.quem = "voce";
         s.passos.push(novo); if ((t === "voar" || t === "sumir") && (s.fim || "repete") === "repete") s.fim = "some"; this.mudou = true; zera(); this.desenhaPainel(); this.desenha();
       });
     }
@@ -537,6 +550,7 @@ const Editor = {
     if ($("ed-marcob")) $("ed-marcob").oninput = () => { const t = $("ed-marcob").value.toLowerCase(); for (const b of $("ed-marco").children) b.hidden = t && !b.textContent.toLowerCase().includes(t); };
     const dest = () => { s.destino = { grupo: +$("ed-dg").value || 0, num: +$("ed-dn").value || 0, x: +$("ed-dx").value || 0, y: +$("ed-dy").value || 0 }; };
     ["ed-dg", "ed-dn", "ed-dx", "ed-dy"].forEach((id) => liga(id, dest));
+    if ($("ed-gat")) $("ed-gat").onclick = () => { this.escolhendoGat = s; this.status("Toque no mapa no quadrado onde você vai pisar."); };
     if ($("ed-daqui")) $("ed-daqui").onclick = () => { this.escolhendoDestino = s; this.status("Toque no mapa no quadrado de chegada."); };
     if ($("ed-onde")) $("ed-onde").onclick = () => { const L = this.mapa.local; s.destino = { grupo: L.grupo, num: L.num, x: L.x, y: L.y }; this.mudou = true; this.desenhaPainel(); };
     ligaTopo();
@@ -559,6 +573,7 @@ const Editor = {
     for (const l of Object.values(this.dados.mapas)) for (const e of l) {
       if (e.acao === "lutar" && !e.treinador) return this.status("⚠️ Escolha o treinador do evento de luta.");
       if (e.acao === "teleporte" && !e.destino) return this.status("⚠️ Escolha o destino do teleporte.");
+      if (e.acao === "sequencia" && e.comeca === "pisar" && !e.gat) return this.status("⚠️ Escolha no mapa o quadrado do gatilho (📍 Escolher o quadrado no mapa).");
     }
     this.dados.t = Date.now(); this.mudou = false;
     // "começar do zero" vai só nesta aplicação (o worker apaga as marcas no save); não fica guardado

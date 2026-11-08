@@ -270,7 +270,7 @@ const EditorQZ = (() => {
       const orig = ev.orig && ev.orig[chave] ? ev.orig[chave] : bus.r32(h + 4);
       const n0 = bus.r8(orig), arr0 = bus.r32(orig + 4);
       let maxId = 0; for (let i = 0; i < n0; i++) maxId = Math.max(maxId, bus.r8(arr0 + 24 * i));
-      const novos = [], trans = [], autos = [], mapaD = dadosMapa(bus, h, orig);
+      const novos = [], trans = [], autos = [], gats = [], mapaD = dadosMapa(bus, h, orig);
       for (const e of lista) {
         if (n0 + novos.length >= 64) { avisos.push("mapa " + chave + ": no máximo 64 pessoas"); break; }
         const id = ++maxId === 0xD1 ? ++maxId : maxId;
@@ -322,7 +322,7 @@ const EditorQZ = (() => {
             // o caminho inteiro vira UMA lista de movimento sem waitmovement. Falas só antes de começar a andar.
             const solto = !!auto && e.comeca === "solto", ml2 = []; let soltou = false, avisou = false, voaFim = false;
             if (auto) {
-              c.push(0x16, ...u16(auto.var), 0x01, 0x00);                                   // setvar temp = 1 (uma vez por entrada)
+              if (auto.var) c.push(0x16, ...u16(auto.var), 0x01, 0x00);                     // setvar temp = 1 (uma vez por entrada); pisar: sem var
               if (e.marca && e.fim && e.fim !== "repete") { c.push(0x2B, ...u16(e.marca)); fimCedo.push(c.length + 2); c.push(0x06, 0x01, 0, 0, 0, 0); }   // já aconteceu
               if (cond) { c.push(0x2B, ...u16(cond.flag)); fimCedo.push(c.length + 2); c.push(0x06, cond.quando === "depois" ? 0x00 : 0x01, 0, 0, 0, 0); }   // ainda não vale
               c.push(LOCK);
@@ -357,6 +357,11 @@ const EditorQZ = (() => {
                 faltas.push([c.length + 2, p.texto || "Preciso de um item… volte quando tiver!"]); c.push(0x06, 0x01, 0, 0, 0, 0);   // goto_if_eq -> pedido
                 c.push(0x45, ...u16(it), ...u16(q));                                // removeitem
                 if (p.texto2) { const a = poeTexto(p.texto2); c.push(0x0F, 0x00, ...u32(a), 0x09, 0x04); }
+              }
+              else if (p.t === "exclamar") {   // ❗ como no script 0x082C0247: som 0x15 ("pim") + movimento 0x56 pronto em 0x083601C3
+                const quem = p.quem === "ele" ? id : 0xFF;
+                if (c[c.length - 1] === 0x04 && c[c.length - 2] === 0x09) c.push(0x68);
+                c.push(0x2F, 0x15, 0x00, 0x4F, ...u16(quem), ...u32(0x083601C3), 0x51, ...u16(quem), 0x28, 0x14, 0x00);   // playse, applymovement, waitmovement, delay 20
               }
               else if (p.t === "pokemon") {   // dá o Pokémon (como o Beldum do jogo, 0x08309305): givemon, sem espaço = msg do jogo 0x083614E0
                 const sp = p.sp | 0, nv = Math.max(1, Math.min(100, p.nv | 0 || 5));
@@ -402,7 +407,15 @@ const EditorQZ = (() => {
           };
           const fala = montaSeq(null);
           s.push(...fala.c); s.__fix = fala.fx;
-          if (e.comeca === "sozinho" || e.comeca === "solto") {   // cena: script próprio, ligado pela tabela ON_FRAME do mapa (var temporária == 0)
+          if (e.comeca === "pisar" && e.gat) {   // pedido 08/11: cena quando você pisa num quadrado (gatilho como o da menina em 0.9)
+            const au = montaSeq({ var: 0 }), aa = aloca(au.c.length);
+            if (!aa) avisos.push("acabou o espaço livre da ROM");
+            else {
+              for (const [k, rel] of au.fx) { const w = u32(aa + rel); for (let j = 0; j < 4; j++) au.c[k + j] = w[j]; }
+              escritas.push([aa, au.c]); gats.push([e.gat.x | 0, e.gat.y | 0, aa]);
+            }
+          }
+          else if (e.comeca === "sozinho" || e.comeca === "solto") {   // cena: script próprio, ligado pela tabela ON_FRAME do mapa (var temporária == 0)
             const v = 0x400F - autos.length, au = montaSeq({ var: v }), aa = aloca(au.c.length);
             if (!aa) { avisos.push("acabou o espaço livre da ROM"); }
             else {
@@ -452,6 +465,17 @@ const EditorQZ = (() => {
       escritas.push([arr, bytes]);
       const cab = []; for (let i = 0; i < 0x14; i++) cab.push(bus.r8(orig + i));
       cab[0] = total; const pa = u32(arr); for (let j = 0; j < 4; j++) cab[4 + j] = pa[j];
+      if (gats.length) {   // gatilhos de quadrado (16 bytes: x, y, altura, 0, var, valor, 0, script). var 0 roda o script num quadro só
+        // (RunScriptImmediately: andar/esperar não funcionam) -> var 0x40E5, que nenhum script nem código do Quetzal usa (fica 0)
+        const nc0 = cab[2], pc0 = cab[12] | cab[13] << 8 | cab[14] << 16 | cab[15] << 24, gb = [];
+        const glay = bus.r32(h), glw = bus.r32(glay), gbl = bus.r32(glay + 0xC);
+        for (const [x, y, sc] of gats) { const z = (x < glw ? bus.r16(gbl + 2 * (y * glw + x)) >> 12 : 0) || 3;   // altura do quadrado (o jogo usa 3 aqui)
+          gb.push(...u16(x), ...u16(y), z, 0, 0xE5, 0x40, 0, 0, 0, 0, ...u32(sc)); }   // os nossos primeiro
+        if (ok(pc0 >>> 0)) for (let i = 0; i < nc0 * 16; i++) gb.push(bus.r8((pc0 >>> 0) + i));
+        const ga = aloca(gb.length);
+        if (!ga) { avisos.push("acabou o espaço livre da ROM"); break; }
+        escritas.push([ga, gb]); cab[2] = nc0 + gats.length; const pg = u32(ga); for (let j = 0; j < 4; j++) cab[12 + j] = pg[j];
+      }
       escritas.push([evs, cab]);
       escritas.push([h + 4, u32(evs)]);
       (ev.orig = ev.orig || {})[chave] = orig;
