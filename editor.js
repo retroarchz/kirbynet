@@ -332,6 +332,7 @@ const Editor = {
     const f = (id, n) => `<button class="ghost${this.pc.ferr === id ? " on" : ""}" data-ferr="${id}">${n}</button>`;
     const sel = this.pc.id >= 0 ? `peça <b>${this.pc.id.toString(16).toUpperCase()}</b>` : "nenhuma peça escolhida";
     let h = `<div class="dica">Escolha uma peça (lista abaixo) e pinte no mapa; arraste para pintar vários. Vale ao 💾 Salvar. Se você estiver neste lugar, entre numa casa e saia para ver no jogo.</div>
+      ${P && temFunda ? `<div class="fundo" style="margin-top:8px"><b>🤿 Água funda (dá para mergulhar)</b><div class="ferr" id="ed-fundas">${P.beh.map((b, i) => b === 0x11 || b === 0x12 || b === 0x14 ? `<canvas data-k="${i}" width="16" height="16" title="peça ${P.ids[i].toString(16).toUpperCase()}" style="width:44px;height:44px;image-rendering:pixelated;cursor:pointer;border:2px solid ${P.ids[i] === this.pc.id ? "#ff5fa2" : "#4fc3ff"};border-radius:6px"></canvas>` : "").join("")}</div><div class="dica">É o azul mais escuro. Toque numa e pinte no mar onde quer mergulhar.</div></div>` : ""}
       <div class="ferr">${f("pincel", "✏️ Pincel")}${f("gotas", "💧 Pegar do mapa")}${f("borracha", "🧽 Voltar ao original")}</div>
       <div class="ferr"><span class="dica" style="align-self:center;margin:0">Tamanho:</span>${[1, 2, 3].map((t) => `<button class="ghost${this.pc.tam === t ? " on" : ""}" data-tam="${t}">${t}×${t}</button>`).join("")}</div>
       <div class="linha" style="margin-top:8px"><canvas id="ed-pcsel" width="16" height="16" style="flex:0 0 40px;width:40px;height:40px;image-rendering:pixelated;background:#1f2230;border-radius:6px"></canvas>
@@ -357,12 +358,14 @@ const Editor = {
     $("ed-volta").onclick = () => this.voltaTraco();
     $("ed-verpar").onclick = () => { this.verParedes = !this.verParedes; this.desenhaPincel(); this.desenha(); };
     if (P && this.pc.id >= 0) { const kk = P.pos.get(this.pc.id); if (kk !== undefined) $("ed-pcsel").getContext("2d").drawImage(P.atlas, (kk % 16) * 16, (kk >> 4) * 16, 16, 16, 0, 0, 16, 16); }
+    p.querySelectorAll("#ed-fundas canvas").forEach((c) => { const i = +c.dataset.k; c.getContext("2d").drawImage(P.atlas, (i % 16) * 16, (i >> 4) * 16, 16, 16, 0, 0, 16, 16);
+      c.onclick = () => { this.escolhePeca(P.ids[i]); this.status(`🤿 Água funda escolhida (peça ${P.ids[i].toString(16).toUpperCase()}). Pinte no mar onde quer mergulhar.`); }; });
     const at = $("ed-atlas");
     if (at && P) {
       at.width = P.atlas.width; at.height = P.atlas.height;
       const c = at.getContext("2d"); c.drawImage(P.atlas, 0, 0);
       c.font = "9px sans-serif"; c.textBaseline = "top";
-      P.beh.forEach((b, i) => { if (b === 0x11 || b === 0x12 || b === 0x14) { c.fillStyle = "rgba(0,0,0,.55)"; c.fillRect((i % 16) * 16, (i >> 4) * 16, 9, 9); c.fillStyle = "#fff"; c.fillText("🤿", (i % 16) * 16, (i >> 4) * 16); } });
+      P.beh.forEach((b, i) => { if (b === 0x11 || b === 0x12 || b === 0x14) { c.strokeStyle = "#4fc3ff"; c.lineWidth = 1; c.strokeRect((i % 16) * 16 + .5, (i >> 4) * 16 + .5, 15, 15); c.fillStyle = "rgba(0,0,0,.55)"; c.fillRect((i % 16) * 16, (i >> 4) * 16, 9, 9); c.fillStyle = "#fff"; c.fillText("🤿", (i % 16) * 16, (i >> 4) * 16); } });
       const ks = P.pos.get(this.pc.id); if (ks !== undefined) { c.strokeStyle = "#ff5fa2"; c.lineWidth = 2; c.strokeRect((ks % 16) * 16 + 1, (ks >> 4) * 16 + 1, 14, 14); }
       at.onclick = (e) => { const r = at.getBoundingClientRect(), x = Math.floor((e.clientX - r.left) * at.width / r.width / 16), y = Math.floor((e.clientY - r.top) * at.height / r.height / 16), i = y * 16 + x;
         if (i >= 0 && i < P.ids.length) { const rol = $("ed-pincel").scrollTop; this.escolhePeca(P.ids[i]); $("ed-pincel").scrollTop = rol; this.status(`Peça ${P.ids[i].toString(16).toUpperCase()} escolhida${this.pc.parede ? " (parede)" : ""}. Pinte no mapa.`); } };
