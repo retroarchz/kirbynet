@@ -10,6 +10,9 @@ const Editor = {
   sprites: new Map(),            // gfx -> canvas
   pedidos: new Set(), listas: null, cat: "pessoas", pagina: 0, busca: "",
   mudou: false,
+  // pintura (pedido 08/11: "pintar as coisas, locais pra dive e meus locais embaixo"): dados.pint = { "g.n": { índice: bloco } },
+  // dados.novos = [{ num, sup }] (fundo do mar: mapa 0.num embaixo do lugar sup). As peças vêm do worker (ed-pecas).
+  abaAtual: "cat", pecas: null, pc: { id: -1, parede: false, v: 0, ferr: "pincel", tam: 1 }, traco: null, pilha: [], verParedes: false,
   // favoritos com nome: { sprite: "nome" }, neste aparelho e na nuvem (saves/<chave>/<sha1('kirbynet-favoritos:'+rom)>)
   favs: {}, favsT: 0,
 
@@ -41,7 +44,7 @@ const Editor = {
       const n = await this.lerNuvem();
       if (n && n.dados && (n.t || 0) > (this.dados.t || 0)) { this.dados = n.dados; this.dados.t = n.t; this.gravarLocal(); }
     } catch (e) {}
-    if (this.total()) run.worker.postMessage({ t: "ed-aplica", ev: this.dados, silencioso: true });
+    if (this.total() || this.temMapas()) run.worker.postMessage({ t: "ed-aplica", ev: this.dados, silencioso: true });
     this.lerFavs();
   },
   chaveFavs() { return `kirbynet.favoritos.${this.who || "-"}.${this.rom}`; },
@@ -88,17 +91,27 @@ const Editor = {
     return r.ok;
   },
   total() { return Object.values(this.dados.mapas || {}).reduce((s, l) => s + l.length, 0); },
+  temMapas() { return Object.keys(this.dados.pint || {}).length > 0 || (this.dados.novos || []).length > 0; },
 
   // ---------- mensagens do worker ----------
   recebe(m) {
     if (m.t === "ed-mapa") this.chegouMapa(m);
     else if (m.t === "ed-sprites") { for (const s of m.lista) this.sprites.set(s.gfx, this.canvasDe(s.w, s.h, new Uint8ClampedArray(s.rgba))); for (const s of m.lista) this.pedidos.delete(s.gfx); this.desenha(); this.desenhaCatalogo(); this.desenhaPainel(); }
     else if (m.t === "ed-listas") { this.listas = m; this.desenhaCatalogo(); this.desenhaPainel(); }
+    else if (m.t === "ed-pecas") {
+      const atlas = this.canvasDe(m.w, m.h, new Uint8ClampedArray(m.rgba)), pos = new Map();
+      m.ids.forEach((id, k) => pos.set(id, k));
+      this.pecas = { ids: m.ids, beh: m.beh, atlas, pos };
+      const M = this.mapa;   // pintura ainda não salva (o mapa que veio do jogo é o do último Salvar)
+      if (M) { for (const [i, v] of Object.entries((this.dados.pint || {})[this.chaveAqui()] || {})) if (M.info[+i] !== v) { M.info[+i] = v; this.pecaNoMapa(+i % M.w, (+i / M.w) | 0, v); } this.desenha(); }
+      this.desenhaPincel();
+    }
     else if (m.t === "ed-ok") {
       // as marcas "uma vez só" escolhidas no worker ficam guardadas no evento (senão o item seria dado de novo)
       if (m.marcas) for (const [k, l] of Object.entries(m.marcas)) (l || []).forEach((e, i) => { const d = (this.dados.mapas[k] || [])[i]; if (d && e.marca && !d.marca) d.marca = e.marca; if (d && e.marcaVis && !d.marcaVis) d.marcaVis = e.marcaVis; });
       this.gravarLocal();
-      if (!m.silencioso) this.status("✅ Salvo! Os eventos aparecem quando você entra no lugar: se já estiver nele, entre numa casa e saia (ou vá a outro mapa e volte)." + (m.avisos && m.avisos.length ? "  ⚠️ " + m.avisos.join(" · ") : ""));
+      if (m.usado) this.espaco = [m.usado, m.livre];
+      if (!m.silencioso) this.status("✅ Salvo! Eventos e pintura aparecem quando você entra no lugar: se já estiver nele, entre numa casa e saia (ou vá a outro mapa e volte)." + (m.avisos && m.avisos.length ? "  ⚠️ " + m.avisos.join(" · ") : ""));
       else if (m.avisos && m.avisos.length) toast("Eventos: " + m.avisos.join(" · "));
     }
     else if (m.t === "ed-erro") this.status("⚠️ " + m.msg);
@@ -131,15 +144,19 @@ const Editor = {
   },
   chegouMapa(m) {
     const base = this.canvasDe(m.w * 16, m.h * 16, new Uint8ClampedArray(m.rgba));
-    this.mapa = { local: m.local, w: m.w, h: m.h, base, info: m.info, objs: m.objs, portas: m.portas || [] };
-    this.sel = null;
+    this.mapa = { local: m.local, w: m.w, h: m.h, base, info: m.info, orig: m.orig || m.info.slice(), objs: m.objs, portas: m.portas || [], g0: m.g0 || 57 };
+    this.sel = null; this.pecas = null; this.pilha = [];
+    // o que já está pintado e ainda não foi salvo (Ler este lugar de novo): desenha por cima quando as peças chegarem
+    if (this.abaAtual === "pincel") this.run.worker.postMessage({ t: "ed-pecas" });
     this.pedeSprites([...new Set([...m.objs.map((o) => o.gfx), ...this.lista().map((e) => e.sprite)])]);
-    $("ed-titulo").textContent = `🛠️ Eventos — mapa ${m.local.grupo}.${m.local.num}`;
+    $("ed-titulo").textContent = `🛠️ Eventos — mapa ${m.local.grupo}.${m.local.num}${this.novoAqui() ? " (seu fundo do mar)" : ""}`;
     this.status(`Você está em ${m.local.x}, ${m.local.y}. Arraste um personagem da lista para o mapa.`);
     if (this.continuar) { this.aba("painel"); this.avisaContinuar(); }
     this.desenha(); this.desenhaPainel();
   },
   lista() { if (!this.mapa) return []; const k = this.mapa.local.grupo + "." + this.mapa.local.num; return this.dados.mapas[k] || (this.dados.mapas[k] = []); },
+  chaveAqui() { return this.mapa ? this.mapa.local.grupo + "." + this.mapa.local.num : ""; },
+  novoAqui() { const k = this.chaveAqui(); return (this.dados.novos || []).find((n) => "0." + n.num === k); },
   status(t) { const s = $("ed-status"); if (s) s.textContent = t; },
 
   // ---------- montagem da tela (uma vez) ----------
@@ -191,6 +208,12 @@ const Editor = {
 #ed .dica{color:#889;font-size:12px;margin-top:4px}
 #ed .perigo{background:#5a1f2a !important}
 #ed-pag{display:flex;gap:6px;align-items:center;margin-top:8px}
+#ed-pincel{flex:1;overflow:auto;padding:10px}
+#ed-atlas{width:100%;image-rendering:pixelated;cursor:pointer;border:1px solid #333a4a;border-radius:6px;margin-top:6px;display:block}
+#ed .ferr{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+#ed .ferr button{flex:1 1 auto;padding:7px 8px;font-size:13px;border-radius:8px;white-space:nowrap}
+#ed .ferr button.on{border-color:#ff5fa2;background:#2a1f2a;color:#fff}
+#ed .fundo{background:#16233a;border:1px solid #2b4a7a;border-radius:10px;padding:10px;margin-top:12px}
 @media (max-width:720px){#ed-corpo{flex-direction:column}#ed-lado{width:auto;max-width:none;height:45vh;border-left:0;border-top:1px solid #2a2e38}}`;
     document.head.appendChild(st);
     const d = document.createElement("div");
@@ -206,7 +229,7 @@ const Editor = {
 <div id="ed-corpo">
   <div id="ed-mapa"><canvas id="ed-cv"></canvas></div>
   <div id="ed-lado">
-    <div id="ed-abas"><button data-aba="cat" class="on">🧍 Personagens</button><button data-aba="painel">✏️ Evento</button></div>
+    <div id="ed-abas"><button data-aba="cat" class="on">🧍 Personagens</button><button data-aba="painel">✏️ Evento</button><button data-aba="pincel">🎨 Pintar</button></div>
     <div id="ed-cat">
       <select id="ed-cats"></select>
       <input id="ed-busca" placeholder="Procurar pelo número ou nome (ex.: 10657, Wally)">
@@ -215,6 +238,7 @@ const Editor = {
       <div id="ed-pag"><button id="ed-ant" class="ghost">◀</button><span id="ed-pagt" class="dica"></span><button id="ed-prox" class="ghost">▶</button></div>
     </div>
     <div id="ed-painel" class="hidden"></div>
+    <div id="ed-pincel" class="hidden"></div>
   </div>
 </div>`;
     document.body.appendChild(d);
@@ -239,10 +263,122 @@ const Editor = {
     cv.addEventListener("pointerdown", (e) => this.aperta(e));
     cv.addEventListener("pointerup", (e) => this.solta(e));
     cv.addEventListener("pointerleave", () => { this.hover = null; this.desenha(); });
+    // atalho: Ctrl+Z volta o último traço de pintura
+    addEventListener("keydown", (e) => { if (this.aberto && this.abaAtual === "pincel" && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); this.voltaTraco(); } });
   },
   aba(qual) {
+    this.abaAtual = qual;
     document.querySelectorAll("#ed-abas button").forEach((b) => b.classList.toggle("on", b.dataset.aba === qual));
     $("ed-cat").classList.toggle("hidden", qual !== "cat"); $("ed-painel").classList.toggle("hidden", qual !== "painel");
+    $("ed-pincel").classList.toggle("hidden", qual !== "pincel");
+    if (qual === "pincel") {
+      this.sel = null; this.colocar = null; this.escolhendoGat = null;
+      if (!this.pecas && this.mapa && this.run) { this.run.worker.postMessage({ t: "ed-pecas" }); }
+      this.desenhaPincel();
+      this.status("🎨 Escolha uma peça ao lado e pinte no mapa (arraste para pintar vários). Depois aperte 💾 Salvar.");
+    }
+    this.desenha();
+  },
+
+  // ---------- pintura ----------
+  pintKey() { const k = this.chaveAqui(); this.dados.pint = this.dados.pint || {}; return this.dados.pint[k] || (this.dados.pint[k] = {}); },
+  // colisão/altura padrão de uma peça: a mais usada com ela neste lugar; água = altura 1 (como o jogo), o resto 3
+  padrao(id) {
+    const M = this.mapa, cont = new Map();
+    for (const v of M.info) if ((v & 0x3FF) === id) cont.set(v >> 10, (cont.get(v >> 10) || 0) + 1);
+    if (cont.size) return [...cont.entries()].sort((a, b) => b[1] - a[1])[0][0] << 10 | id;
+    const k = this.pecas && this.pecas.pos.get(id), b = k !== undefined ? this.pecas.beh[k] : 0;
+    return (b >= 0x10 && b <= 0x15 ? 1 : 3) << 12 | id;
+  },
+  escolhePeca(id, v) {
+    const vv = v !== undefined ? v : this.padrao(id);
+    this.pc.id = id; this.pc.v = vv; this.pc.parede = !!((vv >> 10) & 3);
+    if (this.pc.ferr !== "pincel") this.pc.ferr = "pincel";
+    this.desenhaPincel();
+  },
+  valorPincel() { return (this.pc.v & ~0x0C00) | (this.pc.parede ? 0x0400 : 0); },
+  pecaNoMapa(x, y, v) {   // desenha a peça no fundo do editor
+    const P = this.pecas, k = P && P.pos.get(v & 0x3FF); if (k === undefined) return;
+    this.mapa.base.getContext("2d").drawImage(P.atlas, (k % 16) * 16, (k >> 4) * 16, 16, 16, x * 16, y * 16, 16, 16);
+  },
+  pinta(q) {
+    const M = this.mapa, P = this.pintKey(), t = this.pc.tam || 1, o = -Math.floor((t - 1) / 2);
+    if (this.pc.ferr === "gotas") { const v = M.info[q.y * M.w + q.x]; this.escolhePeca(v & 0x3FF, v); this.status(`Peça ${(v & 0x3FF).toString(16)} pega do mapa${(v >> 10) & 3 ? " (parede)" : ""}. Agora pinte.`); return; }
+    if (this.pc.ferr === "pincel" && this.pc.id < 0) return this.status("Escolha uma peça na lista ao lado primeiro.");
+    if (!this.pecas) return this.status("Carregando as peças…");
+    for (let dy = 0; dy < t; dy++) for (let dx = 0; dx < t; dx++) {
+      const x = q.x + o + dx, y = q.y + o + dy; if (x < 0 || y < 0 || x >= M.w || y >= M.h) continue;
+      const i = y * M.w + x, novo = this.pc.ferr === "borracha" ? M.orig[i] : this.valorPincel();
+      if (M.info[i] === novo) continue;
+      if (this.traco && !this.traco.has(i)) this.traco.set(i, [P[i], M.info[i]]);
+      if (novo === M.orig[i]) delete P[i]; else P[i] = novo;
+      M.info[i] = novo; this.pecaNoMapa(x, y, novo); this.mudou = true;
+    }
+    this.desenha();
+  },
+  voltaTraco() {
+    const t = this.pilha.pop(); if (!t || t.k !== this.chaveAqui()) return this.status("Nada para voltar.");
+    const P = this.pintKey(), M = this.mapa;
+    for (const [i, [antes, info]] of t.m) { if (antes === undefined) delete P[i]; else P[i] = antes; M.info[i] = info; this.pecaNoMapa(i % M.w, (i / M.w) | 0, info); }
+    this.mudou = true; this.desenha(); this.desenhaPincel(); this.status("↶ Voltei o último traço.");
+  },
+  desenhaPincel() {
+    const p = $("ed-pincel"); if (!p) return;
+    if (!this.mapa) { p.innerHTML = '<div class="dica">Lendo o mapa…</div>'; return; }
+    const P = this.pecas, k = this.chaveAqui(), nov = this.dados.novos || [];
+    const aqui = this.novoAqui(), meu = nov.find((n) => n.sup === k);
+    const pintados = Object.keys((this.dados.pint || {})[k] || {}).length;
+    const temFunda = P && P.beh.some((b) => b === 0x11 || b === 0x12 || b === 0x14);
+    const f = (id, n) => `<button class="ghost${this.pc.ferr === id ? " on" : ""}" data-ferr="${id}">${n}</button>`;
+    const sel = this.pc.id >= 0 ? `peça <b>${this.pc.id.toString(16).toUpperCase()}</b>` : "nenhuma peça escolhida";
+    let h = `<div class="dica">Escolha uma peça (lista abaixo) e pinte no mapa; arraste para pintar vários. Vale ao 💾 Salvar. Se você estiver neste lugar, entre numa casa e saia para ver no jogo.</div>
+      <div class="ferr">${f("pincel", "✏️ Pincel")}${f("gotas", "💧 Pegar do mapa")}${f("borracha", "🧽 Voltar ao original")}</div>
+      <div class="ferr"><span class="dica" style="align-self:center;margin:0">Tamanho:</span>${[1, 2, 3].map((t) => `<button class="ghost${this.pc.tam === t ? " on" : ""}" data-tam="${t}">${t}×${t}</button>`).join("")}</div>
+      <div class="linha" style="margin-top:8px"><canvas id="ed-pcsel" width="16" height="16" style="flex:0 0 40px;width:40px;height:40px;image-rendering:pixelated;background:#1f2230;border-radius:6px"></canvas>
+        <div><div>${sel}</div><label style="display:flex;gap:6px;align-items:center;margin:4px 0 0"><input type="checkbox" id="ed-parede" style="width:auto"${this.pc.parede ? " checked" : ""}> 🚧 Parede (não dá para passar)</label></div></div>
+      <div class="ferr"><button class="ghost" id="ed-volta">↶ Voltar traço (Ctrl+Z)</button><button class="ghost${this.verParedes ? " on" : ""}" id="ed-verpar">👁️ Ver paredes</button></div>
+      <div class="dica">${pintados} quadrado(s) pintado(s) neste lugar.${this.espaco ? ` Espaço usado: ${Math.round(this.espaco[0] / 1024)} de ${Math.round(this.espaco[1] / 1024)} KB.` : ""} Casas iguais por dentro usam o mesmo desenho: pintar uma muda todas.</div>`;
+    h += P ? `<div class="dica" style="margin-top:8px">Peças deste lugar${temFunda ? " (🤿 = água funda, onde dá para mergulhar)" : ""}:</div><canvas id="ed-atlas"></canvas>` : `<div class="dica" style="margin-top:8px">Carregando as peças…</div>`;
+    // fundo do mar
+    h += `<div class="fundo"><b>🤿 Fundo do mar</b>`;
+    if (aqui) h += `<div class="dica">Você está no fundo do mar que você criou (mapa 0.${aqui.num}), embaixo do lugar ${aqui.sup}. Pinte rocha (parede) e chão.
+      Você chega aqui no mesmo quadrado onde mergulhou. Para subir: aperte B num chão que não seja o "sem subida" (o jogo pergunta se quer subir); lá em cima tem que ser água.
+      Pessoas e eventos: aba 🧍 Personagens, igual a qualquer lugar.</div><button id="ed-fundo-apaga" class="ghost perigo" style="margin-top:8px" disabled title="Suba antes de apagar">🗑️ Apagar (suba primeiro)</button>`;
+    else if (meu) h += `<div class="dica">Este lugar tem fundo do mar (mapa 0.${meu.num}). Para descer: pinte água funda 🤿, surfe até ela e use Mergulhar (Dive). Lá embaixo você aparece no mesmo quadrado: abra o editor lá para pintar.</div>
+      <button id="ed-fundo-apaga" class="ghost perigo" style="margin-top:8px">🗑️ Apagar o fundo do mar deste lugar</button>`;
+    else h += `<div class="dica">Crie um lugar embaixo d'água só seu. Ele começa com chão embaixo da água e rocha embaixo da terra; depois você pinta como quiser.${P && !temFunda ? " ⚠️ Este lugar não tem peça de água funda: o mergulho só funciona em lugares de fora (rotas, cidades, mar)." : ""}</div>
+      <button id="ed-fundo-cria" style="margin-top:8px;width:100%">🤿 Criar fundo do mar embaixo deste lugar</button>`;
+    h += `</div>`;
+    p.innerHTML = h;
+    p.querySelectorAll("[data-ferr]").forEach((b) => b.onclick = () => { this.pc.ferr = b.dataset.ferr; this.desenhaPincel();
+      this.status({ pincel: "✏️ Pinte no mapa.", gotas: "💧 Toque num quadrado do mapa para pegar a peça dele.", borracha: "🧽 Toque/arraste no mapa: volta ao desenho original do jogo." }[this.pc.ferr]); });
+    p.querySelectorAll("[data-tam]").forEach((b) => b.onclick = () => { this.pc.tam = +b.dataset.tam; this.desenhaPincel(); });
+    $("ed-parede").onchange = () => { this.pc.parede = $("ed-parede").checked; };
+    $("ed-volta").onclick = () => this.voltaTraco();
+    $("ed-verpar").onclick = () => { this.verParedes = !this.verParedes; this.desenhaPincel(); this.desenha(); };
+    if (P && this.pc.id >= 0) { const kk = P.pos.get(this.pc.id); if (kk !== undefined) $("ed-pcsel").getContext("2d").drawImage(P.atlas, (kk % 16) * 16, (kk >> 4) * 16, 16, 16, 0, 0, 16, 16); }
+    const at = $("ed-atlas");
+    if (at && P) {
+      at.width = P.atlas.width; at.height = P.atlas.height;
+      const c = at.getContext("2d"); c.drawImage(P.atlas, 0, 0);
+      c.font = "9px sans-serif"; c.textBaseline = "top";
+      P.beh.forEach((b, i) => { if (b === 0x11 || b === 0x12 || b === 0x14) { c.fillStyle = "rgba(0,0,0,.55)"; c.fillRect((i % 16) * 16, (i >> 4) * 16, 9, 9); c.fillStyle = "#fff"; c.fillText("🤿", (i % 16) * 16, (i >> 4) * 16); } });
+      const ks = P.pos.get(this.pc.id); if (ks !== undefined) { c.strokeStyle = "#ff5fa2"; c.lineWidth = 2; c.strokeRect((ks % 16) * 16 + 1, (ks >> 4) * 16 + 1, 14, 14); }
+      at.onclick = (e) => { const r = at.getBoundingClientRect(), x = Math.floor((e.clientX - r.left) * at.width / r.width / 16), y = Math.floor((e.clientY - r.top) * at.height / r.height / 16), i = y * 16 + x;
+        if (i >= 0 && i < P.ids.length) { const rol = $("ed-pincel").scrollTop; this.escolhePeca(P.ids[i]); $("ed-pincel").scrollTop = rol; this.status(`Peça ${P.ids[i].toString(16).toUpperCase()} escolhida${this.pc.parede ? " (parede)" : ""}. Pinte no mapa.`); } };
+    }
+    if ($("ed-fundo-cria")) $("ed-fundo-cria").onclick = () => {
+      const L = this.dados.novos = this.dados.novos || [];
+      const num = Math.max(this.mapa.g0 - 1, ...L.map((n) => n.num)) + 1;
+      L.push({ num, sup: k }); this.mudou = true; this.desenhaPincel();
+      this.status(`🤿 Fundo do mar criado (mapa 0.${num}). Aperte 💾 Salvar. Depois pinte água funda (peças 🤿) onde quer mergulhar.`);
+    };
+    if ($("ed-fundo-apaga") && meu) $("ed-fundo-apaga").onclick = () => {
+      if (!confirm(`Apagar o fundo do mar deste lugar (mapa 0.${meu.num}), com a pintura e os eventos de lá?`)) return;
+      this.dados.novos = (this.dados.novos || []).filter((n) => n !== meu);
+      delete (this.dados.pint || {})["0." + meu.num]; delete this.dados.mapas["0." + meu.num];
+      this.mudou = true; this.desenhaPincel(); this.status("Fundo do mar apagado. Aperte 💾 Salvar.");
+    };
   },
 
   // ---------- catálogo ----------
@@ -321,6 +457,9 @@ const Editor = {
   },
   aperta(e) {
     const q = this.quadrado(e); if (!q) return;
+    if (this.abaAtual === "pincel") {   // pintura: um traço vai do apertar ao soltar (↶ volta o traço inteiro)
+      this.traco = new Map(); $("ed-cv").setPointerCapture(e.pointerId); this.pinta(q); return;
+    }
     if (this.escolhendoGat) {   // marca/desmarca quadrados do gatilho (vários; pedido 08/11)
       const ev = this.escolhendoGat, L = this.gatsDe(ev), i = L.findIndex((g) => g.x === q.x && g.y === q.y);
       if (i >= 0) L.splice(i, 1); else L.push({ x: q.x, y: q.y });
@@ -343,8 +482,9 @@ const Editor = {
     else { this.sel = null; const o = this.mapa.objs.find((o) => o.x === q.x && o.y === q.y); this.status(o ? `NPC do próprio jogo (sprite ${o.gfx}) em ${q.x}, ${q.y}: esse não dá para mudar.` : `Quadrado ${q.x}, ${q.y}.`); }
     this.desenha(); this.desenhaPainel();
   },
-  mexe(e) { const q = this.quadrado(e); this.hover = q; if (this.arrasto && q) this.arrasto.para = q; this.desenha(); },
+  mexe(e) { const q = this.quadrado(e); this.hover = q; if (this.traco && q && this.pc.ferr !== "gotas") this.pinta(q); if (this.arrasto && q) this.arrasto.para = q; this.desenha(); },
   solta(e) {
+    if (this.traco) { if (this.traco.size) { this.pilha.push({ k: this.chaveAqui(), m: this.traco }); if (this.pilha.length > 50) this.pilha.shift(); } this.traco = null; this.desenhaPincel(); return; }
     const a = this.arrasto; this.arrasto = null; if (!a) return;
     const q = a.para;
     if (q && (q.x !== a.de.x || q.y !== a.de.y)) { if (this.ocupado(q, a.ev)) this.status("Já tem alguém nesse quadrado."); else { a.ev.x = q.x; a.ev.y = q.y; this.mudou = true; this.status(`Movido para ${q.x}, ${q.y}.`); } }
@@ -399,7 +539,15 @@ const Editor = {
       for (const p of tr.passos) if (p.parou && !p.porta) { const [px, py] = c(p.parou); ctx.fillStyle = "rgba(220,40,60,.85)"; ctx.fillText("✖", px, py); }
       if (tr.saiu && tr.pontos.length) { const [px, py] = c(tr.fim); ctx.fillText("🚪", px, py); }
     }
-    if (this.hover) {
+    if (this.verParedes) {   // paredes em vermelho
+      ctx.fillStyle = "rgba(230,40,60,.35)";
+      for (let i = 0; i < M.info.length; i++) if ((M.info[i] >> 10) & 3) ctx.fillRect((i % M.w) * 16 * Z, ((i / M.w) | 0) * 16 * Z, 16 * Z, 16 * Z);
+    }
+    if (this.hover && this.abaAtual === "pincel") {   // onde o pincel vai pintar
+      const t = this.pc.ferr === "gotas" ? 1 : this.pc.tam || 1, o = -Math.floor((t - 1) / 2);
+      ctx.strokeStyle = this.pc.ferr === "borracha" ? "#4fc3ff" : "#ff5fa2"; ctx.lineWidth = 2;
+      ctx.strokeRect((this.hover.x + o) * 16 * Z + 1, (this.hover.y + o) * 16 * Z + 1, t * 16 * Z - 2, t * 16 * Z - 2);
+    } else if (this.hover) {
       ctx.strokeStyle = "rgba(255,255,255,.7)"; ctx.lineWidth = 1; ctx.strokeRect(this.hover.x * 16 * Z + .5, this.hover.y * 16 * Z + .5, 16 * Z - 1, 16 * Z - 1);
       if (this.colocar != null) this.desenhaSprite(ctx, this.colocar, this.hover.x, this.hover.y, .6);
     }
@@ -587,6 +735,7 @@ const Editor = {
   // ---------- salvar ----------
   async salvar() {
     for (const [k, l] of Object.entries(this.dados.mapas)) if (!l.length) delete this.dados.mapas[k];
+    for (const [k, m] of Object.entries(this.dados.pint || {})) if (!Object.keys(m).length) delete this.dados.pint[k];
     for (const l of Object.values(this.dados.mapas)) for (const e of l) {
       if (e.acao === "lutar" && !e.treinador) return this.status("⚠️ Escolha o treinador do evento de luta.");
       if (e.acao === "teleporte" && !e.destino) return this.status("⚠️ Escolha o destino do teleporte.");

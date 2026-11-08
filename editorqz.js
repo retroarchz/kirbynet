@@ -73,20 +73,137 @@ const EditorQZ = (() => {
     const W = w * 16, H = h * 16, rgba = new Uint8ClampedArray(W * H * 4), info = new Uint16Array(w * h);
     for (let my = 0; my < h; my++) for (let mx = 0; mx < w; mx++) {
       const v = bus.r16(blocos + 2 * (my * w + mx)); info[my * w + mx] = v;
-      const t = meta(v & 0x3FF);
-      for (let layer = 0; layer < 2; layer++) for (let q = 0; q < 4; q++) {
-        const e = t[layer * 4 + q], tile = e & 0x3FF, hf = e & 0x400, vf = e & 0x800, p = (e >> 12) * 16;
-        for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
-          const sx = hf ? 7 - x : x, sy = vf ? 7 - y : y, a = tile * 32 + sy * 4 + (sx >> 1);
-          if (a >= 0x8000) continue;
-          const c = sx & 1 ? vram[a] >> 4 : vram[a] & 15;
-          if (!c && layer) continue;
-          const rgb = pal[p + c], X = mx * 16 + (q & 1) * 8 + x, Y = my * 16 + (q >> 1) * 8 + y, o = (Y * W + X) * 4;
-          rgba[o] = rgb[0]; rgba[o + 1] = rgb[1]; rgba[o + 2] = rgb[2]; rgba[o + 3] = 255;
-        }
-      }
+      pintaMeta(rgba, W, mx * 16, my * 16, meta(v & 0x3FF), vram, pal);
     }
     return { w, h, rgba, info };
+  }
+  function pintaMeta(rgba, W, ox, oy, t, vram, pal) {   // um metatile (16x16, camada de baixo e de cima) em rgba
+    for (let layer = 0; layer < 2; layer++) for (let q = 0; q < 4; q++) {
+      const e = t[layer * 4 + q], tile = e & 0x3FF, hf = e & 0x400, vf = e & 0x800, p = (e >> 12) * 16;
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+        const sx = hf ? 7 - x : x, sy = vf ? 7 - y : y, a = tile * 32 + sy * 4 + (sx >> 1);
+        if (a >= 0x8000) continue;
+        const c = sx & 1 ? vram[a] >> 4 : vram[a] & 15;
+        if (!c && layer) continue;
+        const rgb = pal[p + c], X = ox + (q & 1) * 8 + x, Y = oy + (q >> 1) * 8 + y, o = (Y * W + X) * 4;
+        rgba[o] = rgb[0]; rgba[o + 1] = rgb[1]; rgba[o + 2] = rgb[2]; rgba[o + 3] = 255;
+      }
+    }
+  }
+
+  // ---------- pintura e fundo do mar (pedido 08/11: "pintar as coisas, locais pra dive e quando fizer dive os meus locais") ----------
+  // Achados: o desenho do mapa (blocos u16) fica na ROM com tamanho fixo -> pintar = reescrever no lugar. O jogo NÃO usa o
+  // layout do cabeçalho do mapa atual: GetMapLayout (0x080C0F00) pega gMapLayouts[0x08928C78][SaveBlock1+0x4A2 - 1] (id do
+  // cabeçalho +0x12). Mapa novo: id 0xFF00+i e GetMapLayout desviado para uma tabela nossa. Grupo 0 tem 57 mapas (lista
+  // 0x08931D40, logo depois vem a do grupo 1): o mapa novo entra como 0.57, 0.58… numa cópia maior da lista.
+  // Mergulho = ligação tipo 5 (12 bytes: tipo, deslocamento, grupo, número) no mapa de cima e tipo 6 (subir) no de baixo;
+  // você aparece no MESMO x,y. Água funda = comportamento 0x12 (0x11/0x14 também), metatile 0x14E do tileset geral.
+  // Fundo do mar copiado do 0.55 (tipo 5 = embaixo d'água, clima e música de lá): rocha 0x0613, chão onde dá para subir
+  // 0x3216, chão onde não dá (comportamento 0x19) 0x32A9.
+  const LAYOUTS = 0x08928C78, GETLAYOUT = 0x080C0F00, TPL = [0, 55];
+  const PAREDE = 0x0613, CHAO_SOBE = 0x3216, CHAO = 0x32A9;
+  const aguaFunda = (b) => b === 0x11 || b === 0x12 || b === 0x14;
+  function comportamento(bus, lay, id) {
+    const ts = bus.r32(lay + (id < 0x200 ? 0x10 : 0x14)), at = ok(ts) ? bus.r32(ts + 0x10) : 0;
+    return ok(at) ? bus.r16(at + 2 * (id & 0x1FF)) & 0xFF : 0;
+  }
+  function grupo0(bus) { const a = bus.r32(GRUPOS), b = bus.r32(GRUPOS + 4), n = (b - a) / 4; return n > 0 && n < 256 && n === (n | 0) ? n : 57; }
+  // as peças (metatiles) do mapa atual, desenhadas numa folha de 16 colunas, para a paleta do pincel
+  function pecas(bus) {
+    const lay = bus.r32(LAYOUT_RAM); if (!ok(lay)) return null;
+    const ts = [bus.r32(lay + 0x10), bus.r32(lay + 0x14)];
+    const conta = (t) => { if (!ok(t)) return 0; const m = bus.r32(t + 0xC), a = bus.r32(t + 0x10), n = (a - m) / 16; return a > m && n <= 512 && n === (n | 0) ? n : 512; };
+    const ids = [], n0 = conta(ts[0]), n1 = conta(ts[1]);
+    for (let i = 0; i < n0; i++) ids.push(i);
+    for (let i = 0; i < n1; i++) ids.push(0x200 + i);
+    const vram = new Uint8Array(0x8000);
+    for (let a = 0; a < 0x8000; a += 2) { const v = bus.r16(0x06000000 + a); vram[a] = v & 255; vram[a + 1] = v >> 8; }
+    const pal = []; for (let i = 0; i < 16 * 16; i++) pal.push(cor(bus.r16(PAL_RAM + 2 * i)));
+    const W = 256, H = Math.ceil(ids.length / 16) * 16, rgba = new Uint8ClampedArray(W * H * 4), beh = [];
+    ids.forEach((id, k) => {
+      const t = ts[id < 0x200 ? 0 : 1], base = bus.r32(t + 0xC), m = [];
+      for (let j = 0; j < 8; j++) m.push(bus.r16(base + (id & 0x1FF) * 16 + j * 2));
+      pintaMeta(rgba, W, (k % 16) * 16, (k >> 4) * 16, m, vram, pal);
+      beh.push(comportamento(bus, lay, id));
+    });
+    return { ids, beh, w: W, h: H, rgba };
+  }
+  // pintura (ev.pint = { "g.n": { índice: bloco u16 } }) e fundos do mar (ev.novos = [{ num, sup: "g.n" }]).
+  // Roda ANTES do montar dos eventos (que lê da ROM os cabeçalhos dos mapas novos): o site grava estas escritas e depois
+  // chama montar(bus, ev, est). guarda = o que estava antes fora das faixas livres (o desfazer volta).
+  function montarMapas(bus, ev) {
+    const escritas = [], avisos = [], guarda = [], est = { fat: 0, pos: LIVRE[0][0] }, pintOrig = {};
+    const aloca = (n) => {
+      n = (n + 3) & ~3;
+      while (est.fat < LIVRE.length) { if (est.pos + n <= LIVRE[est.fat][1]) { const a = est.pos; est.pos += n; return a; } est.fat++; if (est.fat < LIVRE.length) est.pos = LIVRE[est.fat][0]; }
+      return 0;
+    };
+    const u16 = (v) => [v & 255, v >> 8 & 255], u32 = (v) => [v & 255, v >> 8 & 255, v >> 16 & 255, v >>> 24 & 255];
+    const grava = (a, b) => { const velho = []; for (let i = 0; i < b.length; i++) velho.push(bus.r8(a + i)); guarda.push([a, velho]); escritas.push([a, b]); };
+    const pint = ev.pint || {}, n0 = grupo0(bus);
+    const novos = (ev.novos || []).filter((n) => n && n.num >= n0 && n.num < 250 && n.sup);
+    const deNovo = new Set(novos.map((n) => "0." + n.num));
+    // 1) mapas do jogo: no lugar (mapas com o mesmo desenho, como casas iguais, mudam juntos)
+    for (const [k, mp] of Object.entries(pint)) {
+      if (deNovo.has(k)) continue;
+      const [g, n] = k.split(".").map(Number), h = cabecalho(bus, g, n); if (!h) continue;
+      const lay = bus.r32(h), w = bus.r32(lay), hh = bus.r32(lay + 4), bl = bus.r32(lay + 0xC);
+      if (!ok(bl) || w > 512 || hh > 512) continue;
+      const po = pintOrig[k] = {};
+      for (const [i, v] of Object.entries(mp)) { const idx = +i; if (!(idx >= 0 && idx < w * hh)) continue; po[idx] = bus.r16(bl + 2 * idx); grava(bl + 2 * idx, u16(v & 0xFFFF)); }
+    }
+    if (!novos.length) return { escritas, avisos, guarda, est, pintOrig };
+    // 2) fundos do mar
+    const tplH = cabecalho(bus, TPL[0], TPL[1]), tplL = bus.r32(tplH), lista0 = bus.r32(GRUPOS);
+    const maxN = Math.max(...novos.map((n) => n.num)), L = [], ext = [];
+    for (let i = 0; i <= maxN; i++) L.push(...u32(i < n0 ? bus.r32(lista0 + 4 * i) : tplH));   // buraco (fundo apagado) = cópia do 0.55
+    for (let i = n0; i <= maxN; i++) ext.push(...u32(tplL));
+    const supUsada = new Set();
+    for (const nv of novos) {
+      const [sg, sn] = nv.sup.split(".").map(Number), sh = cabecalho(bus, sg, sn);
+      if (!sh || supUsada.has(nv.sup)) continue; supUsada.add(nv.sup);
+      const sl = bus.r32(sh), w = bus.r32(sl), hh = bus.r32(sl + 4), sbl = bus.r32(sl + 0xC);
+      if (!ok(sbl) || w > 300 || hh > 300 || (w + 15) * (hh + 14) > 0x2800) { avisos.push(`o lugar ${nv.sup} é grande demais para ter fundo do mar`); continue; }
+      const P = pint["0." + nv.num] || {}, PS = pint[nv.sup] || {}, po = pintOrig["0." + nv.num] = {}, blocos = [];
+      for (let i = 0; i < w * hh; i++) {   // começo: rocha embaixo da terra, chão embaixo da água, chão "de subir" embaixo da água funda
+        const sv = PS[i] !== undefined ? PS[i] : bus.r16(sbl + 2 * i), b = comportamento(bus, sl, sv & 0x3FF);
+        const v0 = aguaFunda(b) ? CHAO_SOBE : b >= 0x10 && b <= 0x15 ? CHAO : PAREDE;
+        if (P[i] !== undefined) po[i] = v0;
+        blocos.push(...u16(P[i] !== undefined ? P[i] & 0xFFFF : v0));
+      }
+      const ba = aloca(blocos.length), la = aloca(0x1C), ha = aloca(0x1C), ea = aloca(0x14), sa = aloca(4), ca = aloca(8 + 12);
+      if (!ba || !la || !ha || !ea || !sa || !ca) { avisos.push("acabou o espaço livre da ROM (fundo do mar " + nv.sup + ")"); break; }
+      escritas.push([ba, blocos]);
+      const lay = []; for (let i = 0; i < 0x1C; i++) lay.push(bus.r8(tplL + i));
+      lay.splice(0, 4, ...u32(w)); lay.splice(4, 4, ...u32(hh)); lay.splice(0xC, 4, ...u32(ba));
+      escritas.push([la, lay]);
+      escritas.push([ea, new Array(0x14).fill(0)]);                                     // sem pessoas (o editor de eventos põe)
+      escritas.push([sa, [0, 0, 0, 0]]);                                                // sem scripts do mapa
+      escritas.push([ca, [...u32(1), ...u32(ca + 8), 6, 0, 0, 0, 0, 0, 0, 0, sg, sn, 0, 0]]);   // subir -> lugar de cima
+      const hd = []; for (let i = 0; i < 0x1C; i++) hd.push(bus.r8(tplH + i));
+      hd.splice(0, 4, ...u32(la)); hd.splice(4, 4, ...u32(ea)); hd.splice(8, 4, ...u32(sa)); hd.splice(0xC, 4, ...u32(ca));
+      hd.splice(0x12, 2, ...u16(0xFF00 + nv.num - n0)); hd[0x14] = bus.r8(sh + 0x14);   // id do desenho nosso; nome do lugar = o de cima
+      escritas.push([ha, hd]);
+      L.splice(4 * nv.num, 4, ...u32(ha)); ext.splice(4 * (nv.num - n0), 4, ...u32(la));
+      // no lugar de cima: ligação de mergulho para o novo (troca a que já existir)
+      const sc = bus.r32(sh + 0xC), ents = [];
+      if (ok(sc)) { const nc = bus.r32(sc), cp = bus.r32(sc + 4); if (ok(cp) && nc < 32) for (let i = 0; i < nc; i++) { if (bus.r8(cp + 12 * i) === 5) continue; for (let j = 0; j < 12; j++) ents.push(bus.r8(cp + 12 * i + j)); } }
+      ents.push(5, 0, 0, 0, 0, 0, 0, 0, 0, nv.num, 0, 0);
+      const na = aloca(8 + ents.length); if (!na) { avisos.push("acabou o espaço livre da ROM"); break; }
+      escritas.push([na, [...u32(ents.length / 12), ...u32(na + 8), ...ents]]);
+      grava(sh + 0xC, u32(na));
+    }
+    const la0 = aloca(L.length), xa = aloca(ext.length), code = aloca(0x3C);
+    if (!la0 || !xa || !code) { avisos.push("acabou o espaço livre da ROM"); return { escritas, avisos, guarda, est, pintOrig }; }
+    escritas.push([la0, L]); escritas.push([xa, ext]);
+    grava(GRUPOS, u32(la0));
+    // GetMapLayout novo: id 0 -> nada; id 0xFFxx -> nossa tabela[xx]; senão gMapLayouts[id-1] (como o original)
+    escritas.push([code, [0x0A, 0x48, 0x00, 0x68, 0x0A, 0x49, 0x40, 0x18, 0x01, 0x88, 0x00, 0x20, 0x00, 0x29, 0x0B, 0xD0,
+      0x0A, 0x0A, 0xFF, 0x2A, 0x04, 0xD0, 0x01, 0x39, 0x89, 0x00, 0x06, 0x48, 0x40, 0x58, 0x03, 0xE0,
+      0x09, 0x06, 0x89, 0x0D, 0x04, 0x48, 0x40, 0x58, 0x70, 0x47, 0xC0, 0x46,
+      ...u32(0x030055BC), ...u32(0x4A2), ...u32(LAYOUTS), ...u32(xa)]]);
+    grava(GETLAYOUT, [0x00, 0x4B, 0x18, 0x47, ...u32(code | 1)]);   // ldr r3,[pc]; bx r3; .word nosso
+    return { escritas, avisos, guarda, est, pintOrig };
   }
 
   // objetos (eventos de pessoa) do mapa: os do jogo e os nossos
@@ -280,9 +397,9 @@ const EditorQZ = (() => {
   const DIRS = { baixo: 0, cima: 1, esq: 2, dir: 3 };
   // movimento "ficar invisível" do Quetzal (para o modo solto: some no fim do caminho sem travar o jogador)
   const INVIS = () => (typeof globalThis.QZ_INVIS === "number" ? globalThis.QZ_INVIS : 0x54);
-  function montar(bus, ev) {
+  function montar(bus, ev, est) {   // est: de onde continuar nas faixas livres (depois do montarMapas)
     const escritas = [], avisos = [], vigias = [];
-    let fat = 0, pos = LIVRE[0][0];
+    let fat = est ? est.fat : 0, pos = est ? est.pos : LIVRE[0][0];
     const aloca = (n) => {   // n bytes alinhados em 4 nas faixas livres
       n = (n + 3) & ~3;
       while (fat < LIVRE.length) { if (pos + n <= LIVRE[fat][1]) { const a = pos; pos += n; return a; } fat++; if (fat < LIVRE.length) pos = LIVRE[fat][0]; }
@@ -579,7 +696,7 @@ const EditorQZ = (() => {
     return { escritas, avisos, vigias, usado: LIVRE.slice(0, fat).reduce((s, [a, b]) => s + b - a, 0) + (pos - (LIVRE[fat] || [pos])[0]) };
   }
   // desfaz (volta os cabeçalhos e limpa as faixas livres)
-  function desfazer(bus, orig, origScr) {
+  function desfazer(bus, orig, origScr, guarda) {
     const escritas = [], w = (o) => [o & 255, o >> 8 & 255, o >> 16 & 255, o >>> 24 & 255];
     for (const [chave, o] of Object.entries(orig || {})) {
       const [grupo, num] = chave.split(".").map(Number), h = cabecalho(bus, grupo, num);
@@ -589,6 +706,9 @@ const EditorQZ = (() => {
       const [grupo, num] = chave.split(".").map(Number), h = cabecalho(bus, grupo, num);
       if (h) escritas.push([h + 8, w(o)]);
     }
+    // pintura, grupo 0, ligações de mergulho, GetMapLayout: volta o que estava lá (do último para o primeiro). Depois dos
+    // cabeçalhos dos eventos: com a lista do grupo 0 original, o "0.57" leria o cabeçalho de outro mapa.
+    for (let i = (guarda || []).length - 1; i >= 0; i--) escritas.push(guarda[i]);
     for (const [a, b] of LIVRE) escritas.push([a, new Array(b - a).fill(0xFF)]);
     return escritas;
   }
@@ -642,6 +762,6 @@ const EditorQZ = (() => {
     }
     return ativo;
   }
-  return { local, cabecalho, desenhaMapa, objetos, trajeto, caminhoAte, dadosMapa, desenhaSprite, infoSprite, catalogo, treinadores, itens, especies, texto, montar, vigiaVoo, desfazer, MOV, LIVRE, MARCAS };
+  return { pecas, montarMapas, grupo0, comportamento, PAREDE, CHAO, CHAO_SOBE, local, cabecalho, desenhaMapa, objetos, trajeto, caminhoAte, dadosMapa, desenhaSprite, infoSprite, catalogo, treinadores, itens, especies, texto, montar, vigiaVoo, desfazer, MOV, LIVRE, MARCAS };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = EditorQZ;

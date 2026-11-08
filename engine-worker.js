@@ -509,7 +509,7 @@ function lutaDiag() {
 // ---------- editor de eventos do Pokémon Quetzal (editorqz.js; a tela fica no editor.js) ----------
 // Nunca na sala por rollback (lá todos rodam a mesma ROM). Os eventos são escritas na ROM da partida (romWrite), refeitas
 // do zero a cada aplicação: desfaz as anteriores (cabeçalhos originais + faixas livres de volta a 0xFF) e monta de novo.
-let edPend = null, edOrig = null, edOrigScr = null, edVig = [], edVigVoo = false;
+let edPend = null, edOrig = null, edOrigScr = null, edVig = [], edVigVoo = false, edGuarda = null, edPintOrig = {}, edNovos = [];
 const edPode = () => run && run.quetzal && !run.rb && !SNES && run.s.romWrite;
 function edBus() {
   const s = run.s, r16 = (a) => s.read16(0, a) & 0xFFFF;
@@ -519,10 +519,15 @@ function edAplica(m) {
   if (!run) { edPend = m; return; }
   if (!edPode()) return postMessage({ t: "ed-ok", avisos: ["Os eventos não valem nesta partida (sala por rollback)."] });
   const bus = edBus(), escreve = (lista) => { for (const [a, b] of lista) run.s.romWrite(a - 0x08000000, Uint8Array.from(b)); };
-  if (edOrig) escreve(EditorQZ.desfazer(bus, edOrig, edOrigScr));
-  const ev = { mapas: m.ev && m.ev.mapas || {} };
-  const r = EditorQZ.montar(bus, ev);
+  if (edOrig || edGuarda) escreve(EditorQZ.desfazer(bus, edOrig, edOrigScr, edGuarda));
+  const ev = { mapas: m.ev && m.ev.mapas || {}, pint: m.ev && m.ev.pint || {}, novos: m.ev && m.ev.novos || [] };
+  // pintura e fundos do mar primeiro (o montar dos eventos lê da ROM os cabeçalhos dos mapas novos)
+  const mm = EditorQZ.montarMapas(bus, ev);
+  escreve(mm.escritas);
+  const r = EditorQZ.montar(bus, ev, mm.est);
   escreve(r.escritas);
+  r.avisos = [...mm.avisos, ...r.avisos];
+  edGuarda = mm.guarda; edPintOrig = mm.pintOrig; edNovos = ev.novos;
   // eventos mudados no editor (reset): o save esquece que eles já sumiram/já deram o item (marca "uma vez" desligada)
   const ramR = run.s.ram(0);
   if (ramR && !m.silencioso) {
@@ -530,7 +535,7 @@ function edAplica(m) {
     if (s1 >= 0x02000000 && s1 < 0x02040000 - 0x2000)
       for (const l of Object.values(ev.mapas)) for (const e of l) if (e.reset && e.marca) ramR.w8(s1 + (e.marca >> 3), ramR.r8(s1 + (e.marca >> 3)) & ~(1 << (e.marca & 7)));
   }
-  edOrig = ev.orig || null; edOrigScr = ev.origScr || null; edVig = r.vigias || [];
+  edOrig = ev.orig || {}; edOrigScr = ev.origScr || null; edVig = r.vigias || [];
   // O jogo guarda na RAM uma cópia do cabeçalho do mapa atual (gMapHeader 0x02038CB0: +4 eventos, +8 scripts). Se
   // aplicamos com o jogador DENTRO de um mapa editado, essa cópia ainda aponta para a lista velha, que acabou de ser
   // apagada/regravada em outro lugar: as portas liam lixo e ninguém conseguia sair (relato 03/11, Wally no mapa 22.0).
@@ -539,12 +544,17 @@ function edAplica(m) {
   if (ram) {
     const s1 = ram.r32(0x030055BC);
     if (s1 >= 0x02000000 && s1 < 0x02040000 - 0x2000) {
-      const h = EditorQZ.cabecalho(bus, ram.r8(s1 + 0x474), ram.r8(s1 + 0x475));
+      const g = ram.r8(s1 + 0x474), n = ram.r8(s1 + 0x475), h = EditorQZ.cabecalho(bus, g, n);
       const w32 = (a, v) => { ram.w16(a, v & 0xFFFF); ram.w16(a + 2, v >>> 16); };
-      if (h && bus.r32(h) === ram.r32(0x02038CB0)) { w32(0x02038CB4, bus.r32(h + 4)); w32(0x02038CB8, bus.r32(h + 8)); }
+      // fundo do mar seu: o desenho dele pode ter mudado de lugar (as faixas livres são refeitas a cada Salvar)
+      const novo = g === 0 && ev.novos.some((x) => x.num === n);
+      if (h && (novo || bus.r32(h) === ram.r32(0x02038CB0))) {
+        if (novo) w32(0x02038CB0, bus.r32(h));
+        w32(0x02038CB4, bus.r32(h + 4)); w32(0x02038CB8, bus.r32(h + 8)); w32(0x02038CBC, bus.r32(h + 0xC));   // +0xC ligações (mergulho)
+      }
     }
   }
-  postMessage({ t: "ed-ok", avisos: r.avisos, marcas: ev.mapas, silencioso: !!m.silencioso });
+  postMessage({ t: "ed-ok", avisos: r.avisos, marcas: ev.mapas, silencioso: !!m.silencioso, usado: r.usado, livre: EditorQZ.LIVRE.reduce((t, [a, b]) => t + b - a, 0) });
 }
 // O jogo guarda no save uma cópia das pessoas do mapa atual (SaveBlock1 +0x1790, 24 bytes cada) e, ao continuar um jogo
 // salvo, usa essa cópia: o evento novo só nasceria depois de sair e voltar ao mapa. A cada 30 quadros: se o mapa carregado
@@ -552,7 +562,7 @@ function edAplica(m) {
 // copia a lista certa. O jogo cria quem faltar quando a câmera anda (TrySpawnObjectEvents lê essa cópia).
 function edVigia() {
   if (edVig.length && (edVigVoo || run.frames % 8 === 0) && edPode()) { const r = run.s.ram(0); if (r) edVigVoo = EditorQZ.vigiaVoo(r, edVig); }   // voar no fim do "anda junto" (a cada quadro durante o voo)
-  if (!edOrig || run.frames % 30 || !edPode()) return;
+  if (!edOrig || !Object.keys(edOrig).length || run.frames % 30 || !edPode()) return;
   const ram = run.s.ram(0); if (!ram) return;
   const ev = ram.r32(0x02038CB4);
   if (!EditorQZ.LIVRE.some(([a, b]) => ev >= a && ev < b)) return;
@@ -570,8 +580,13 @@ function edMsg(m) {
     // objetos do jogo (sem os nossos: os nossos vêm do editor)
     const orig = edOrig && edOrig[L.grupo + "." + L.num] || bus.r32(h + 4);
     const objs = EditorQZ.objetos(bus, orig), portas = EditorQZ.dadosMapa(bus, h, orig).portas;
-    const buf = M.rgba.buffer;
-    postMessage({ t: "ed-mapa", local: L, w: M.w, h: M.h, rgba: buf, info: Array.from(M.info), objs, portas }, [buf]);
+    const buf = M.rgba.buffer, info = Array.from(M.info), antes = info.slice();
+    for (const [i, v] of Object.entries(edPintOrig[L.grupo + "." + L.num] || {})) antes[+i] = v;   // como era antes da pintura (borracha)
+    postMessage({ t: "ed-mapa", local: L, w: M.w, h: M.h, rgba: buf, info, orig: antes, objs, portas, g0: EditorQZ.grupo0(bus) }, [buf]);
+  } else if (m.t === "ed-pecas") {
+    const P = EditorQZ.pecas(bus);
+    if (!P) return postMessage({ t: "ed-erro", msg: "Não consegui ler as peças deste lugar agora." });
+    postMessage({ t: "ed-pecas", ids: P.ids, beh: P.beh, w: P.w, h: P.h, rgba: P.rgba.buffer }, [P.rgba.buffer]);
   } else if (m.t === "ed-sprites") {
     const lista = [], bufs = [];
     for (const g of m.ids || []) { const sp = EditorQZ.desenhaSprite(bus, g); if (sp) { lista.push({ gfx: g, w: sp.w, h: sp.h, rgba: sp.rgba.buffer }); bufs.push(sp.rgba.buffer); } }
