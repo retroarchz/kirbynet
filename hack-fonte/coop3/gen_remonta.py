@@ -28,6 +28,11 @@ a.label('escp'); a.addi('r1', 16); a.addi('r2', 1); a.cmpi('r2', 6); a.bc('lo', 
 a.ldr_lit('r0', FLAG); a.ldrb_i('r0', 'r0', 0); a.cmpi('r0', 0); a.bc('eq', 'fim')
 a.ldr_lit('r0', COUNT); a.ldrb_i('r0', 'r0', 0); a.cmpi('r0', 4); a.bc('ls', 'fim')
 a.ldr_lit('r0', ABSENT); a.ldrb_i('r0', 'r0', 0); a.mov('r1', 0x10); a.alu('tst', 'r0', 'r1'); a.bc('ne', 'fim')
+# marcas de balanço do lugar 4 (healthBoxesData[4] +0 bits 1 e 2): a figura invisível do balanço foi apagada com as outras;
+# com a marca ligada, ao escolher a ação o jogo "parava o balanço" apagando o número velho, que virava o do Pokémon do meio
+# (0x08042678, travamento/bagunça ao trocar no jogo do dono do lugar 4, 08/11)
+a.ldr_lit('r0', 0x02023570); a.ldr_i('r0', 'r0', 0); a.ldr_i('r0', 'r0', 4); a.addi('r0', 48)
+a.ldrb_i('r1', 'r0', 0); a.mov('r2', 6); a.alu('bic', 'r1', 'r2'); a.strb_i('r1', 'r0', 0)
 chama(0x080FB414, 4)                                         # imagem
 chama(0x080FB504, 4)                                         # Pokémon
 chama(0x080FB860, 4)                                         # caixa de vida
@@ -44,7 +49,7 @@ a.label('pal'); a.ldr_lit('r1', 0x030033BC); a.strb_i('r0', 'r1', 0)
 a.ldr_lit('r3', 0x080FB3D3); a.bx('r3')
 a.pool()
 code = a.build()
-assert E + len(code) <= 0x09FF7F00
+assert E + len(code) <= 0x09FF6B00, hex(E + len(code))
 ponte = struct.pack('<HH', 0x4B00, 0x4718) + struct.pack('<I', E | 1)     # ldr r3,[pc,#0]; bx r3; .word (0x080FB2F0 % 4 == 0)
 ponte2 = struct.pack('<HH', 0x4B00, 0x4718) + struct.pack('<I', a.labels['paletas'] | 1)
 assert R[0xFB254:0xFB25C].hex()[:8] == '01490420'   # ldr r1,=0x030033BC ; movs r0,#4
