@@ -2,7 +2,8 @@
 # 3-5): o André ficava com o Cubchoo do Sandro, o Sandro e o Luan perdiam Pokémon. Desvio em 0x080B1A1C (dentro da
 # função de devolver 0x080B19A4): na luta de 3 (bandeira 0x0203FE00), o jogador p (id 0x030055F0) recebe os espaços
 # 2p e 2p+1 da batalha nas posições dos 2 primeiros escolhidos (gSelectedOrderFromParty 0x0203EA2C, base 1) e o 3º
-# escolhido volta igual ao save (SaveBlock1 + 0x6A8). Fora da luta de 3, faz o que o jogo fazia.
+# escolhido volta igual ao save (SaveBlock1 + 0x6A8), ou, se a reserva entrou na luta (gen_reserva.py), o Pokémon que ela
+# substituiu. Fora da luta de 3, faz o que o jogo fazia.
 import sys, struct, json
 sys.path.insert(0, 'C:/Users/Sandro/Downloads/kirbynet-site-retroarchz/hack-fonte/metaknight')
 from thumb import Asm
@@ -30,7 +31,14 @@ for k in (0, 1):
     a.mov('r2', 0x68); a.alu('mul', 'r1', 'r2'); a.ldr_lit('r2', PARTY); a.add_r('r1', 'r1', 'r2')
     a.mov('r2', 0x68); a.ldr_lit('r3', MEMCPY); a.bl('via')
 a.ldr_lit('r0', SEL); a.ldrb_i('r1', 'r0', 2); a.subi('r1', 1); a.cmpi('r1', 5); a.bc('hi', 'fim')
+# reserva usada (gen_reserva.py)? então o 3º que volta é o desmaiado guardado em RES3[p]
+a.ldr_lit('r0', 0x0203F3AC); a.ldrh_i('r0', 'r0', 0); a.ldr_lit('r2', 0xA55A); a.alu('cmp', 'r0', 'r2'); a.bc('ne', 'dosave')
+a.h(0x0876)                                                   # lsrs r6,r6,#1 (p)
+a.ldr_lit('r0', 0x0203F3A8); a.ldrb_r('r0', 'r0', 'r6'); a.cmpi('r0', 0); a.bc('eq', 'dosave')
+a.mov('r1', 0x68); a.alu('mul', 'r1', 'r6'); a.ldr_lit('r0', 0x0203F270); a.add_r('r1', 'r1', 'r0'); a.b('copia3')
+a.label('dosave')
 a.mov('r2', 0x68); a.alu('mul', 'r1', 'r2'); a.ldr_lit('r0', SB1); a.ldr_i('r0', 'r0', 0); a.add_r('r1', 'r1', 'r0'); a.ldr_lit('r0', 0x6A8); a.add_r('r1', 'r1', 'r0')
+a.label('copia3')
 a.h(0xA805); a.addi('r0', 0xD0); a.mov('r2', 0x68); a.ldr_lit('r3', MEMCPY); a.bl('via')
 a.label('fim')
 a.ldr_lit('r1', 0x080B1A4D); a.h(0x9104); a.pop(['r4', 'r5', 'r6', 'r7'])
@@ -38,7 +46,7 @@ a.ldr_lit('r5', PARTY); a.h(0xAE1B); a.h(0xAF35)              # add r6, sp, #0x6
 a.pop([], pc=True)
 a.label('via'); a.bx('r3'); a.pool()
 code = a.build()
-assert E + len(code) <= 0x09FF3E00, hex(E + len(code))
+assert E + len(code) <= 0x09FF3D00, hex(E + len(code))
 off = (VEN - (SITE + 2 + 4)) >> 1
 site = struct.pack('<H', 0x4B01) + struct.pack('<HH', 0xF000 | (off >> 11) & 0x7FF, 0xF800 | off & 0x7FF) + struct.pack('<H', 0x46C0) + struct.pack('<I', E | 1)
 assert SITE % 4 == 0
