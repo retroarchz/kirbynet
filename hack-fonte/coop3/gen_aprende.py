@@ -163,17 +163,118 @@ a = monta(a.labels)
 code = a.build()
 assert E + len(code) <= 0x09FF3C00, hex(E + len(code))
 
+# ---------- caixa de status do nível na tela do dono (comando 0x42) ----------
+# O host roda a rotina 0x0808C6C8 (estado em gBattleScripting+0x1E, espera o A do host). Em luta pelo cabo, se o dono não é o
+# próprio host, o host manda [0x42, espaço, 6 status de antes (12 bytes)] e espera; o dono roda a mesma rotina (com o A dele)
+# e uma trava no fim (0x0808C8B4) impede que ela mexa na tarefa da experiência do dono.
+E2 = 0x09FF3510
+DONO = 0x0203F3F9; PRONTO = 0x0203F3FA; TMP2 = 0x0203F3E0
+EST2 = 0x020234F0 + 0x1E
+def monta2(PRE):
+    c = Asm(E2)
+    def chama2(addr, reg='r7'):
+        c.ldr_lit(reg, addr | 1); c.bl('v_' + reg)
+    # host
+    c.label('hc')
+    c.push(['r4', 'r5', 'r6', 'r7'], lr=True); c.movh('r7', 'r0')
+    c.ldr_lit('r0', TIPO); c.ldr_i('r0', 'r0', 0); c.mov('r1', 2); c.alu('tst', 'r0', 'r1'); c.bc('eq', 'horig')
+    c.ldr_lit('r0', GBS); c.ldr_i('r0', 'r0', 0); c.addi('r0', 0x20); c.ldrb_i('r6', 'r0', 3); c.lsl('r6', 'r6', 26); c.h(0x0F76)  # lsrs r6,r6,#29
+    c.lsl('r0', 'r6', 2); c.ldr_lit('r1', FUNCS); c.add_r('r0', 'r0', 'r1'); c.ldr_i('r0', 'r0', 0); c.ldr_lit('r1', 0x0808DABD); c.alu('cmp', 'r0', 'r1'); c.bc('eq', 'horig')
+    c.ldr_lit('r4', EST2); c.ldrb_i('r5', 'r4', 0)
+    c.cmpi('r5', 0); c.bc('ne', 'h20')
+    # monta [0x42, espaço, 12 bytes de status de antes] e manda ao lugar r6
+    c.ldr_lit('r1', TMP2); c.mov('r0', 0x42); c.strb_i('r0', 'r1', 0)
+    c.ldr_lit('r2', GBS); c.ldr_i('r2', 'r2', 0); c.addi('r2', 0x20); c.ldrb_i('r2', 'r2', 2); c.strb_i('r2', 'r1', 1)
+    c.ldr_lit('r2', RES); c.ldr_i('r2', 'r2', 0); c.ldr_i('r2', 'r2', 0x10); c.mov('r3', 0)
+    c.label('hcopia'); c.ldrb_r('r0', 'r2', 'r3'); c.add_r('r5', 'r1', 'r3'); c.strb_i('r0', 'r5', 2); c.addi('r3', 1); c.cmpi('r3', 12); c.bc('lo', 'hcopia')
+    c.movh('r0', 'r6'); c.mov('r1', 0); c.ldr_lit('r2', TMP2); c.mov('r3', 14); chama2(PREP)
+    c.movh('r0', 'r6'); chama2(MARCA)
+    c.mov('r0', 0x20); c.strb_i('r0', 'r4', 0); c.b('hfim')
+    c.label('h20')
+    c.cmpi('r5', 0x20); c.bc('ne', 'horig')
+    c.ldr_lit('r0', EXEC); c.ldr_i('r0', 'r0', 0); c.cmpi('r0', 0); c.bc('ne', 'hfim')
+    c.mov('r0', 40); c.alu('mul', 'r0', 'r7'); c.ldr_lit('r1', 0x03005640); c.add_r('r0', 'r0', 'r1')   # o que o fim da rotina faz
+    c.mov('r1', 1); c.strh_i('r1', 'r0', 0xA); c.mov('r1', 0); c.strh_i('r1', 'r0', 0xC); c.strh_i('r1', 'r0', 0xE)
+    c.strh_i('r1', 'r0', 0x10); c.strh_i('r1', 'r0', 0x12); c.ldr_lit('r1', 0x0808C8E1); c.str_i('r1', 'r0', 0)
+    c.mov('r0', 10); c.strb_i('r0', 'r4', 0)
+    c.label('hfim'); c.pop(['r4', 'r5', 'r6', 'r7']); c.pop(['r0']); c.bx('r0')
+    c.label('horig'); c.movh('r0', 'r7'); c.pop(['r4', 'r5', 'r6', 'r7']); c.pop(['r1']); c.movh('lr', 'r1')
+    c.ldr_lit('r2', PRE.get('corig', 0) | 1); c.bx('r2')
+    c.label('v_r7'); c.bx('r7')
+    c.pool()
+    return c
+c = monta2({}); c = monta2(c.labels); code2 = c.build()
+assert E2 + len(code2) <= 0x09FF3600, hex(E2 + len(code2))
+print('caixa host/fim', hex(E2), '..', hex(E2 + len(code2)))
+
+# dono: 0x42 no controle do jogador -> código no espaço que sobra depois de E (até 0x09FF3C00)
+E3 = (E + len(code) + 3) & ~3
+def monta3(PRE):
+    d = Asm(E3)
+    def chama3(addr, reg='r7'):
+        d.ldr_lit(reg, addr | 1); d.bl('w_' + reg)
+    d.label('h42')
+    d.push(['r4', 'r5', 'r6', 'r7'], lr=True)
+    d.ldr_lit('r1', BATT); d.strb_i('r0', 'r1', 0)
+    d.ldr_lit('r5', RES); d.ldr_i('r5', 'r5', 0); d.addi('r5', 0x24); d.lsl('r1', 'r0', 9); d.add_r('r5', 'r5', 'r1')   # bufferA
+    d.ldrb_i('r1', 'r5', 1); d.ldr_lit('r2', GBS); d.ldr_i('r2', 'r2', 0); d.addi('r2', 0x20); d.strb_i('r1', 'r2', 2)  # espaço
+    d.ldr_lit('r2', RES); d.ldr_i('r2', 'r2', 0); d.ldr_i('r2', 'r2', 0x10); d.mov('r3', 0)
+    d.label('dcopia'); d.add_r('r1', 'r5', 'r3'); d.ldrb_i('r1', 'r1', 2); d.strb_r('r1', 'r2', 'r3'); d.addi('r3', 1); d.cmpi('r3', 12); d.bc('lo', 'dcopia')
+    d.ldr_lit('r1', EST2); d.mov('r2', 0); d.strb_i('r2', 'r1', 0)
+    d.ldr_lit('r1', PRONTO); d.strb_i('r2', 'r1', 0); d.ldr_lit('r1', DONO); d.mov('r2', 1); d.strb_i('r2', 'r1', 0)
+    d.lsl('r0', 'r0', 2); d.ldr_lit('r1', FUNCS); d.add_r('r0', 'r0', 'r1'); d.ldr_lit('r2', PRE.get('e42', 0) | 1); d.str_i('r2', 'r0', 0)
+    d.pop(['r4', 'r5', 'r6', 'r7']); d.pop(['r0']); d.bx('r0')
+    d.pool()
+    d.label('e42')
+    d.push(['r4', 'r5', 'r6', 'r7'], lr=True)
+    d.mov('r0', 0); chama3(PRE.get('corig', 0))
+    d.ldr_lit('r1', PRONTO); d.ldrb_i('r0', 'r1', 0); d.cmpi('r0', 0); d.bc('eq', 'e42fim')
+    d.mov('r0', 0); d.strb_i('r0', 'r1', 0); d.ldr_lit('r1', DONO); d.strb_i('r0', 'r1', 0)
+    d.ldr_lit('r0', BATT); d.ldrb_i('r0', 'r0', 0); chama3(0x0808DA4C)
+    d.label('e42fim'); d.pop(['r4', 'r5', 'r6', 'r7']); d.pop(['r0']); d.bx('r0')
+    d.label('w_r7'); d.bx('r7')
+    d.pool()
+    # fim da rotina (0x0808C8B4): no dono não mexe na tarefa, só avisa que acabou
+    d.label('fimc')
+    d.ldr_lit('r1', DONO); d.ldrb_i('r1', 'r1', 0); d.cmpi('r1', 0); d.bc('eq', 'forig')
+    d.ldr_lit('r1', PRONTO); d.mov('r0', 1); d.strb_i('r0', 'r1', 0)
+    d.ldr_lit('r1', 0x0808C8CF); d.bx('r1')
+    d.label('forig')
+    d.ldr_lit('r1', 0x03005640); d.lsl('r0', 'r5', 2); d.add_r('r0', 'r0', 'r5'); d.lsl('r0', 'r0', 3); d.add_r('r0', 'r0', 'r1')
+    d.mov('r1', 1); d.strh_i('r1', 'r0', 0xA); d.strh_i('r4', 'r0', 0xC)
+    d.ldr_lit('r1', 0x0808C8C5); d.bx('r1')
+    d.pool()
+    return d
+E4 = 0x09FF3FD0   # depois da tabela (0x09FF3EC0..0x09FF3FCC)
+e = Asm(E4)
+e.label('corig')   # a rotina original da caixa (entrada sem o desvio)
+for h in (0xB530, 0xB081, 0x0600, 0x0E05): e.h(h)
+e.ldr_lit('r0', 0x020234F0); e.ldrb_i('r1', 'r0', 0x1E); e.movh('r4', 'r0'); e.cmpi('r1', 0)
+e.ldr_lit('r2', 0x0808C6D9); e.bx('r2')
+e.pool(); code4 = e.build(); assert E4 + len(code4) <= 0x09FF4000
+d = monta3(dict(e.labels)); d = monta3({**d.labels, **e.labels}); code3 = d.build()
+assert E3 + len(code3) <= 0x09FF3C00, hex(E3 + len(code3))
+c = monta2(dict(e.labels)); code2 = c.build()
+print('caixa dono', hex(E3), '..', hex(E3 + len(code3)))
+
 # tabela nova: 0x40 entradas originais + 0x40 vazio + 0x41 escolha de golpe
-tab = b''.join(struct.pack('<I', rd(0x08539780 + 4 * k)) for k in range(0x40)) + struct.pack('<II', a.labels['h40'] | 1, a.labels['h41'] | 1)
+tab = b''.join(struct.pack('<I', rd(0x08539780 + 4 * k)) for k in range(0x40)) + struct.pack('<III', a.labels['h40'] | 1, a.labels['h41'] | 1, d.labels['h42'] | 1)
 salta = lambda alvo: struct.pack('<HHIII', 0x4778, 0x46C0, 0xE59FC000, 0xE12FFF1C, alvo | 1)
 lista = [
     [TAB - 0x08000000, list(tab)],
     [E - 0x08000000, list(code)],
-    [0x0808DADE - 0x08000000, list(struct.pack('<H', 0x2841))],     # cmp r0,#0x41
+    [0x0808DADE - 0x08000000, list(struct.pack('<H', 0x2842))],     # cmp r0,#0x42
     [0x0808DB00 - 0x08000000, list(struct.pack('<I', TAB))],        # literal da tabela
     [0x0808CA98 - 0x08000000, list(salta(a.labels['apA']))],
     [0x0808CE8C - 0x08000000, list(salta(a.labels['apP']))],
+    [E2 - 0x08000000, list(code2)],
+    [E3 - 0x08000000, list(code3)],
+    [E4 - 0x08000000, list(code4)],
+    [0x0808C6C8 - 0x08000000, list(salta(c.labels['hc']))],
+    [0x0808C8B4 - 0x08000000, list(salta(d.labels['fimc']))],
 ]
+assert R[0x8C6C8:0x8C6D8].hex() == '30b581b00006050e0548817f041c0029'
+assert R[0x8C8B4:0x8C8C4].hex() == '0849a8004019c0004018012141818481'
 assert R[0x8DADE:0x8DAE0] == bytes.fromhex('3f28'), R[0x8DADE:0x8DAE0].hex()
 assert rd(0x0808DB00) == 0x08539780
 assert R[0x8CA98:0x8CAA8].hex() == 'f0b557464e464546e0b482b000060000'[:24] + R[0x8CAA4:0x8CAA8].hex(), R[0x8CA98:0x8CAA8].hex()
