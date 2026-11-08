@@ -456,7 +456,8 @@ const EditorQZ = (() => {
               fx.push([desvio + 2, ja]);
             }
             for (const [k, t] of faltas) { fx.push([k, c.length]); const a = poeTexto(t); c.push(0x0F, 0x00, ...u32(a), 0x09, 0x04, REL, 0x02); }
-            if (fimCedo.length) { const fim = c.length; c.push(0x02); for (const k of fimCedo) fx.push([k, fim]); }
+            // gatilho: o Quetzal deixa você congelado se o script só der 'end' (pedido 08/11: "piso de volta e travo") -> releaseall antes
+            if (fimCedo.length) { const fim = c.length; if (auto && auto.vem !== undefined) c.push(0x6B); c.push(0x02); for (const k of fimCedo) fx.push([k, fim]); }
             for (const [k, ml] of mv) { const a = aloca(ml.length); if (!a) { avisos.push("acabou o espaço livre da ROM"); break; } escritas.push([a, ml]); const v = u32(a); for (let j = 0; j < 4; j++) c[k + j] = v[j]; }
             return { c, fx, voaFim };
           };
