@@ -1100,6 +1100,18 @@ const LinkHLE = (() => {
     if (b[1] === 16 && b.length >= 3) return { from, m: { k: "rv", v: b[2] } };
     return null;
   }
-  return { supports, create, encode, decode, trocaModo, semRocket, GAMES };
+  // Com trapaça (Alt), golpes de campo sem insígnia (pedido 08/11: "libere o surf pra testar" o mergulho do editor).
+  // O Quetzal confere tudo numa função só (special 0x29F -> 0x082A1510): golpe -> índice (0x082A14C8), insígnias
+  // suficientes (0x082A12D4); NÃO precisa de Pokémon com o golpe. Com trapaça o 'bne' depois das insígnias (0x082A152C)
+  // vira 'b': Surf, Mergulhar (descer e subir), Cachoeira, Força… liberados. Sem trapaça volta o original.
+  const CAMPO = 0x2A152C, CAMPO_ORIG = [0x01, 0xD1], CAMPO_LIVRE = [0x01, 0xE0];
+  function campoLivre(s) {
+    if (!s || !s.romWrite) return;
+    const m = lerModo(s.ram(0)); if (!m) return;
+    const quer = m.v === 1 ? CAMPO_LIVRE : CAMPO_ORIG;
+    if (s.__campo === quer) return;
+    s.romWrite(CAMPO, Uint8Array.from(quer)); s.__campo = quer;
+  }
+  return { supports, create, encode, decode, trocaModo, semRocket, campoLivre, GAMES };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = LinkHLE;
