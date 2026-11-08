@@ -264,6 +264,8 @@ const CaboLog = {
     });
     this.linhas.push(`${this.hora()} ${st.fps.toFixed(1)} fps · meu ping ${meu.med ?? "?"}/${meu.max ?? "?"} ms · fila do jogo ${c.jogo}` +
                      (c.desc ? ` · ${c.desc} posições velhas descartadas` : "") + (st.fps < 55 ? " ⚠️ jogo lento" : "") + " | " + partes.join(" | "));
+    // resumo da luta (engine-worker.js lutaDiag): só quando muda, para achar onde a luta parou
+    if (st.luta && st.luta !== this.ultLuta) { this.ultLuta = st.luta; this.linhas.push(`${this.hora()} 🧩 luta: ${st.luta}`); }
     if (this.linhas.length > 3600) this.linhas.splice(0, this.linhas.length - 3600);
   },
   // para a linha de baixo: "⏱ Luan 40 ms"
@@ -334,6 +336,8 @@ const KcLog = {
                      ` · kirbys ${JSON.stringify(k.kirbys)} · eu=P${k.local + 1} x=${k.x} band=${(k.bandeiras >>> 0).toString(16)} · salas ${k.salas.map((r, i) => "P" + (i + 1) + "=" + r).join(" ")}` +
                      (k.avisosM || k.avisosR ? ` · avisos de inimigo: mandei ${k.avisosM}, recebi ${k.avisosR}` : "") +
                      (k.estrelas ? ` · ${k.estrelas} estrela(s) criada(s) pela rede de segurança` : "") + " | " + partes.join(" | "));
+    // resumo da luta (engine-worker.js lutaDiag): só quando muda, para achar onde a luta parou
+    if (st.luta && st.luta !== this.ultLuta) { this.ultLuta = st.luta; this.linhas.push(`${this.hora()} 🧩 luta: ${st.luta}`); }
     if (this.linhas.length > 3600) this.linhas.splice(0, this.linhas.length - 3600);
   },
   curto(st) {

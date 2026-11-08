@@ -466,7 +466,7 @@ function tick() {
     postMessage({ t: "status", fps: run.fpsN / ((now - run.fpsT) / 1000), frame: run.frames, waiting, waitMs,
                   delay: run.net ? run.delay : null, load, marg: run.marg, coop: run.hle ? run.hle.resumo : null,
                   cabo: run.hle && run.hle.medidas ? run.hle.medidas() : null, kc: run.kc ? run.kc.medidas() : null,
-                  rb: run.rb ? { count: run.rb.count, resim: run.rb.resim, limit: predLimit() } : null });
+                  rb: run.rb ? { count: run.rb.count, resim: run.rb.resim, limit: predLimit() } : null, luta: lutaDiag() });
     run.fpsT = now; run.fpsN = 0; run.busy = 0; run.busyN = 0; run.marg = {};
     if (run.rb) {
       run.rb.count = 0; run.rb.resim = 0;
@@ -479,6 +479,24 @@ function tick() {
   if (run.net && !run.kc) autoDelay(now);
   // save para guardar: só sem quadros supostos (um save "do futuro suposto" poderia estar errado)
   if (now - run.snapT >= SNAP_MS && (!run.rb || run.confirmed === run.frames)) snapshot();
+}
+
+// Resumo da luta pelo cabo para o log do coop (08/11: a luta dos 3 parou ao vivo e o log não dizia onde). Só com o cabo
+// ligado e na tela da batalha do Quetzal: tela atual, o que está pendente (gBattleControllerExecFlags) e a função de
+// controle de cada lugar, a equipe em campo (gBattlerPartyIndexes), o comando do script e as tarefas. Lido, nunca escrito.
+function lutaDiag() {
+  try {
+    if (!run || !run.quetzal || !run.hle || !run.hle.resumo || !run.hle.resumo.ligados) return null;
+    const m = run.s.ram(0), cb2 = m.r32(0x03002664) >>> 0;
+    if (cb2 !== 0x0803F431 && cb2 !== 0x080FB13D && m.r8(0x0203FE00) === 0) return null;
+    const h = (v) => (v >>> 0).toString(16), ctl = [], tk = [];
+    for (let b = 0; b < 6; b++) ctl.push(h(m.r32(0x0203FA00 + 4 * b)));
+    for (let t = 0; t < 16; t++) if (m.r8(0x03005640 + 40 * t + 4)) tk.push(h(m.r32(0x03005640 + 40 * t)));
+    const ci = m.r32(0x0202320C) >>> 0;
+    return "tela " + h(cb2) + " · pendente " + h(m.r32(0x02023040)) + " · ctl " + ctl.join(" ") + " · em campo " +
+      [0, 1, 2, 3, 4, 5].map(b => m.r16(0x0203F400 + 2 * b)).join(",") + " · ausentes " + h(m.r8(0x02023209)) +
+      " · script " + h(ci) + " · tarefas " + tk.join(" ") + " · tripla " + m.r8(0x0203FE00);
+  } catch (e) { return null; }
 }
 
 // ---------- editor de eventos do Pokémon Quetzal (editorqz.js; a tela fica no editor.js) ----------
