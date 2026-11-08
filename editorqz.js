@@ -298,7 +298,7 @@ const EditorQZ = (() => {
     const porId = new Map(), citados = new Set();
     for (const l of Object.values(ev.mapas || {})) for (const e of l) { if (e.id) porId.set(e.id, e); if (e.cond && e.cond.evento) citados.add(e.cond.evento); }
     for (const l of Object.values(ev.mapas || {})) for (const e of l)
-      if (!e.marca && (e.acao === "item" || e.acao === "chao" || (e.acao === "sequencia" && e.fim && e.fim !== "repete") || citados.has(e.id))) e.marca = novaMarca();
+      if (!e.marca && (e.acao === "item" || e.acao === "chao" || (e.acao === "sequencia" && ((e.fim && e.fim !== "repete") || e.comeca === "pisar")) || citados.has(e.id))) e.marca = novaMarca();
     for (const [chave, lista] of Object.entries(ev.mapas || {})) {
       if (!lista.length) continue;
       const [grupo, num] = chave.split(".").map(Number), h = cabecalho(bus, grupo, num);
@@ -314,7 +314,7 @@ const EditorQZ = (() => {
         const msg = (t) => { const a = poeTexto(t); s.push(0x0F, 0x00, ...u32(a), 0x09, 0x02); };   // loadword 0, texto; callstd MSGBOX_NPC
         let marcaObj = 0;
         const somePego = e.acao === "chao" || (e.acao === "sequencia" && e.fim === "some");
-        if (e.acao === "item" || e.acao === "chao" || (e.acao === "sequencia" && e.fim !== "repete")) { if (!e.marca) e.marca = novaMarca(); if (!e.marca) { avisos.push("acabaram as marcas livres"); continue; } }
+        if (e.acao === "item" || e.acao === "chao" || (e.acao === "sequencia" && (e.fim !== "repete" || e.comeca === "pisar"))) { if (!e.marca) e.marca = novaMarca(); if (!e.marca) { avisos.push("acabaram as marcas livres"); continue; } }
         let cond = e.cond && (e.cond.quando === "depois" || e.cond.quando === "antes") ? { ...e.cond } : null;
         if (cond && cond.evento) { const alvo = porId.get(cond.evento); cond.flag = alvo && alvo !== e ? alvo.marca : 0; }
         if (cond && !cond.flag) cond = null;
@@ -359,17 +359,21 @@ const EditorQZ = (() => {
             const solto = !!auto && e.comeca === "solto", ml2 = []; let soltou = false, avisou = false, voaFim = false;
             if (auto) {
               if (auto.var) c.push(0x16, ...u16(auto.var), 0x01, 0x00);                     // setvar temp = 1 (uma vez por entrada); pisar: sem var
-              if (e.marca && e.fim && e.fim !== "repete") { c.push(0x2B, ...u16(e.marca)); fimCedo.push(c.length + 2); c.push(0x06, 0x01, 0, 0, 0, 0); }   // já aconteceu
+              // gatilho de quadrado: só a 1ª vez, sempre (pedido 08/11: "não quero ficar pisando toda vez e ela falando comigo")
+              if (e.marca && ((e.fim && e.fim !== "repete") || auto.vem !== undefined)) { c.push(0x2B, ...u16(e.marca)); fimCedo.push(c.length + 2); c.push(0x06, 0x01, 0, 0, 0, 0); }   // já aconteceu
               if (cond) { c.push(0x2B, ...u16(cond.flag)); fimCedo.push(c.length + 2); c.push(0x06, cond.quando === "depois" ? 0x00 : 0x01, 0, 0, 0, 0); }   // ainda não vale
               c.push(LOCK);
               if (auto.vem) {   // gatilho: ❗ na SUA cabeça (som 0x15 + mov. pronto 0x083601C3) e ele vem até o seu lado e te olha
                 // o jogo só mantém carregada quem está perto da tela (pedido 08/11: "a pessoa não está indo até mim", ela estava
-                // 10 quadrados longe): ele reaparece no 1º ponto do caminho que fica dentro da sua tela e vem andando dali.
-                const g = auto.g, P = [{ x: e.x, y: e.y }, ...auto.vem.pontos];
-                let i0 = P.findIndex((q) => Math.abs(q.x - g.x) <= 6 && Math.abs(q.y - g.y) <= 4); if (i0 < 0) i0 = P.length - 1;
+                // 10 quadrados longe): ele reaparece no último ponto do caminho FORA da sua tela (a tela vai de -7 a +7 e de -5 a
+                // +5; pedido 08/11: "sai do nada do mato") e entra andando pela beirada. Se já começa na tela, não pula nada.
+                const g = auto.g, P = [{ x: e.x, y: e.y }, ...auto.vem.pontos], naTela = (q) => Math.abs(q.x - g.x) <= 7 && Math.abs(q.y - g.y) <= 5;
+                let i0 = P.findIndex(naTela); i0 = i0 <= 0 ? 0 : i0 - 1;
                 const F = cond ? e.marcaVis : marcaObj;
-                c.push(0x53, ...u16(id)); if (F) c.push(0x2A, ...u16(F));                                   // removeobject (onde estiver); a marca dele continua desligada
-                c.push(0x63, ...u16(id), ...u16(P[i0].x), ...u16(P[i0].y), 0x55, ...u16(id));                 // setobjectxyperm no ponto da beirada, addobject
+                if (i0 > 0) {   // começou longe: tira de onde estiver e põe na beirada
+                  c.push(0x53, ...u16(id)); if (F) c.push(0x2A, ...u16(F));                                 // removeobject (onde estiver); a marca dele continua desligada
+                  c.push(0x63, ...u16(id), ...u16(P[i0].x), ...u16(P[i0].y), 0x55, ...u16(id));               // setobjectxyperm no ponto da beirada, addobject
+                }
                 c.push(0x2F, 0x15, 0x00, 0x4F, 0xFF, 0x00, ...u32(0x083601C3), 0x51, 0xFF, 0x00, 0x28, 0x0A, 0x00);
                 mv.push([c.length + 3, [...auto.vem.dirs.slice(i0).map((d) => 0x08 + d), auto.vem.face, 0xFE]]); c.push(0x4F, ...u16(id), 0, 0, 0, 0, 0x51, ...u16(id));
                 mv.push([c.length + 3, [[1, 0, 3, 2][auto.vem.face], 0xFE]]); c.push(0x4F, 0xFF, 0x00, 0, 0, 0, 0, 0x51, 0xFF, 0x00);   // você vira para ele
@@ -440,7 +444,7 @@ const EditorQZ = (() => {
                 c.push(0x53, ...u16(id), 0x9E, 0x1E, 0x00, 0x51, ...u16(id));                                // some no meio do pulo; waitfieldeffect; waitmovement (libera)
               }
             }
-            if (e.fim === "uma" || ((!e.fim || e.fim === "repete") && citados.has(e.id) && e.marca)) c.push(0x29, ...u16(e.marca));   // terminou (outro evento pode depender)
+            if (e.fim === "uma" || ((!e.fim || e.fim === "repete") && (citados.has(e.id) || (auto && auto.vem !== undefined)) && e.marca)) c.push(0x29, ...u16(e.marca));   // terminou (outro evento pode depender)
             if (e.fim === "some") c.push(0x29, ...u16(e.marca), ...(solto ? [] : [0x53, ...u16(id)]));   // setflag, removeobject id
             if (solto && ml2.length) {
               if (e.fim === "some" && !voaFim && ml2[ml2.length - 1] !== INVIS()) ml2.push(INVIS());
