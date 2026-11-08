@@ -10,7 +10,7 @@ import sys, struct, json
 sys.path.insert(0, 'C:/Users/Sandro/Downloads/kirbynet-site-retroarchz/hack-fonte/metaknight')
 from thumb import Asm
 
-E = 0x09FF6800
+E = 0x09FF6C00
 FLAG = 0x0203FE00
 RES3 = 0x0203F270          # 3 x 0x68 (até 0x0203F3A8)
 USADA = 0x0203F3A8         # 3 bytes
@@ -81,6 +81,9 @@ a.label('tique')
 a.push(['r0', 'r4', 'r5', 'r6', 'r7'], lr=True)
 a.ldr_lit('r0', FLAG); a.ldrb_i('r0', 'r0', 0); a.cmpi('r0', 0); a.bc('eq', 'tfim')
 a.ldr_lit('r0', VALE); a.ldrh_i('r0', 'r0', 0); a.ldr_lit('r1', 0xA55A); a.alu('cmp', 'r0', 'r1'); a.bc('ne', 'tfim')
+# só com a tela da batalha (BattleMainCB2): com a tela de troca aberta a equipe está na ordem dos quadros e com os espaços
+# dos outros vazios; a troca caía no espaço errado (08/11: Drilbur fantasma na luta e ícone no "SAIR")
+a.ldr_lit('r0', 0x03002664); a.ldr_i('r0', 'r0', 0); a.ldr_lit('r1', 0x0803F431); a.alu('cmp', 'r0', 'r1'); a.bc('ne', 'tfim')
 a.mov('r4', 0)                                              # r4 = jogador p
 a.label('tp')
 a.ldr_lit('r0', USADA); a.ldrb_r('r0', 'r0', 'r4'); a.cmpi('r0', 0); a.bc('ne', 'tpprox')
