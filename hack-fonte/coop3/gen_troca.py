@@ -4,6 +4,7 @@ sys.path.insert(0, 'C:/Users/Sandro/Downloads/kirbynet-site-retroarchz/hack-font
 from thumb import Asm
 FLAG, ORDEM = 0x0203FE00, 0x0203EA34
 import os
+RES2_RESNA = 0x0203F3AB
 RES2 = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'reserva2.json')))
 BASE = 0x09FF7AE0                                # (era 0x09FF3600; mudou em 08/11 ao crescer com a reserva)
 VEN_BAIXO, VEN_ALTO = 0x0808A492, 0x084BDBD4     # "bx r3" ao alcance de cada ponto
@@ -24,7 +25,9 @@ for k, (site, reg, P, N) in enumerate(SITES):
         a.label('R%d' % k)
     for v in (1, 4, 5): a.cmpi('r0', v); a.bc('eq', 'P%d' % k)
     a.cmpi('r0', 3); a.bc('ne', 'N%d' % k)
-    a.ldr_lit('r2', FLAG); a.ldrb_i('r2', 'r2', 0); a.cmpi('r2', 0); a.bc('ne', 'P%d' % k)   # luta de 3: quadrado 3 é de parceiro
+    a.ldr_lit('r2', FLAG); a.ldrb_i('r2', 'r2', 0); a.cmpi('r2', 0); a.bc('eq', 'N%d' % k)
+    a.ldr_lit('r2', RES2_RESNA); a.ldrb_i('r2', 'r2', 0); a.cmpi('r2', 1); a.bc('ne', 'P%d' % k)   # luta de 3: quadrado 3 é de parceiro,
+                                                                                             # a não ser que mostre a reserva do jogador (azul, dele)
     a.label('N%d' % k); a.ldr_lit('r2', N | 1); a.b('S%d' % k)
     a.label('P%d' % k); a.ldr_lit('r2', P | 1)
     a.label('S%d' % k); a.str_i('r2', 'sp', 12) if False else a.h(0x9203)   # str r2,[sp,#12]
