@@ -162,12 +162,20 @@ const EditorQZ = (() => {
     for (const nv of novos) {
       const [sg, sn] = nv.sup.split(".").map(Number), sh = cabecalho(bus, sg, sn);
       if (!sh || supUsada.has(nv.sup)) continue; supUsada.add(nv.sup);
-      const sl = bus.r32(sh), w = bus.r32(sl), hh = bus.r32(sl + 4), sbl = bus.r32(sl + 0xC);
-      if (!ok(sbl) || w > 300 || hh > 300 || (w + 15) * (hh + 14) > 0x2800) { avisos.push(`o lugar ${nv.sup} é grande demais para ter fundo do mar`); continue; }
+      const sl = bus.r32(sh), sw = bus.r32(sl), shh = bus.r32(sl + 4), sbl = bus.r32(sl + 0xC);
+      // tamanho: o do lugar de cima, ou maior (pedido 08/11: "ir expandindo"); cresce só para a direita e para baixo
+      let w = Math.max(sw, nv.w | 0), hh = Math.max(shh, nv.h | 0);
+      while ((w + 15) * (hh + 14) > 0x2800 && (w > sw || hh > shh)) { if (hh > shh) hh--; else w--; }
+      if (!ok(sbl) || sw > 300 || shh > 300 || (w + 15) * (hh + 14) > 0x2800) { avisos.push(`o lugar ${nv.sup} é grande demais para ter fundo do mar`); continue; }
+      if (w !== Math.max(sw, nv.w | 0) || hh !== Math.max(shh, nv.h | 0)) avisos.push(`fundo do mar do ${nv.sup}: o jogo aceita no máximo ${w}×${hh}`);
       const P = pint["0." + nv.num] || {}, PS = pint[nv.sup] || {}, po = pintOrig["0." + nv.num] = {}, blocos = [];
       for (let i = 0; i < w * hh; i++) {   // começo: rocha embaixo da terra, chão embaixo da água, chão "de subir" embaixo da água funda
-        const sv = PS[i] !== undefined ? PS[i] : bus.r16(sbl + 2 * i), b = comportamento(bus, sl, sv & 0x3FF);
-        const v0 = aguaFunda(b) ? CHAO_SOBE : b >= 0x10 && b <= 0x15 ? CHAO : PAREDE;
+        const x = i % w, y = (i / w) | 0;
+        let v0 = PAREDE;   // a parte a mais (fora do lugar de cima) começa toda em rocha
+        if (x < sw && y < shh) {
+          const si = y * sw + x, sv = PS[si] !== undefined ? PS[si] : bus.r16(sbl + 2 * si), b = comportamento(bus, sl, sv & 0x3FF);
+          v0 = aguaFunda(b) ? CHAO_SOBE : b >= 0x10 && b <= 0x15 ? CHAO : PAREDE;
+        }
         if (P[i] !== undefined) po[i] = v0;
         blocos.push(...u16(P[i] !== undefined ? P[i] & 0xFFFF : v0));
       }
@@ -425,6 +433,18 @@ const EditorQZ = (() => {
       let maxId = 0; for (let i = 0; i < n0; i++) maxId = Math.max(maxId, bus.r8(arr0 + 24 * i));
       const novos = [], trans = [], autos = [], gats = [], mapaD = dadosMapa(bus, h, orig);
       for (const e of lista) {
+        if (e.acao === "saida") {   // buraco/saída (pedido 08/11: "sair por outro buraco e sair em outro lugar"): sem pessoa;
+          // pisou no quadrado -> "Subir por aqui?" -> warp. Na água o jogo já põe você surfando; no chão, a pé.
+          const d = e.destino; if (!d) { avisos.push(`saída em ${e.x}, ${e.y} (mapa ${chave}) sem destino`); continue; }
+          const c = [0x69], a = poeTexto(e.texto || "A luz vem de cima… Subir por aqui?");
+          c.push(0x0F, 0x00, ...u32(a), 0x09, 0x05, 0x21, 0x0D, 0x80, 0x00, 0x00);   // msgbox SIM/NÃO; compare VAR_RESULT, 0 (não)
+          const k = c.length; c.push(0x06, 0x01, 0, 0, 0, 0);
+          c.push(0x39, d.grupo & 255, d.num & 255, 0xFF, ...u16(d.x | 0), ...u16(d.y | 0), 0x27, 0x6B, 0x02);   // warp, waitstate
+          const fim = c.length; c.push(0x68, 0x6B, 0x02);                              // não: fecha a caixa, solta
+          const ca = aloca(c.length); if (!ca) { avisos.push("acabou o espaço livre da ROM"); break; }
+          c.splice(k + 2, 4, ...u32(ca + fim));
+          escritas.push([ca, c]); gats.push([e.x | 0, e.y | 0, ca]); continue;
+        }
         if (n0 + novos.length >= 64) { avisos.push("mapa " + chave + ": no máximo 64 pessoas"); break; }
         const id = ++maxId === 0xD1 ? ++maxId : maxId;
         const s = [];   // script

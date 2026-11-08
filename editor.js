@@ -146,6 +146,7 @@ const Editor = {
     const base = this.canvasDe(m.w * 16, m.h * 16, new Uint8ClampedArray(m.rgba));
     this.mapa = { local: m.local, w: m.w, h: m.h, base, info: m.info, orig: m.orig || m.info.slice(), objs: m.objs, portas: m.portas || [], g0: m.g0 || 57 };
     this.sel = null; this.pecas = null; this.pilha = [];
+    const nvA = this.novoAqui(); if (nvA && m.w === Math.max(nvA.sw || 0, nvA.w || 0)) this.tamMudou = false;
     // o que já está pintado e ainda não foi salvo (Ler este lugar de novo): desenha por cima quando as peças chegarem
     if (this.abaAtual === "pincel") this.run.worker.postMessage({ t: "ed-pecas" });
     this.pedeSprites([...new Set([...m.objs.map((o) => o.gfx), ...this.lista().map((e) => e.sprite)])]);
@@ -302,6 +303,7 @@ const Editor = {
     this.mapa.base.getContext("2d").drawImage(P.atlas, (k % 16) * 16, (k >> 4) * 16, 16, 16, x * 16, y * 16, 16, 16);
   },
   pinta(q) {
+    if (this.tamMudou && this.novoAqui()) return this.status("📐 O tamanho mudou: salve, suba e mergulhe de novo para continuar pintando aqui.");
     const M = this.mapa, P = this.pintKey(), t = this.pc.tam || 1, o = -Math.floor((t - 1) / 2);
     if (this.pc.ferr === "gotas") { const v = M.info[q.y * M.w + q.x]; this.escolhePeca(v & 0x3FF, v); this.status(`Peça ${(v & 0x3FF).toString(16)} pega do mapa${(v >> 10) & 3 ? " (parede)" : ""}. Agora pinte.`); return; }
     if (this.pc.ferr === "pincel" && this.pc.id < 0) return this.status("Escolha uma peça na lista ao lado primeiro.");
@@ -342,13 +344,26 @@ const Editor = {
     h += P ? `<div class="dica" style="margin-top:8px">Peças deste lugar${temFunda ? " (🤿 = água funda, onde dá para mergulhar)" : ""}:</div><canvas id="ed-atlas"></canvas>` : `<div class="dica" style="margin-top:8px">Carregando as peças…</div>`;
     // fundo do mar
     h += `<div class="fundo"><b>🤿 Fundo do mar</b>`;
+    const nv = aqui || meu;
+    if (nv) {   // tamanho do lugar de cima (o fundo nunca é menor que ele)
+      if (meu && !nv.sw) { nv.sw = this.mapa.w; nv.sh = this.mapa.h; }
+      if (aqui && !nv.sw && !nv.w && !nv.h) { nv.sw = this.mapa.w; nv.sh = this.mapa.h; }
+    }
+    const tam = nv && nv.sw ? [Math.max(nv.sw, nv.w || 0), Math.max(nv.sh, nv.h || 0)] : null;
+    const caixaTam = tam ? `<div style="margin-top:10px"><b>📐 Tamanho do fundo: ${tam[0]} × ${tam[1]}</b> <span class="dica">(o lugar de cima tem ${nv.sw} × ${nv.sh})</span>
+      <div class="ferr"><button class="ghost" data-cresce="10,0">→ +10</button><button class="ghost" data-cresce="0,10">↓ +10</button><button class="ghost" data-cresce="-10,0">→ −10</button><button class="ghost" data-cresce="0,-10">↓ −10</button></div>
+      <div class="dica">Cresce para a direita e para baixo (a parte nova começa toda em rocha: pinte o chão para abrir caminho). Para cima/esquerda não dá: lá embaixo você aparece no mesmo quadrado de onde mergulhou.${this.tamMudou ? ` <b style="color:#ffd166">Salve, suba e mergulhe de novo para ver o tamanho novo.</b>` : ""}</div></div>` : "";
+    const saidas = this.lista().filter((e) => e.acao === "saida");
+    const caixaSaida = `<div style="margin-top:10px"><b>🕳️ Saídas</b> <span class="dica">(${saidas.length} aqui)</span>
+      <div class="dica">Um quadrado que, quando você pisa, pergunta e leva para outro lugar (outro mapa, outro buraco, a superfície longe daqui…).</div>
+      <button id="ed-saida-nova" class="${this.pondoSaida ? "" : "ghost"}" style="width:100%;margin-top:6px">${this.pondoSaida ? "⏳ Toque no mapa onde fica a saída…" : "＋ Pôr saída"}</button></div>`;
     if (aqui) h += `<div class="dica">Você está no fundo do mar que você criou (mapa 0.${aqui.num}), embaixo do lugar ${aqui.sup}. Pinte rocha (parede) e chão.
       Você chega aqui no mesmo quadrado onde mergulhou. Para subir: aperte B num chão que não seja o "sem subida" (o jogo pergunta se quer subir); lá em cima tem que ser água.
-      Pessoas e eventos: aba 🧍 Personagens, igual a qualquer lugar.</div><button id="ed-fundo-apaga" class="ghost perigo" style="margin-top:8px" disabled title="Suba antes de apagar">🗑️ Apagar (suba primeiro)</button>`;
+      Para quebrar paredes: 💧 Pegar do mapa num chão e pinte por cima da rocha. Pessoas e eventos: aba 🧍 Personagens, igual a qualquer lugar.</div>${caixaTam}${caixaSaida}<button id="ed-fundo-apaga" class="ghost perigo" style="margin-top:8px" disabled title="Suba antes de apagar">🗑️ Apagar (suba primeiro)</button>`;
     else if (meu) h += `<div class="dica">Este lugar tem fundo do mar (mapa 0.${meu.num}). Para descer: pinte água funda 🤿, surfe até ela e use Mergulhar (Dive). Lá embaixo você aparece no mesmo quadrado: abra o editor lá para pintar.</div>
-      <button id="ed-fundo-apaga" class="ghost perigo" style="margin-top:8px">🗑️ Apagar o fundo do mar deste lugar</button>`;
+      ${caixaTam}${caixaSaida}<button id="ed-fundo-apaga" class="ghost perigo" style="margin-top:8px">🗑️ Apagar o fundo do mar deste lugar</button>`;
     else h += `<div class="dica">Crie um lugar embaixo d'água só seu. Ele começa com chão embaixo da água e rocha embaixo da terra; depois você pinta como quiser.${P && !temFunda ? " ⚠️ Este lugar não tem peça de água funda: o mergulho só funciona em lugares de fora (rotas, cidades, mar)." : ""}</div>
-      <button id="ed-fundo-cria" style="margin-top:8px;width:100%">🤿 Criar fundo do mar embaixo deste lugar</button>`;
+      <button id="ed-fundo-cria" style="margin-top:8px;width:100%">🤿 Criar fundo do mar embaixo deste lugar</button>${caixaSaida}`;
     h += `</div>`;
     p.innerHTML = h;
     p.querySelectorAll("[data-ferr]").forEach((b) => b.onclick = () => { this.pc.ferr = b.dataset.ferr; this.desenhaPincel();
@@ -373,9 +388,25 @@ const Editor = {
     if ($("ed-fundo-cria")) $("ed-fundo-cria").onclick = () => {
       const L = this.dados.novos = this.dados.novos || [];
       const num = Math.max(this.mapa.g0 - 1, ...L.map((n) => n.num)) + 1;
-      L.push({ num, sup: k }); this.mudou = true; this.desenhaPincel();
+      L.push({ num, sup: k, sw: this.mapa.w, sh: this.mapa.h }); this.mudou = true; this.desenhaPincel();
       this.status(`🤿 Fundo do mar criado (mapa 0.${num}). Aperte 💾 Salvar. Depois pinte água funda (peças 🤿) onde quer mergulhar.`);
     };
+    if ($("ed-saida-nova")) $("ed-saida-nova").onclick = () => { this.pondoSaida = !this.pondoSaida; this.desenhaPincel();
+      if (this.pondoSaida) this.status("🕳️ Toque no mapa no quadrado da saída."); };
+    p.querySelectorAll("[data-cresce]").forEach((b) => b.onclick = () => {
+      const [dx, dy] = b.dataset.cresce.split(",").map(Number), W0 = tam[0], H0 = tam[1];
+      let W1 = Math.max(nv.sw, Math.min(250, W0 + dx)), H1 = Math.max(nv.sh, Math.min(250, H0 + dy));
+      if ((W1 + 15) * (H1 + 14) > 0x2800) return this.status("⚠️ O jogo não aceita um lugar maior que isso.");
+      if (W1 === W0 && H1 === H0) return this.status(dx < 0 || dy < 0 ? "Não fica menor que o lugar de cima." : "");
+      // a pintura do fundo é guardada por índice (y × largura + x): muda junto com a largura
+      const k0 = "0." + nv.num, P0 = (this.dados.pint || {})[k0] || {}, P1 = {};
+      for (const [i, v] of Object.entries(P0)) { const x = +i % W0, y = (+i / W0) | 0; if (x < W1 && y < H1) P1[y * W1 + x] = v; }
+      (this.dados.pint = this.dados.pint || {})[k0] = P1;
+      for (const e of this.dados.mapas[k0] || []) { e.x = Math.min(e.x, W1 - 1); e.y = Math.min(e.y, H1 - 1); }
+      nv.w = W1; nv.h = H1; this.mudou = true;
+      if (aqui) this.tamMudou = true;
+      this.desenhaPincel(); this.status(`📐 Fundo do mar: ${W1} × ${H1}. Aperte 💾 Salvar${aqui ? ", suba e mergulhe de novo para ver" : ""}.`);
+    });
     if ($("ed-fundo-apaga") && meu) $("ed-fundo-apaga").onclick = () => {
       if (!confirm(`Apagar o fundo do mar deste lugar (mapa 0.${meu.num}), com a pintura e os eventos de lá?`)) return;
       this.dados.novos = (this.dados.novos || []).filter((n) => n !== meu);
@@ -441,6 +472,7 @@ const Editor = {
     return [...dentro];
   },
   nomeEvento(e, k) {
+    if (e.acao === "saida") return `🕳️ Saída → ${e.destino ? `mapa ${e.destino.grupo}.${e.destino.num} (${e.destino.x}, ${e.destino.y})` : "sem destino"} (mapa ${k}, ${e.x},${e.y})`;
     const t = e.acao === "sequencia" ? ((e.passos || []).find((p) => p.texto) || {}).texto : e.texto;
     const quem = this.favs[e.sprite] ? this.favs[e.sprite] + (e.parte ? ` — parte ${e.parte}` : "") + " " : (e.parte ? `parte ${e.parte} ` : "");
     return `${this.ACOES[e.acao] ? this.ACOES[e.acao].split(" ")[0] : ""} ${quem}“${String(t || "evento").slice(0, 28)}” (mapa ${k}, ${e.x},${e.y})`;
@@ -450,6 +482,9 @@ const Editor = {
   // Por dentro são dois eventos (cada mapa tem os seus personagens); a parte anterior passa a sumir no fim.
   get continuar() { try { return JSON.parse(localStorage.getItem("kirbynet.ed.continuar")); } catch (e) { return null; } },
   set continuar(v) { try { v ? localStorage.setItem("kirbynet.ed.continuar", JSON.stringify(v)) : localStorage.removeItem("kirbynet.ed.continuar"); } catch (e) {} },
+  get pendDest() { try { return JSON.parse(localStorage.getItem("kirbynet.ed.destino")); } catch (e) { return null; } },
+  set pendDest(v) { try { v ? localStorage.setItem("kirbynet.ed.destino", JSON.stringify(v)) : localStorage.removeItem("kirbynet.ed.destino"); } catch (e) {} },
+  eventoPorId(id) { for (const l of Object.values(this.dados.mapas)) for (const e of l) if (e.id === id) return e; return null; },
   avisaContinuar() { const c = this.continuar; if (c) this.status(`➡️ Toque no mapa onde ${c.nome} vai aparecer depois (parte ${c.parte}). Pode ser em outro lugar: feche, ande até lá e abra o editor. Para desistir, aperte Fechar duas vezes.`); },
   novo(gfx, q) {
     if (this.ocupado(q)) return this.status("Já tem alguém nesse quadrado.");
@@ -460,7 +495,7 @@ const Editor = {
   },
   aperta(e) {
     const q = this.quadrado(e); if (!q) return;
-    if (this.abaAtual === "pincel") {   // pintura: um traço vai do apertar ao soltar (↶ volta o traço inteiro)
+    if (this.abaAtual === "pincel" && !this.pendDest && !this.pondoSaida) {   // pintura: um traço vai do apertar ao soltar (↶ volta o traço inteiro)
       this.traco = new Map(); $("ed-cv").setPointerCapture(e.pointerId); this.pinta(q); return;
     }
     if (this.escolhendoGat) {   // marca/desmarca quadrados do gatilho (vários; pedido 08/11)
@@ -468,6 +503,21 @@ const Editor = {
       if (i >= 0) L.splice(i, 1); else L.push({ x: q.x, y: q.y });
       ev.gats = L; delete ev.gat; this.mudou = true; ev.reset = true; this.desenhaPainel(); this.desenha();
       this.status(`${L.length} quadrado(s) marcado(s). Toque em outros para marcar/desmarcar; aperte ✓ Pronto quando acabar.`); return;
+    }
+    const pd = this.pendDest;
+    if (pd) {   // destino de uma saída: o próximo toque no mapa, aqui ou em outro lugar
+      const ev = this.eventoPorId(pd.id); this.pendDest = null;
+      if (ev) { ev.destino = { grupo: this.mapa.local.grupo, num: this.mapa.local.num, x: q.x, y: q.y }; this.mudou = true; this.sel = ev.acao ? { ev } : null; }
+      this.desenha(); this.desenhaPainel(); this.desenhaPincel();
+      return this.status(ev ? `✅ A saída leva para cá: mapa ${this.mapa.local.grupo}.${this.mapa.local.num}, ${q.x}, ${q.y}. Aperte 💾 Salvar.` : "A saída não existe mais.");
+    }
+    if (this.pondoSaida) {   // nova saída neste quadrado
+      this.pondoSaida = false;
+      const e = { id: this.novoId(), acao: "saida", x: q.x, y: q.y, texto: this.novoAqui() ? "A luz vem de cima… Subir por aqui?" : "Um buraco… Entrar?" };
+      this.lista().push(e); this.sel = { ev: e }; this.mudou = true;
+      this.pendDest = { id: e.id };
+      this.aba("painel"); this.desenha(); this.desenhaPainel();
+      return this.status("🕳️ Saída posta. Agora toque no lugar onde você vai sair: pode ser aqui, ou em outro mapa: aperte 💾 Salvar, feche, vá até lá no jogo, abra o editor e toque no quadrado.");
     }
     if (this.escolhendoDestino) { const ev = this.escolhendoDestino; ev.destino = { grupo: this.mapa.local.grupo, num: this.mapa.local.num, x: q.x, y: q.y }; this.escolhendoDestino = null; this.mudou = true; this.desenhaPainel(); this.status(`Destino: ${q.x}, ${q.y} deste mapa.`); return; }
     const cont = this.continuar;
@@ -514,7 +564,8 @@ const Editor = {
     for (const e of this.lista()) {
       const a = this.arrasto && this.arrasto.ev === e && this.arrasto.para ? this.arrasto.para : e;
       ctx.fillStyle = "rgba(255,95,162,.25)"; ctx.fillRect(a.x * 16 * Z, a.y * 16 * Z, 16 * Z, 16 * Z);
-      this.desenhaSprite(ctx, e.sprite, a.x, a.y, 1);
+      if (e.acao === "saida") { ctx.font = `${Math.round(12 * Z)}px sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("🕳️", (a.x * 16 + 8) * Z, (a.y * 16 + 8) * Z); }
+      else this.desenhaSprite(ctx, e.sprite, a.x, a.y, 1);
       ctx.strokeStyle = this.sel && this.sel.ev === e ? "#ffd166" : "#ff5fa2"; ctx.lineWidth = 2;
       ctx.strokeRect(a.x * 16 * Z + 1, a.y * 16 * Z + 1, 16 * Z - 2, 16 * Z - 2);
     }
@@ -580,6 +631,20 @@ const Editor = {
       Os eventos aparecem quando você entra no lugar (se já estiver nele, entre numa casa e saia).
       Ficam guardados na nuvem com o seu nome e valem sempre que você jogar, sozinho ou no coop (só no seu jogo).</div>`; ligaTopo(); return; }
     const op = (o, v) => Object.entries(o).map(([k, n]) => `<option value="${k}"${k === v ? " selected" : ""}>${n}</option>`).join("");
+    if (s.acao === "saida") {
+      const d = s.destino, pd = this.pendDest && this.pendDest.id === s.id;
+      p.innerHTML = topo + `<div class="secao"></div><div><b>🕳️ Saída</b> em <b>${s.x}, ${s.y}</b> (arraste no mapa para mudar)</div>
+        <label>Pergunta quando você pisa</label><textarea id="ed-texto">${esc(s.texto || "")}</textarea>
+        <label>Leva para</label><div class="dica" style="color:#ffd166">${d ? `mapa ${d.grupo}.${d.num}, quadrado ${d.x}, ${d.y}` : "ainda sem destino"}</div>
+        <button id="ed-saida-dest" class="${pd ? "" : "ghost"}" style="width:100%;margin-top:6px">${pd ? "⏳ Toque no mapa onde vai sair (aqui ou em outro lugar)…" : "📍 Escolher onde sai"}</button>
+        <div class="dica">Pode ser em outro mapa: aperte, depois 💾 Salvar, feche o editor, vá até lá no jogo, abra o editor e toque no quadrado (e Salvar de novo). Se for na água você sai surfando; no chão, a pé; num fundo do mar seu, mergulhado.</div>
+        <button id="ed-apaga" class="ghost perigo" style="margin-top:12px">🗑️ Apagar saída</button>`;
+      ligaTopo();
+      $("ed-texto").oninput = () => { s.texto = $("ed-texto").value; this.mudou = true; };
+      $("ed-saida-dest").onclick = () => { this.pendDest = pd ? null : { id: s.id }; this.desenhaPainel(); if (!pd) this.status("Toque no mapa onde você vai sair (pode ser em outro lugar: feche, vá até lá e abra o editor)."); };
+      $("ed-apaga").onclick = () => { const l = this.lista(); l.splice(l.indexOf(s), 1); if (pd) this.pendDest = null; this.sel = null; this.mudou = true; this.desenha(); this.desenhaPainel(); };
+      return;
+    }
     const lt = this.listas ? this.listas.treinadores : [], li = this.listas ? this.listas.itens : [];
     let h = topo + `<div class="secao"></div><div class="linha"><div id="ed-pv" style="flex:0 0 72px;height:72px;background:#1f2230;border-radius:8px;display:flex;align-items:center;justify-content:center"></div>
       <div><div><b>${esc(this.nomeSprite(s.sprite))}</b> em <b>${s.x}, ${s.y}</b></div><button id="ed-troca" class="ghost" style="margin-top:6px">Trocar sprite</button></div></div>
@@ -742,6 +807,7 @@ const Editor = {
     for (const l of Object.values(this.dados.mapas)) for (const e of l) {
       if (e.acao === "lutar" && !e.treinador) return this.status("⚠️ Escolha o treinador do evento de luta.");
       if (e.acao === "teleporte" && !e.destino) return this.status("⚠️ Escolha o destino do teleporte.");
+      if (e.acao === "saida" && !e.destino && !(this.pendDest && this.pendDest.id === e.id)) return this.status("⚠️ Uma saída está sem destino (📍 Escolher onde sai).");
       if (e.acao === "sequencia" && e.comeca === "pisar" && !this.gatsDe(e).length) return this.status("⚠️ Marque no mapa os quadrados do gatilho (📍 Marcar quadrados no mapa).");
     }
     this.dados.t = Date.now(); this.mudou = false;
