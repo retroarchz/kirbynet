@@ -17,6 +17,8 @@ EQUIPE = 0x020235CC
 F = 0x0823FC79             # espaço da batalha -> espaço da tela
 MEMCPY = 0x084BFF15
 ALLOC = 0x08000BD1
+import os
+RES2 = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'reserva2.json')))
 
 R = open('C:/Users/Sandro/Downloads/kirbynet-site-retroarchz/hack-fonte/coop3/.runtime/rom-site.gba', 'rb').read()
 PROLOGO = bytes.fromhex('70b59c24a400201c')
@@ -53,6 +55,7 @@ a.mov('r0', 1); a.h(0x40B8)                             # lsls r0,r7 (bit do esp
 a.ldr_lit('r1', MASCARA); a.ldrb_i('r2', 'r1', 0); a.alu('orr', 'r2', 'r0'); a.strb_i('r2', 'r1', 0)
 a.label('bprox'); a.addi('r4', 1); a.cmpi('r4', 6); a.bc('lo', 'blaco')
 a.ldr_lit('r0', ASSINA); a.ldr_lit('r1', 0xA55A); a.strh_i('r1', 'r0', 0)
+chama(RES2['mostra'])                                   # reserva na vaga 3 (gen_reserva2.py)
 a.label('bfim'); a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r0']); a.bx('r0')
 a.label('orig_b'); prologo(0x0823FCCC)
 a.label('via'); a.bx('r3')
@@ -70,6 +73,7 @@ a.mov('r0', 0x68); a.alu('mul', 'r0', 'r7'); a.movh('r5', 'r0')
 a.ldr_lit('r0', EQUIPE); a.add_r('r0', 'r0', 'r5'); a.ldr_lit('r1', GUARDA); a.add_r('r1', 'r1', 'r5'); a.mov('r2', 0x68); chama(MEMCPY)
 a.label('cprox'); a.addi('r7', 1); a.cmpi('r7', 6); a.bc('lo', 'claco')
 a.ldr_lit('r0', MASCARA); a.mov('r1', 0); a.strb_i('r1', 'r0', 0); a.ldr_lit('r0', ASSINA); a.strh_i('r1', 'r0', 0)
+a.ldr_lit('r0', 0x0203F3AB); a.strb_i('r1', 'r0', 0)        # RESNA = 0 (gen_reserva2.py)
 a.label('cfim'); a.pop(['r0', 'r4', 'r5', 'r6', 'r7']); a.pop(['r1']); a.movh('lr', 'r1')
 prologo(0x0823FD1C)
 a.pool()
