@@ -309,7 +309,12 @@ const LinkHLE = (() => {
   // Caixas de vida na batalha de 3 (Coop 3): as três do jogador cobriam os inimigos. Jogador à esquerda, na ordem dos Pokémon
   // na tela; inimigos à direita. Tabela (x, y por posição) em 0x080AB6F8, trocada só com a bandeira da tripla ligada
   const CAIXAS = { flag: 0x0203FE00, rom: 0xAB6F8,
-                   normal: [159, 76, 32, 19, 159, 101, 32, 44, 159, 51, 32, 69], tripla: [24, 15, 167, 76, 24, 61, 167, 101, 24, 38, 167, 51] };
+                   normal: [159, 76, 32, 19, 159, 101, 32, 44, 159, 51, 32, 69], tripla: [24, 15, 167, 76, 24, 61, 167, 101, 24, 38, 167, 51],
+                   // Tela de equipe na luta dos 3 (08/11, desenho do usuário "ideal.png"): só os Pokémon do jogador, centralizados.
+                   // Formato "multi" (janelas 0x092BC8FC, figuras 0x092BC7D0): as vagas dele são a 0 (grande), a 2 e a 3 (reserva),
+                   // descidas 4 linhas; as vagas 1, 4 e 5 vão para fora da tela
+                   outras: [[0x12BC8FC, [0, 1, 1, 10, 7, 3, 99, 0, 0, 1, 8, 10, 7, 4, 169, 0, 0, 12, 2, 18, 3, 5, 239, 0, 0, 12, 5, 18, 3, 6, 37, 1, 0, 12, 9, 18, 3, 7, 91, 1, 0, 12, 12, 18, 3, 8, 145, 1], [0, 1, 5, 10, 7, 3, 99, 0, 0, 1, 21, 10, 7, 4, 169, 0, 0, 12, 6, 18, 3, 5, 239, 0, 0, 12, 9, 18, 3, 6, 37, 1, 0, 12, 22, 18, 3, 7, 91, 1, 0, 12, 25, 18, 3, 8, 145, 1]],
+                            [0x12BC7D0, [16, 24, 20, 34, 50, 36, 16, 18, 16, 80, 20, 90, 50, 92, 16, 74, 104, 26, 106, 36, 136, 35, 102, 33, 104, 50, 106, 60, 136, 59, 102, 57, 104, 82, 106, 92, 136, 91, 102, 89, 104, 106, 106, 116, 136, 115, 102, 113], [16, 56, 20, 66, 50, 68, 16, 50, 16, 200, 20, 200, 50, 200, 16, 200, 104, 58, 106, 68, 136, 67, 102, 65, 104, 82, 106, 92, 136, 91, 102, 89, 104, 200, 106, 200, 136, 200, 102, 200, 104, 200, 106, 200, 136, 200, 102, 200]]] };
   const ESCUDO = { base: 0x0203FF80, tarefa: 0x09FFAB41, lugares: 6, aviso: 12, repete: 120 };
 
   const DEAD_MS = 15000;   // ligado comigo e sem dar notícia há tanto tempo: caiu (o jogo recebe o "desconectar")
@@ -840,7 +845,10 @@ const LinkHLE = (() => {
         if (C && ram.r8(CAIXAS.flag) && ram.r32(AUTO.cb2) === AUTO.field) ram.w8(CAIXAS.flag, 0);
         if (C && aoCaixas) {
           const tri = ram.r8(CAIXAS.flag) === 1;
-          if (tri !== caixasTri) { caixasTri = tri; aoCaixas(CAIXAS.rom, new Uint8Array(tri ? CAIXAS.tripla : CAIXAS.normal)); }
+          if (tri !== caixasTri) {
+            caixasTri = tri; aoCaixas(CAIXAS.rom, new Uint8Array(tri ? CAIXAS.tripla : CAIXAS.normal));
+            for (const [at, normal, tripla] of CAIXAS.outras) aoCaixas(at, new Uint8Array(tri ? tripla : normal));
+          }
         }
         if (ids && ram.r32(AUTO.cb2) === AUTO.batalha) {
           if (cur()[0] === me) escudoEnvia(); else if (escudoFases) escudoAplica();
