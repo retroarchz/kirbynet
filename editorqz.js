@@ -149,6 +149,24 @@ const EditorQZ = (() => {
   function nome(bus, a, max) { let t = ""; for (let i = 0; i < max; i++) { const c = bus.r8(a + i); if (c === 0xFF) break; t += DEC[c] ?? ""; } return t.trim(); }
   function treinadores(bus) { const out = []; for (let i = 1; i < NTREIN; i++) out.push([i, nome(bus, TREIN + 0x20 * i + 3, 11)]); return out; }
   function itens(bus) { const out = []; for (let i = 1; i < NITENS; i++) { const n = nome(bus, ITENS + 20 * i, 20); if (n && !/^\?+$/.test(n)) out.push([i, n]); } return out; }
+  // espécies para os passos "dar Pokémon" e "luta para capturar" (pedido 08/11: eventos para os que não dá para pegar).
+  // Nomes 0x0850ED90 (13 bytes); 1529 espécies internas. Formas repetem o nome: megas 899-948 viram "Mega X"; as outras
+  // ganham "(forma N)". ★ = não dá para pegar no jogo normal (levantamento 08/11: 12 paradoxos, Darkrai e as megas).
+  const ESPN = 0x0850ED90, NESP = 1529;
+  const MEGA_NOME = { 900: "Mega Charizard X", 901: "Mega Charizard Y", 912: "Mega Mewtwo X", 913: "Mega Mewtwo Y", 947: "Kyogre Primal", 948: "Groudon Primal" };
+  const SEM_JEITO = new Set([491, 1314, 1315, 1316, 1317, 1318, 1320, 1321, 1322, 1323, 1324, 1334, 1335]);
+  function especies(bus) {
+    const out = [], visto = new Set();
+    for (let i = 1; i < NESP; i++) {
+      const n = nome(bus, ESPN + 13 * i, 13); if (!n || /^\?+$/.test(n)) continue;
+      let r = n;
+      if (i >= 899 && i <= 948) r = MEGA_NOME[i] || "Mega " + n;
+      else if (visto.has(n)) r = n + " (forma " + i + ")";
+      visto.add(n);
+      out.push([i, (SEM_JEITO.has(i) || (i >= 899 && i <= 948) ? "★ " : "") + r]);
+    }
+    return out;
+  }
 
   // ---------- texto ----------
   const TAB = {};
@@ -340,6 +358,24 @@ const EditorQZ = (() => {
                 c.push(0x45, ...u16(it), ...u16(q));                                // removeitem
                 if (p.texto2) { const a = poeTexto(p.texto2); c.push(0x0F, 0x00, ...u32(a), 0x09, 0x04); }
               }
+              else if (p.t === "pokemon") {   // dá o Pokémon (como o Beldum do jogo, 0x08309305): givemon, sem espaço = msg do jogo 0x083614E0
+                const sp = p.sp | 0, nv = Math.max(1, Math.min(100, p.nv | 0 || 5));
+                c.push(0x79, ...u16(sp), nv, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);   // givemon espécie, nível, sem item
+                c.push(0x21, 0x0D, 0x80, 0x02, 0x00, 0x06, 0x01, ...u32(0x083614E0));   // VAR_RESULT == 2 (equipe e caixas cheias)
+                const a = poeTexto("Você recebeu " + String(p.nome || "o Pokémon").replace(/^★\s*/, "") + "!");
+                c.push(0x31, 0x72, 0x01, 0x0F, 0x00, ...u32(a), 0x09, 0x04, 0x32);   // playfanfare 0x172, msgbox, waitfanfare
+              }
+              else if (p.t === "capturar") {   // luta para pegar, igual às lutas com lendário do jogo (Tapu Koko 0x082C3990)
+                const sp = p.sp | 0, nv = Math.max(1, Math.min(100, p.nv | 0 || 50));
+                if (c[c.length - 1] === 0x04 && c[c.length - 2] === 0x09) c.push(0x68);   // fecha a caixa de texto
+                c.push(0xA1, ...u16(sp), 0x02, 0x00, 0xC5, 0x28, 0x14, 0x00);   // grito, waitmoncry, delay 20
+                c.push(0x16, 0x04, 0x80, ...u16(sp), 0x16, 0x05, 0x80, ...u16(nv), 0x16, 0x06, 0x80, 0x00, 0x00);   // 0x8004 espécie, 0x8005 nível, 0x8006 0
+                c.push(0x25, 0xEE, 0x01, 0x25, 0x44, 0x01, 0x27);   // special 0x1EE (cria), special 0x144 (luta), waitstate
+                // resultado da luta (special 0xC1), como o script do Tapu Koko: 1 = derrotou, 4 = fugiu, 5 = teleporte -> não pegou,
+                // para aqui (dá para tentar de novo). Nessa luta não dá para fugir (testado 08/11: "Não pode escapar!").
+                c.push(0x26, 0x0D, 0x80, 0xC1, 0x00);
+                for (const r of [1, 4, 5]) { c.push(0x21, 0x0D, 0x80, r, 0x00); faltas.push([c.length + 2, p.texto || "Ele continua por aqui… fale comigo para tentar de novo!"]); c.push(0x06, 0x01, 0, 0, 0, 0); }
+              }
               else if (p.t === "sumir") c.push(0x2F, 0x09, 0x00, 0x53, ...u16(id));   // "entra" (porta de enfeite, caverna…): som de porta e some
               else if (p.t === "voar") {   // sai voando como nas cenas do jogo (0x082C72D2): pulinho, o pássaro passa e leva
                 c.push(0x68); mv.push([c.length + 3, [0x25, 0xFE]]); c.push(0x4F, ...u16(id), 0, 0, 0, 0, 0x51, 0x00, 0x00);   // igual ao Steven (0x082C72C7): closemessage, passinho no lugar 0x25 (0x083601D5)
@@ -524,6 +560,6 @@ const EditorQZ = (() => {
     }
     return ativo;
   }
-  return { local, cabecalho, desenhaMapa, objetos, trajeto, dadosMapa, desenhaSprite, infoSprite, catalogo, treinadores, itens, texto, montar, vigiaVoo, desfazer, MOV, LIVRE, MARCAS };
+  return { local, cabecalho, desenhaMapa, objetos, trajeto, dadosMapa, desenhaSprite, infoSprite, catalogo, treinadores, itens, especies, texto, montar, vigiaVoo, desfazer, MOV, LIVRE, MARCAS };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = EditorQZ;

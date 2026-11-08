@@ -23,7 +23,8 @@ const Editor = {
   },
   ACOES: { falar: "💬 Falar", item: "🎁 Dar item (uma vez)", chao: "📦 Item no chão", lutar: "⚔️ Lutar", teleporte: "🌀 Teleporte",
            sequencia: "📜 Sequência (falar, dar item, andar…)" },
-  PASSOS: { falar: "💬 Falar", item: "🎁 Dar item", pedir: "🤲 Pedir item", andar: "🚶 Andar", virar: "↪️ Virar", esperar: "⏳ Esperar", voar: "🕊️ Sair voando", sumir: "🚪 Entrar e sumir" },
+  PASSOS: { falar: "💬 Falar", item: "🎁 Dar item", pedir: "🤲 Pedir item", andar: "🚶 Andar", virar: "↪️ Virar", esperar: "⏳ Esperar", voar: "🕊️ Sair voando", sumir: "🚪 Entrar e sumir",
+           pokemon: "🐾 Dar Pokémon", capturar: "⚔️ Luta para capturar" },
   DIRS: { baixo: "para baixo", cima: "para cima", esq: "para a esquerda", dir: "para a direita" },
   // marcas que o jogo liga: insígnia N = 0xA7F + N - 1 (achado nos scripts dos ginásios), treinador vencido = 0x500 + id
   INSIGNIAS: ["ganhar a 1ª insígnia (Roxanne, Rustboro)", "ganhar a 2ª insígnia (Brawly, Dewford)", "ganhar a 3ª insígnia (Wattson, Mauville — Raio)",
@@ -450,6 +451,11 @@ const Editor = {
     if (s.acao === "sequencia") {
       if (!s.passos || !s.passos.length) s.passos = [{ t: "falar", texto: s.texto || "Olá!" }];
       const opItem = (v) => li.map(([i, n]) => `<option value="${i}"${i === v ? " selected" : ""}>${esc(n)}</option>`).join("");
+      const le = this.listas && this.listas.especies ? this.listas.especies : [];
+      const opSp = (v) => le.map(([i, n]) => `<option value="${i}"${i === v ? " selected" : ""}>${esc(n)}</option>`).join("");
+      const campoSp = (p, i) => `<input class="busca-sp" data-i="${i}" placeholder="Procurar Pokémon (★ = não dá para pegar no jogo)…">
+          <select data-i="${i}" data-k="sp" size="5">${opSp(p.sp)}</select>
+          <div class="dica">O nível é o jogo que decide, pelo seu time (testado: pedi 30 e 90, veio no nível do seu Pokémon mais forte).</div>`;
       h += `<label>Quando começa</label><select id="ed-comeca">${op({ falar: "Quando você fala com ele", sozinho: "Sozinho ao chegar (cena: você fica parado)", solto: "Sozinho ao chegar, e você anda junto" }, s.comeca || "falar")}</select>
         ${s.comeca === "sozinho" ? `<div class="dica">Cena: ao entrar no lugar, tudo para e ele faz os passos sozinho (se ele estiver valendo e ainda não tiver ido embora).</div>` : ""}
         ${s.comeca === "solto" ? `<div class="dica">Ao entrar no lugar ele começa sozinho e você continua livre para andar. Falas, itens e esperas só valem <b>antes</b> dele começar a andar; "Sumir" no fim faz ele desaparecer; "Voar" no fim: quando ele chega, dá o pulinho e o pássaro do Fly leva ele.</div>` : ""}
@@ -464,6 +470,9 @@ const Editor = {
           <label>Se você ainda não tem (ele para aqui)</label><textarea data-i="${i}" data-k="texto">${esc(p.texto)}</textarea>
           <label>Quando você entrega (opcional)</label><textarea data-i="${i}" data-k="texto2">${esc(p.texto2 || "")}</textarea>
           <div class="dica">Com o item na mochila, ele tira o item e segue para os próximos passos.</div>`;
+        if (p.t === "pokemon") campo = campoSp(p, i) + `<div class="dica">Ele entrega o Pokémon (vai para a equipe ou para o PC). Com tudo cheio, o jogo avisa e ele para aqui. Use "Só a primeira vez" ou "Some" no fim para não dar de novo.</div>`;
+        if (p.t === "capturar") campo = campoSp(p, i) + `<label>Se você não pegar (ele para aqui)</label><textarea data-i="${i}" data-k="texto">${esc(p.texto || "Ele continua por aqui… fale comigo para tentar de novo!")}</textarea>
+          <div class="dica">Luta como as dos lendários do jogo: o Pokémon grita e aparece. Só segue para os próximos passos se você pegar; se fugir ou derrotar, dá para tentar de novo. Dica: use o sprite do próprio Pokémon e "Some e não volta mais" no fim.</div>`;
         if (p.t === "sumir") campo = `<div class="dica">Som de porta e ele desaparece, como se entrasse. Use depois de "Andar" até uma porta de enfeite, cortina, caverna…</div>`;
         if (p.t === "voar") campo = `<div class="dica">Pulinho e um Pokémon voador passa e leva ele (como nas cenas do jogo). Use "Some e não volta mais" no fim para ele não voltar.</div>`;
         return `<div class="passo"><div class="passo-cab"><span class="num">${i + 1}</span><span class="tipo">${this.PASSOS[p.t]}</span>
@@ -498,8 +507,17 @@ const Editor = {
     liga("ed-comeca", (el) => { if (el.value === "falar") delete s.comeca; else s.comeca = el.value; this.mudou = true; this.desenhaPainel(); }, "change");
     const ps = $("ed-passos");
     if (ps) {
-      const muda = (el) => { const p = s.passos[+el.dataset.i]; if (!p) return; const k = el.dataset.k; p[k] = ["item", "qtd", "n"].includes(k) ? +el.value || 0 : el.value; this.mudou = true; zera(); this.desenha(); };
-      ps.addEventListener("input", (e) => e.target.dataset.k && muda(e.target));
+      const muda = (el) => { const p = s.passos[+el.dataset.i]; if (!p) return; const k = el.dataset.k; p[k] = ["item", "qtd", "n", "sp", "nv"].includes(k) ? +el.value || 0 : el.value;
+        if (k === "sp" && el.selectedOptions[0]) p.nome = el.selectedOptions[0].text.replace(/^★\s*/, "");
+        this.mudou = true; zera(); this.desenha(); };
+      ps.addEventListener("input", (e) => {
+        if (e.target.classList.contains("busca-sp")) {   // procura na lista de Pokémon do mesmo passo
+          const t = e.target.value.toLowerCase(), sel = ps.querySelector(`select[data-k="sp"][data-i="${e.target.dataset.i}"]`);
+          if (sel) for (const o of sel.options) o.hidden = t && !o.text.toLowerCase().includes(t);
+          return;
+        }
+        if (e.target.dataset.k) muda(e.target);
+      });
       ps.addEventListener("change", (e) => e.target.dataset.k && muda(e.target));
       ps.addEventListener("click", (e) => {
         const b = e.target.closest("button"); if (!b) return;
@@ -510,6 +528,7 @@ const Editor = {
       p.querySelectorAll("[data-add]").forEach((b) => b.onclick = () => {
         const t = b.dataset.add, novo = { t };
         if (t === "falar") novo.texto = "…"; if (t === "pedir") { novo.item = 1; novo.qtd = 1; novo.texto = "Preciso de um item. Me traz?"; novo.texto2 = "Obrigado!"; } if (t === "item") { novo.item = 1; novo.qtd = 1; } if (t === "andar") { novo.dir = "baixo"; novo.n = 2; } if (t === "virar") novo.dir = "baixo"; if (t === "esperar") novo.n = 1;
+        if (t === "pokemon" || t === "capturar") { novo.sp = 491; novo.nv = 50; novo.nome = "Darkrai"; }
         s.passos.push(novo); if ((t === "voar" || t === "sumir") && (s.fim || "repete") === "repete") s.fim = "some"; this.mudou = true; zera(); this.desenhaPainel(); this.desenha();
       });
     }

@@ -577,7 +577,7 @@ function edMsg(m) {
     for (const g of m.ids || []) { const sp = EditorQZ.desenhaSprite(bus, g); if (sp) { lista.push({ gfx: g, w: sp.w, h: sp.h, rgba: sp.rgba.buffer }); bufs.push(sp.rgba.buffer); } }
     postMessage({ t: "ed-sprites", lista }, bufs);
   } else if (m.t === "ed-listas") {
-    postMessage({ t: "ed-listas", sprites: EditorQZ.catalogo(bus), treinadores: EditorQZ.treinadores(bus), itens: EditorQZ.itens(bus) });
+    postMessage({ t: "ed-listas", sprites: EditorQZ.catalogo(bus), treinadores: EditorQZ.treinadores(bus), itens: EditorQZ.itens(bus), especies: EditorQZ.especies(bus) });
   }
 }
 
