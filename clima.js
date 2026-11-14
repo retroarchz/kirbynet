@@ -79,18 +79,18 @@
         mask[j * 17 + i] = a; if (a) alguma = true;
       }
       if (!alguma) return;
-      const dx = Math.floor(t / 3), dy = Math.floor(t / 6);   // vento: as nuvens andam para a esquerda e para cima
+      const dx = Math.floor(t / 2), dy = 0;   // vento igual ao do jogo: meio pixel por quadro para a esquerda
       for (let y = 0; y < 160; y++) {
         const wy = oy + y, lj = Math.floor(wy / 16) - by0;
-        const cyw = wy + dy, linha = Math.floor(cyw / 80), v = ((cyw % 80) + 80) % 80, des = (linha & 1) * 80;
+        const cyw = wy + dy, linha = Math.floor(cyw / 128), v = ((cyw % 128) + 128) % 128, des = (linha & 1) * 128;
         for (let x = 0; x < 240; x++) {
           const wx = ox + x;
           if (!mask[lj * 17 + Math.floor(wx / 16) - bx0]) continue;
           const k = (y * 240 + x) * 4, r = px[k], g = px[k + 1], b = px[k + 2];
           if (debug) { if (!(b > r + 24 && b >= g)) { px[k] = 255; px[k + 1] = 0; px[k + 2] = 0; } continue; }
-          if (!(b > r + 24 && b >= g && r < 150)) continue;   // só a cor da água (pessoas, barcos e pedras ficam por cima)
+          if (!(b > r + 8 && r < 170)) continue;                // não pinta beira de terra nem gente (a espuma das ondas entra) (pessoas, barcos e pedras ficam por cima)
           if (v >= 64) continue;
-          const u = (((wx + dx - des) % 160) + 160) % 160; if (u >= 64) continue;
+          const u = (((wx + dx - des) % 256) + 256) % 256; if (u >= 64) continue;   // poucas nuvens: uma a cada 256x128
           const c = nuv[v * 64 + u]; if (!c) continue;
           const C = NUV_COR[c], f = Math.max(0.3, Math.min(1, (r * 0.3 + g * 0.59 + b * 0.11) / 120));   // de noite a nuvem escurece junto
           px[k] = Math.min(255, (C[0] * f * 12 + r * 8) / 16); px[k + 1] = Math.min(255, (C[1] * f * 12 + g * 8) / 16); px[k + 2] = Math.min(255, (C[2] * f * 12 + b * 8) / 16);
@@ -116,6 +116,7 @@
       return TIPOS.has(ram.r8(A.mapa + 0x17)) && COMUM.has(ram.r8(A.mapa + 0x16));
     };
     const troca = (w) => {
+      if (w === 1 && !semNuvens) w = 2;   // antes as nuvens do jogo têm que sair (senão ficavam presas na tela)
       const G = A.G, sb = ram.r32(A.sb1);
       if (ram.r8(G + 0x6D1) !== w) { ram.w8(G + 0x6D1, w); ram.w8(G + 0x6D3, 0); ram.w16(G + 0x6CE, 0); }
       if (sb >= 0x02000000 && sb < 0x02040000 && ram.r8(sb + A.salvo) !== w) ram.w8(sb + A.salvo, w);
