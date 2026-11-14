@@ -9,7 +9,7 @@ const V = (location.search.match(/[?&]v=(\w+)/) || [])[1] || "";   // mesma vers
 const NO_RB = /[?&]rb=0\b/.test(location.search);   // página aberta com ?semrollback
 // SNES: também o Mundo livre (fantasma dos outros e inimigos compartilhados, do snesnet v1.6)
 // GBA: o cabo link pela internet (linkhle.js) para o coop do Pokémon Quetzal
-importScripts(...(SNES ? ["sncore.js", "ghost-core.js", "objlayout.js", "coop-sync.js"] : ["kncore.js", "linkhle.js", "dianoite.js", "kirbycoop.js", "editorqz.js"]).map(f => f + "?v=" + V));
+importScripts(...(SNES ? ["sncore.js", "ghost-core.js", "objlayout.js", "coop-sync.js"] : ["kncore.js", "linkhle.js", "dianoite.js", "clima.js", "kirbycoop.js", "editorqz.js"]).map(f => f + "?v=" + V));
 const Core = SNES ? SnCore : KnCore;
 
 const W = Core.W, H = Core.H, FRAME_BYTES = W * H * 4;
@@ -292,6 +292,11 @@ function relogio() {
   if (run.quetzal && run.frames >= 120) LinkHLE.semRocket(run.s.ram(0));   // sem trapaça, a Equipe Rocket não aparece (linkhle.js)
   if (run.quetzal && run.frames >= 120 && !run.rb && !SNES && run.frames % 30 === 0) LinkHLE.campoLivre(run.s);   // com trapaça (Alt): Surf/Mergulhar sem insígnia
   if (run.quetzal && edOrig) edVigia();   // eventos do editor no mapa atual (cópia do save)
+  if (run.quetzal && !run.rb && !SNES && run.frames >= 120 && (run.clPed || run.cl)) {   // clima de verdade (clima.js)
+    if (!run.cl) { const r = run.s.ram(0); if (r) run.cl = Clima.create(r); }
+    if (run.cl && run.clPed) { run.cl.alvo(run.clPed.w); run.clPed = null; }
+    if (run.cl) run.cl.quadro(run.frames);
+  }
   if (!run.dn) return;
   run.dn.quadro();
   if (run.dnJogo && run.frames % 1800 === 0) postMessage({ t: "relogio", min: run.dn.minuto() });
@@ -670,6 +675,9 @@ onmessage = async (ev) => {
     }
   }
   else if (m.t && m.t.startsWith("ed-")) edMsg(m);   // editor de eventos do Quetzal (editorqz.js)
+  else if (m.t === "clima") {   // Pokémon Quetzal: clima de verdade (número do clima do jogo, ou null = o do mapa)
+    if (run && run.quetzal && !run.rb && !SNES) run.clPed = { w: m.w == null ? null : m.w };
+  }
   else if (m.t === "relogio") {   // Pokémon Quetzal: hora real ou hora do jogo
     if (run && run.quetzal && !run.rb && !SNES) {
       run.dnJogo = m.modo === "jogo";

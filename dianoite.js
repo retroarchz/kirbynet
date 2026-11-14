@@ -8,8 +8,9 @@
   // árvores à noite: as cores do próprio jogo, escolhidas pelo usuário, só para estas cores exatas do mapa
   const ARVORES = {"327":[24,33,0],"13072":[57,82,57],"6695":[24,57,24],"17398":[74,115,74],"6376":[24,24,24],"11629":[41,33,49]};
   const A = { hora: 0x0203FF58, local: 0x030054F8, un: 0x020391FC, fa: 0x020395FC, cb2: 0x03002664, fade: 0x02039AC3, fadeY: 0x02039AC0,
-              sb2: 0x030055C0, opcao: 0x2B9, mapa: 0x02038CB0, oam: 0x03002698, terreno: 0x02022FC0, BAT_INI: 0x0803D24D, BAT: 0x0803F431 };
+              sb2: 0x030055C0, opcao: 0x2B9, clima: 0x02039F3C, mapa: 0x02038CB0, oam: 0x03002698, terreno: 0x02022FC0, BAT_INI: 0x0803D24D, BAT: 0x0803F431 };
   const K = 8.226, TIPOS = new Set([1, 2, 3, 6]);
+  const gamaN = new Uint8Array(32), gamaA = new Uint8Array(32);   // tabelas do escurecido do clima no quadro atual
   const ENTRADA = 0x080C2959;                                     // mapa durante a entrada da batalha
   const CAMPO = new Set([0x080C2965, ENTRADA]);
   const SEM_CEU = new Set([3, 7, 8]);                             // terrenos debaixo d'água, caverna e prédio
@@ -142,6 +143,11 @@
         // Na entrada da batalha o jogo pisca a tela misturando a Unfaded com cinza. A Unfaded já tem a cor da hora: basta não
         // repintar a tela por cima, senão o piscar some.
         const entrada = cb2 === ENTRADA, tela = !entrada && semFade();
+        // chuva, nublado e tempestade escurecem a tela (clima.js): o jogo passa a cor por uma tabela (gWeather + 0x200 nos
+        // fundos 0-12, + 0x460 nos bonecos) com o índice em gWeather + 0x6C0. A cor da hora recebe o mesmo escurecido.
+        const g = (ram.r8(A.clima + 0x6C0) << 24) >> 24;
+        if (g > 0) for (let k = 0; k < 32; k++) { gamaN[k] = ram.r8(A.clima + 0x200 + (g - 1) * 32 + k); gamaA[k] = ram.r8(A.clima + 0x460 + (g - 1) * 32 + k); }
+        const gama = (i, v) => { if (g <= 0) return v; const t = i < 256 ? gamaN : gamaA; return t[v & 31] | (t[(v >> 5) & 31] << 5) | (t[(v >> 10) & 31] << 10); };
         for (let i = 0; i < 512; i++) {
           if (i >= 208 && i < 256) continue;                      // paletas de janela e texto dos menus
           const atual = ram.r16(A.un + i * 2);
@@ -157,7 +163,8 @@
           const v = cor(c, i, a, n);
           if (atual !== v) ram.w16(A.un + i * 2, v);
           feito[i] = v;
-          if (tela && ram.r16(A.fa + i * 2) !== v) ram.w16(A.fa + i * 2, v);
+          const vf = gama(i, v);
+          if (tela && ram.r16(A.fa + i * 2) !== vf) ram.w16(A.fa + i * 2, vf);
         }
         sombras(a);
       },

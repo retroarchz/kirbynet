@@ -755,7 +755,8 @@ function startRun(opts) {
   $("btn-eventos").classList.toggle("hidden", !edPode);
   if (edPode) Editor.inicio(run, opts.romSha1);
   $("relogio-linha").classList.toggle("hidden", !run.moto);
-  Relogio.rotulo();
+  $("clima-linha").classList.toggle("hidden", !run.moto || (run.net && !run.free));
+  Relogio.rotulo(); ClimaReal.rotulo();
   if (run.cabo && run.net) run.net.onCabo = (u8) => { const b = u8.slice(); run.worker.postMessage({ t: "cabo", bytes: b.buffer }, [b.buffer]); };
   if (run.free && !run.cabo) ghostInit(run);
   if (run.free && !run.cabo && run.net) {
@@ -1387,6 +1388,45 @@ const Relogio = {
   enviar(run) { if (run && run.moto) run.worker.postMessage({ t: "relogio", modo: this.modo(), min: +this.ler("kn-relogio-min", "720") }); },
   troca() { this.gravar("kn-relogio", this.modo() === "jogo" ? "real" : "jogo"); this.rotulo(); this.enviar(Play.run); },
 };
+// Clima de verdade no Quetzal (clima.js): o tempo de agora onde a pessoa está (open-meteo.com, sem chave) vira o clima do
+// jogo fora de casa: nublado, chuva, tempestade com raios, neblina, neve. Lugar: GPS do aparelho (o navegador pergunta uma
+// vez); sem permissão, a cidade pela internet (ipwho.is). Confere de novo a cada 15 minutos.
+const ClimaReal = {
+  NOMES: { 1: "sol com nuvens", 2: "sol", 3: "chuva", 4: "neve", 5: "tempestade com raios", 6: "neblina", 11: "nublado", 13: "chuva forte" },
+  w: null, quando: 0, timer: null, avisou: false,
+  modo() { return Relogio.ler("kn-clima", "real"); },
+  rotulo() { $("btn-clima").textContent = this.modo() === "jogo" ? "🎮 Clima do jogo" : "🌦️ Clima real"; },
+  troca() { Relogio.gravar("kn-clima", this.modo() === "jogo" ? "real" : "jogo"); this.rotulo(); this.avisou = false; this.inicio(Play.run); },
+  manda(run, w) { if (run && run.moto && run.worker) run.worker.postMessage({ t: "clima", w }); },
+  async lugar() {
+    try { const c = JSON.parse(Relogio.ler("kn-clima-lugar", "null")); if (c && Date.now() - c.t < 6 * 3600e3) return c; } catch {}
+    let c = null;
+    if (navigator.geolocation) c = await new Promise((ok) => navigator.geolocation.getCurrentPosition(
+      (p) => ok({ lat: p.coords.latitude, lon: p.coords.longitude }), () => ok(null), { timeout: 15000, maximumAge: 3600e3 }));
+    if (!c) try { const j = await (await fetch("https://ipwho.is/")).json(); if (j && j.success && j.latitude != null) c = { lat: j.latitude, lon: j.longitude }; } catch {}
+    if (c) { c.t = Date.now(); Relogio.gravar("kn-clima-lugar", JSON.stringify(c)); }
+    return c;
+  },
+  async tempo() {
+    const c = await this.lugar(); if (!c) return null;
+    const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${c.lat.toFixed(2)}&longitude=${c.lon.toFixed(2)}&current=weather_code,cloud_cover`);
+    const j = await r.json(); const a = j && j.current; if (!a) return null;
+    return Clima.doTempo(a.weather_code, a.cloud_cover);
+  },
+  async inicio(run) {
+    clearTimeout(this.timer);
+    if (!run || !run.moto || (run.net && !run.free)) return;   // só Quetzal; nunca na sala por rollback
+    if (this.modo() === "jogo") return this.manda(run, null);
+    try {
+      if (!this.w || Date.now() - this.quando > 15 * 60e3) { const w = await this.tempo(); if (w != null) { this.w = w; this.quando = Date.now(); } }
+      if (this.w != null && Play.run === run) {
+        this.manda(run, this.w);
+        if (!this.avisou) { this.avisou = true; toast(`🌦️ Clima de agora aí fora: ${this.NOMES[this.w] || "?"} (vale nas cidades e rotas)`); }
+      }
+    } catch (e) { console.warn("clima:", e.message); }
+    this.timer = setTimeout(() => { if (Play.run === run) this.inicio(run); }, 15 * 60e3);
+  },
+};
 // Encontros no mato mudados a pedido (07/11/2026): o Cubchoo também aparece no mato da Rota 117 (onde fica a história do
 // Wally), no lugar do Drowzee (vaga 2 da tabela = 10% dos encontros), níveis 13-14. Lista de mato da 0.32 em 0x0917A2A0
 // (4 bytes por vaga: nível mín., máx., espécie u16); igual na Alpha 9 e na Coop 3. Muda na memória ao abrir o jogo, então o
@@ -1487,6 +1527,7 @@ function cheatsResult(run, res) {
 }
 $("btn-cheats").onclick = openCheats;
 $("btn-relogio").onclick = () => Relogio.troca();
+$("btn-clima").onclick = () => ClimaReal.troca();
 $("cheats-close").onclick = closeCheats;
 $("cheats-apply").onclick = applyCheats;
 $("cheats-add").onclick = () => {
@@ -1560,7 +1601,7 @@ function onWorker(run, m) {
     if (Play.run === run) toast(`↩ ${quem} saiu da luta. Voltaram para antes dela: falem com o treinador de novo.`);
   }
   else if (m.t === "relogio") Relogio.gravar("kn-relogio-min", String(m.min));
-  else if (m.t === "started") { Relogio.enviar(run); if (Moto.ligado()) Moto.aplica(run, true); }   // volta com o capacete escolhido
+  else if (m.t === "started") { Relogio.enviar(run); ClimaReal.inicio(run); if (Moto.ligado()) Moto.aplica(run, true); }   // volta com o capacete escolhido
   else if (m.t === "snap") persistSaves(run, m.saves, false);   // o jogo gravou algo novo
   else if (m.t === "saves") finishRun(run, m.saves);
 }
