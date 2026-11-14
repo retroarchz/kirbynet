@@ -10,6 +10,9 @@
 // Climas do jogo: 1 sol com nuvens (nuvens andando no chão: NÃO usar), 2 sol, 3 chuva, 4 neve, 5 tempestade com raios,
 // 6 neblina, 11 nublado, 13 chuva forte.
 (function (root) {
+  // Sem nuvens no chão (usuário: "nuvem no chão! não pode!"): na tabela de funções dos climas (0x091755D8, 16 bytes cada:
+  // início, quadro, início completo, fim) o clima 1 recebe as funções do sol (2). Só troca com as nuvens fora da tela.
+  const FUNCOES = 0x091755D8;
   const A = { G: 0x02039F3C, sb1: 0x030055BC, salvo: 0x49E, mapa: 0x02038CB0, cb2: 0x03002664, fade: 0x02039AC3, GRUPOS: 0x08932FB8 };
   const CAMPO = 0x080C2965, TIPOS = new Set([1, 2, 3, 6]), COMUM = new Set([0, 1, 2]);
   // código do tempo (WMO, open-meteo) -> clima do jogo
@@ -40,7 +43,18 @@
     return lista;
   }
   function create(ram, rom) {
-    let alvo = null, mexi = false, lista = null;
+    let alvo = null, mexi = false, lista = null, semNuvens = false;
+    const tiraNuvens = () => {
+      const G = A.G, sb = ram.r32(A.sb1);
+      if (sb >= 0x02000000 && sb < 0x02040000 && ram.r8(sb + A.salvo) === 1) ram.w8(sb + A.salvo, 2);
+      if (semNuvens || !rom) return;
+      if (ram.r8(G + 0x6D0) === 1 || ram.r8(G + 0x6D1) === 1) {   // nuvens na tela: o fim do próprio clima tira elas
+        if (ram.r8(G + 0x6D1) === 1) { ram.w8(G + 0x6D1, 2); ram.w8(G + 0x6D3, 0); ram.w16(G + 0x6CE, 0); }
+        return;
+      }
+      for (let k = 0; k < 16; k++) rom.w8(FUNCOES + 16 + k, rom.r8(FUNCOES + 32 + k));
+      semNuvens = true;
+    };
     const pode = () => {
       if (ram.r32(A.cb2) !== CAMPO || (ram.r8(A.fade) & 0x80)) return false;
       return TIPOS.has(ram.r8(A.mapa + 0x17)) && COMUM.has(ram.r8(A.mapa + 0x16));
@@ -64,6 +78,7 @@
     return {
       quadro(f) {
         if (f % 10) return;
+        tiraNuvens();
         if (f % 600 === 0) naRom();   // o editor de eventos pode regravar cabeçalhos
         if (alvo == null) {
           if (mexi && pode()) { troca(orig()); mexi = false; }   // desligou: volta o clima do mapa
@@ -74,6 +89,7 @@
       },
       alvo(w) { alvo = w == null ? null : w | 0; naRom(); },
       get atual() { return ram.r8(A.G + 0x6D0); },
+      get semNuvens() { return semNuvens; },
       get lugares() { return lista ? lista.length : 0; },
     };
   }
