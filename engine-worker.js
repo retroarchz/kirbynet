@@ -426,6 +426,7 @@ function tick() {
         if (i >= run.n) continue;
         const buf = pool.pop() || new ArrayBuffer(FRAME_BYTES);
         run.s.video(i, new Uint8Array(buf));
+        if (i === 0 && run.cl) run.cl.video(new Uint8Array(buf), run.frames);   // nuvens passando só na água (clima.js)
         vids.push({ i, buf }); transfer.push(buf);
       }
       const a = run.s.audio(run.net ? run.slot : 0);   // som do SEU Kirby (no "Mesmo PC", o do P1)
