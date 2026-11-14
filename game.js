@@ -1390,26 +1390,44 @@ const Relogio = {
 };
 // Clima de verdade no Quetzal (clima.js): o tempo de agora onde a pessoa está (open-meteo.com, sem chave) vira o clima do
 // jogo fora de casa: nublado, chuva, tempestade com raios, neblina, neve. Lugar: GPS do aparelho (o navegador pergunta uma
-// vez); sem permissão, a cidade pela internet (ipwho.is). Confere de novo a cada 15 minutos.
+// vez); sem permissão, a cidade pela internet (ipwho.is), que pode errar: o botão 📍 grava a cidade escrita pela pessoa. Confere de novo a cada 15 minutos.
 const ClimaReal = {
-  NOMES: { 1: "sol com nuvens", 2: "sol", 3: "chuva", 4: "neve", 5: "tempestade com raios", 6: "neblina", 11: "nublado", 13: "chuva forte" },
-  w: null, quando: 0, timer: null, avisou: false,
+  w: null, quando: 0, timer: null,
   modo() { return Relogio.ler("kn-clima", "real"); },
-  rotulo() { $("btn-clima").textContent = this.modo() === "jogo" ? "🎮 Clima do jogo" : "🌦️ Clima real"; },
-  troca() { Relogio.gravar("kn-clima", this.modo() === "jogo" ? "real" : "jogo"); this.rotulo(); this.avisou = false; this.inicio(Play.run); },
+  cidade() { try { return JSON.parse(Relogio.ler("kn-clima-cidade", "null")); } catch { return null; } },
+  rotulo() {
+    $("btn-clima").textContent = this.modo() === "jogo" ? "🎮 Clima do jogo" : "🌦️ Clima real";
+    const c = this.cidade(); $("btn-clima-onde").textContent = c ? "📍 " + c.nome : "📍 Sua cidade";
+  },
+  troca() { Relogio.gravar("kn-clima", this.modo() === "jogo" ? "real" : "jogo"); this.rotulo(); this.inicio(Play.run); },
+  // a pessoa escreve a cidade (o lugar pela internet pode dar outra cidade, ex.: São Paulo); vazio = descobrir sozinho
+  async escolher() {
+    const c = this.cidade(), nome = prompt("Sua cidade (para o clima do jogo ser o daí). Deixe vazio para descobrir sozinho:", c ? c.nome : "");
+    if (nome === null) return;
+    if (!nome.trim()) { try { localStorage.removeItem("kn-clima-cidade"); } catch {} }
+    else try {
+      const j = await (await fetch(`https://geocoding-api.open-meteo.com/v1/search?count=1&language=pt&name=${encodeURIComponent(nome.trim())}`)).json();
+      const r = j && j.results && j.results[0];
+      if (!r) return alert("Não achei essa cidade. Tente só o nome (ex.: Campinas).");
+      Relogio.gravar("kn-clima-cidade", JSON.stringify({ nome: r.name + (r.admin1 ? " - " + r.admin1 : ""), lat: r.latitude, lon: r.longitude }));
+    } catch { return alert("Sem internet agora para achar a cidade."); }
+    this.w = null; this.rotulo(); this.inicio(Play.run);
+  },
   manda(run, w) { if (run && run.moto && run.worker) run.worker.postMessage({ t: "clima", w }); },
+  // lugar: cidade escrita > GPS do aparelho > cidade pela internet (pode errar a cidade)
   async lugar() {
-    try { const c = JSON.parse(Relogio.ler("kn-clima-lugar", "null")); if (c && Date.now() - c.t < 6 * 3600e3) return c; } catch {}
+    const cid = this.cidade(); if (cid) return cid;
+    try { const c = JSON.parse(Relogio.ler("kn-clima-lugar", "null")); if (c && c.gps && Date.now() - c.t < 6 * 3600e3) return c; } catch {}
     let c = null;
     if (navigator.geolocation) c = await new Promise((ok) => navigator.geolocation.getCurrentPosition(
-      (p) => ok({ lat: p.coords.latitude, lon: p.coords.longitude }), () => ok(null), { timeout: 15000, maximumAge: 3600e3 }));
-    if (!c) try { const j = await (await fetch("https://ipwho.is/")).json(); if (j && j.success && j.latitude != null) c = { lat: j.latitude, lon: j.longitude }; } catch {}
-    if (c) { c.t = Date.now(); Relogio.gravar("kn-clima-lugar", JSON.stringify(c)); }
+      (p) => ok({ lat: p.coords.latitude, lon: p.coords.longitude, gps: true }), () => ok(null), { timeout: 15000, maximumAge: 3600e3 }));
+    if (c) { c.t = Date.now(); Relogio.gravar("kn-clima-lugar", JSON.stringify(c)); return c; }
+    try { const j = await (await fetch("https://ipwho.is/")).json(); if (j && j.success && j.latitude != null) c = { lat: j.latitude, lon: j.longitude }; } catch {}
     return c;
   },
   async tempo() {
     const c = await this.lugar(); if (!c) return null;
-    const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${c.lat.toFixed(2)}&longitude=${c.lon.toFixed(2)}&current=weather_code,cloud_cover`);
+    const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${(+c.lat).toFixed(2)}&longitude=${(+c.lon).toFixed(2)}&current=weather_code,cloud_cover`);
     const j = await r.json(); const a = j && j.current; if (!a) return null;
     return Clima.doTempo(a.weather_code, a.cloud_cover);
   },
@@ -1418,11 +1436,8 @@ const ClimaReal = {
     if (!run || !run.moto || (run.net && !run.free)) return;   // só Quetzal; nunca na sala por rollback
     if (this.modo() === "jogo") return this.manda(run, null);
     try {
-      if (!this.w || Date.now() - this.quando > 15 * 60e3) { const w = await this.tempo(); if (w != null) { this.w = w; this.quando = Date.now(); } }
-      if (this.w != null && Play.run === run) {
-        this.manda(run, this.w);
-        if (!this.avisou) { this.avisou = true; toast(`🌦️ Clima de agora aí fora: ${this.NOMES[this.w] || "?"} (vale nas cidades e rotas)`); }
-      }
+      if (this.w == null || Date.now() - this.quando > 15 * 60e3) { const w = await this.tempo(); if (w != null) { this.w = w; this.quando = Date.now(); } }
+      if (this.w != null && Play.run === run) this.manda(run, this.w);
     } catch (e) { console.warn("clima:", e.message); }
     this.timer = setTimeout(() => { if (Play.run === run) this.inicio(run); }, 15 * 60e3);
   },
@@ -1528,6 +1543,7 @@ function cheatsResult(run, res) {
 $("btn-cheats").onclick = openCheats;
 $("btn-relogio").onclick = () => Relogio.troca();
 $("btn-clima").onclick = () => ClimaReal.troca();
+$("btn-clima-onde").onclick = () => ClimaReal.escolher();
 $("cheats-close").onclick = closeCheats;
 $("cheats-apply").onclick = applyCheats;
 $("cheats-add").onclick = () => {

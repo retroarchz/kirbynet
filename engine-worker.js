@@ -293,7 +293,7 @@ function relogio() {
   if (run.quetzal && run.frames >= 120 && !run.rb && !SNES && run.frames % 30 === 0) LinkHLE.campoLivre(run.s);   // com trapaça (Alt): Surf/Mergulhar sem insígnia
   if (run.quetzal && edOrig) edVigia();   // eventos do editor no mapa atual (cópia do save)
   if (run.quetzal && !run.rb && !SNES && run.frames >= 120 && (run.clPed || run.cl)) {   // clima de verdade (clima.js)
-    if (!run.cl) { const r = run.s.ram(0); if (r) run.cl = Clima.create(r); }
+    if (!run.cl) { const r = run.s.ram(0); if (r) { const b = edBus(); run.cl = Clima.create(r, { ...b, w8: (a, v) => run.s.romWrite(a - 0x08000000, Uint8Array.of(v)) }); } }
     if (run.cl && run.clPed) { run.cl.alvo(run.clPed.w); run.clPed = null; }
     if (run.cl) run.cl.quadro(run.frames);
   }
