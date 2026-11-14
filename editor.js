@@ -1,7 +1,10 @@
 "use strict";
 // Editor de eventos do Pokémon Quetzal (tela). O GBA fica no engine-worker; lá o editorqz.js lê o mapa/sprites e grava os
 // eventos na ROM da partida. Aqui: o mapa de verdade, o catálogo de sprites para arrastar, e as propriedades de cada evento.
-// Eventos guardados por pessoa (nome) e por ROM: neste navegador e na nuvem (eventos/<chave do nome>/<rom>.json).
+// Eventos de TODOS (pedido 14/11: "as alterações do Eventos acontecem só para quem fez, queria que fosse para todos"):
+// uma lista só por ROM, na nuvem em saves/<sha1("kirbynet-eventos-de-todos")>/<sha1("kirbynet-eventos:" + rom)>, igual para
+// qualquer nome. Quem tinha eventos só seus (saves/<chave do nome>/...) tem eles juntados na lista de todos uma vez.
+// Duas pessoas salvando ao mesmo tempo: cada lugar (mapa) fica com a versão de quem mexeu nele (junta, não apaga o do outro).
 const Editor = {
   aberto: false, run: null, rom: null, who: "",
   dados: { mapas: {} },          // { "grupo.num": [evento, ...] }
@@ -83,6 +86,8 @@ const Editor = {
       const n = await this.lerNuvem();
       if (n && n.dados && (n.t || 0) > (this.dados.t || 0)) { this.dados = n.dados; this.dados.t = n.t; this.gravarLocal(); }
     } catch (e) {}
+    this.marcaBase();
+    try { if (await this.juntaProprios()) { this.dados.t = Date.now(); this.gravarLocal(); await this.gravarNuvem(); } } catch (e) {}
     if (this.total() || this.temMapas()) run.worker.postMessage({ t: "ed-aplica", ev: this.dados, silencioso: true });
     this.lerFavs();
   },
@@ -111,23 +116,77 @@ const Editor = {
   },
   gatsDe(e) { return e.gats ? e.gats : e.gat ? [e.gat] : []; },
   nomeSprite(id) { return this.favs[id] ? `${this.favs[id]} (${id})` : String(id); },
-  chave() { return `kirbynet.eventos.${this.who || "-"}.${this.rom}`; },
+  // lista de todos (cópia local + nuvem)
+  chave() { return `kirbynet.eventos.*todos*.${this.rom}`; },
   lerLocal() { try { const d = JSON.parse(localStorage.getItem(this.chave())); if (d && d.mapas) return d; } catch (e) {} return { mapas: {} }; },
   gravarLocal() { try { localStorage.setItem(this.chave(), JSON.stringify(this.dados)); } catch (e) {} },
-  // As regras do Firebase só aceitam saves/<chave do nome>/<40 letras hex> com {d, t, dev} (a pasta "eventos" é recusada):
-  // os eventos vão em saves/<chave>/<sha1("kirbynet-eventos:" + rom)>.
-  url() { return `${CLOUD_DB}/saves/${Cloud.key(this.who)}/${sha1Hex(enc("kirbynet-eventos:" + this.rom))}.json`; },
+  // As regras do Firebase só aceitam saves/<40 hex>/<40 hex> com {d, t, dev} (a pasta "eventos" é recusada).
+  TODOS: "139e2dcd543699478bca66df9bde7f90d51de535",   // sha1("kirbynet-eventos-de-todos")
+  url() { return `${CLOUD_DB}/saves/${this.TODOS}/${sha1Hex(enc("kirbynet-eventos:" + this.rom))}.json`; },
   async lerNuvem() {
-    if (!this.who || typeof Cloud === "undefined") return null;
+    if (typeof CLOUD_DB === "undefined") return null;
     const r = await fetch(this.url(), { cache: "no-store" });
     if (!r.ok) return null;
     const j = await r.json(); if (!j || !j.d) return null;
     return { dados: JSON.parse(j.d), t: j.t || 0 };
   },
+  // grava a lista de todos; se outra pessoa salvou depois que esta cópia foi lida, junta: cada mapa/pintura que
+  // mudou aqui fica com a versão daqui, o resto fica com a da nuvem.
   async gravarNuvem() {
-    if (!this.who || typeof Cloud === "undefined") return false;
+    if (typeof CLOUD_DB === "undefined" || typeof Cloud === "undefined") return false;
+    try {
+      const n = await this.lerNuvem();
+      if (n && n.dados && (n.t || 0) > (this.baseT || 0)) {
+        this.dados = this.junta(this.base || { mapas: {} }, this.dados, n.dados); this.gravarLocal();
+        if (this.run) this.run.worker.postMessage({ t: "ed-aplica", ev: this.dados, silencioso: true });
+      }
+    } catch (e) {}
+    this.dados.t = Math.max(Date.now(), this.dados.t || 0);
     const r = await fetch(this.url(), { method: "PUT", body: JSON.stringify({ d: JSON.stringify(this.dados), t: this.dados.t, dev: Cloud.dev }) });
+    if (r.ok) this.marcaBase();
     return r.ok;
+  },
+  marcaBase() { this.base = JSON.parse(JSON.stringify(this.dados)); this.baseT = this.dados.t || 0; },
+  junta(base, meu, deles) {
+    const J = (x) => JSON.stringify(x === undefined ? null : x), out = JSON.parse(JSON.stringify(deles));
+    for (const campo of ["mapas", "pint"]) {
+      const b = base[campo] || {}, m = meu[campo] || {}, o = out[campo] = out[campo] || {};
+      for (const k of new Set([...Object.keys(b), ...Object.keys(m)])) if (J(b[k]) !== J(m[k])) { if (m[k] === undefined) delete o[k]; else o[k] = m[k]; }
+    }
+    if (J(base.novos) !== J(meu.novos)) out.novos = meu.novos;
+    return out;
+  },
+  // eventos antigos, que ficavam só no nome da pessoa: entram na lista de todos (uma vez; a nuvem guarda "juntado")
+  urlProprio() { return `${CLOUD_DB}/saves/${Cloud.key(this.who)}/${sha1Hex(enc("kirbynet-eventos:" + this.rom))}.json`; },
+  async juntaProprios() {
+    if (!this.who || typeof Cloud === "undefined") return false;
+    const kl = `kirbynet.eventos.${this.who}.${this.rom}`;
+    let p = null, pt = 0, feito = false;
+    try { const d = JSON.parse(localStorage.getItem(kl)); if (d && d.mapas && !d.juntado) { p = d; pt = d.t || 0; } if (d && d.juntado) feito = true; } catch (e) {}
+    const r = await fetch(this.urlProprio(), { cache: "no-store" }); if (!r.ok) return false;
+    const j = await r.json(); const c = j && j.d ? JSON.parse(j.d) : null;
+    if (c && c.juntado) feito = true;
+    if (feito) { try { localStorage.removeItem(kl); } catch (e) {} return false; }
+    if (c && c.mapas && (!p || (j.t || 0) > pt)) p = c;
+    if (!p) return false;
+    // cada evento, pintura e fundo do mar que a lista de todos ainda não tem
+    const D = this.dados; D.mapas = D.mapas || {};
+    const porId = new Map(); for (const l of Object.values(D.mapas)) for (const e of l) if (e.id) porId.set(e.id, e);
+    const usadas = new Set(); for (const e of porId.values()) { if (e.marca) usadas.add(e.marca); if (e.marcaVis) usadas.add(e.marcaVis); }
+    let mudou = false;
+    for (const [k, l] of Object.entries(p.mapas || {})) for (const e of l) {
+      const ja = e.id && porId.get(e.id);
+      if (ja) { for (const q of ["marca", "marcaVis"]) if (e[q] && !ja[q] && !usadas.has(e[q])) { ja[q] = e[q]; usadas.add(e[q]); mudou = true; } continue; }
+      for (const q of ["marca", "marcaVis"]) if (e[q] && usadas.has(e[q])) delete e[q]; else if (e[q]) usadas.add(e[q]);
+      (D.mapas[k] = D.mapas[k] || []).push(e); mudou = true;
+    }
+    for (const [k, m] of Object.entries(p.pint || {})) if (!(D.pint || {})[k]) { (D.pint = D.pint || {})[k] = m; mudou = true; }
+    for (const n of p.novos || []) if (!(D.novos || []).some((x) => x.num === n.num)) { (D.novos = D.novos || []).push(n); mudou = true; }
+    // marca "juntado" no lugar antigo (senão um evento apagado da lista de todos voltaria por outro aparelho)
+    const t = Date.now();
+    await fetch(this.urlProprio(), { method: "PUT", body: JSON.stringify({ d: JSON.stringify({ mapas: {}, juntado: t, t }), t, dev: Cloud.dev }) });
+    try { localStorage.removeItem(kl); } catch (e) {}
+    return mudou;
   },
   total() { return Object.values(this.dados.mapas || {}).reduce((s, l) => s + l.length, 0); },
   temMapas() { return Object.keys(this.dados.pint || {}).length > 0 || (this.dados.novos || []).length > 0; },
@@ -151,8 +210,11 @@ const Editor = {
     }
     else if (m.t === "ed-ok") {
       // as marcas "uma vez só" escolhidas no worker ficam guardadas no evento (senão o item seria dado de novo)
-      if (m.marcas) for (const [k, l] of Object.entries(m.marcas)) (l || []).forEach((e, i) => { const d = (this.dados.mapas[k] || [])[i]; if (d && e.marca && !d.marca) d.marca = e.marca; if (d && e.marcaVis && !d.marcaVis) d.marcaVis = e.marcaVis; });
+      let novas = false;
+      if (m.marcas) for (const [k, l] of Object.entries(m.marcas)) (l || []).forEach((e, i) => { const d = (this.dados.mapas[k] || [])[i]; if (d && e.marca && !d.marca) { d.marca = e.marca; novas = true; } if (d && e.marcaVis && !d.marcaVis) { d.marcaVis = e.marcaVis; novas = true; } });
       this.gravarLocal();
+      // as marcas escolhidas vão para a lista de todos também: assim todo mundo usa as mesmas
+      if (novas && !this.mudou) this.gravarNuvem().catch(() => {});
       if (m.usado) this.espaco = [m.usado, m.livre];
       if (!m.silencioso) this.status("✅ Salvo! Eventos e pintura aparecem quando você entra no lugar: se já estiver nele, entre numa casa e saia (ou vá a outro mapa e volte)." + (m.avisos && m.avisos.length ? "  ⚠️ " + m.avisos.join(" · ") : ""));
       else if (m.avisos && m.avisos.length) toast("Eventos: " + m.avisos.join(" · "));
@@ -173,12 +235,23 @@ const Editor = {
   // ---------- abrir / fechar ----------
   abrir() {
     if (!this.run) return;
+    this.atualiza();
     this.garanteIds();
     this.monta();
     this.aberto = true; $("ed").classList.remove("hidden");
     this.status("Lendo o mapa…");
     this.run.worker.postMessage({ t: "ed-mapa" });
     if (!this.listas) this.run.worker.postMessage({ t: "ed-listas" });
+  },
+  // abriu o editor: se alguém salvou eventos enquanto você jogava, traz (e aplica) antes de mexer
+  async atualiza() {
+    try {
+      const n = await this.lerNuvem();
+      if (!n || !n.dados || (n.t || 0) <= (this.dados.t || 0) || this.mudou) return;
+      this.dados = n.dados; this.dados.t = n.t; this.gravarLocal(); this.marcaBase(); this.garanteIds();
+      this.run.worker.postMessage({ t: "ed-aplica", ev: this.dados, silencioso: true });
+      if (this.aberto) { this.sel = null; this.monta(); this.run.worker.postMessage({ t: "ed-mapa" }); }
+    } catch (e) {}
   },
   fechar() {
     if (this.mudou && !confirm("Fechar sem salvar? As mudanças não salvas somem.")) return;
@@ -767,7 +840,7 @@ const Editor = {
     const topo = (cont ? `<div class="passo" style="border-color:#ffd166"><b>➡️ Escolhendo onde ${esc(cont.nome)} aparece (parte ${cont.parte})</b>
       <div class="dica">Toque no mapa, aqui ou em outro lugar (feche, ande até lá e abra o editor).</div><button id="ed-desiste" class="ghost mini" style="margin-top:6px">✖ Desistir</button></div>` : "") +
       `<button id="ed-novo" style="width:100%">＋ Novo evento (escolher personagem)</button>
-      ${L.length ? `<div class="dica" style="margin-top:8px">Seus eventos neste lugar:</div><div class="evs">${L.map((e, i) => `<button class="ghost ev${e === s ? " on" : ""}" data-ev="${i}">${this.nomeEvento(e, nm).replace(/ \(mapa[^)]*\)/, "")} <span class="dica">${e.x},${e.y}</span></button>`).join("")}</div>` : ""}`;
+      ${L.length ? `<div class="dica" style="margin-top:8px">Eventos neste lugar (valem para todos):</div><div class="evs">${L.map((e, i) => `<button class="ghost ev${e === s ? " on" : ""}" data-ev="${i}">${this.nomeEvento(e, nm).replace(/ \(mapa[^)]*\)/, "")} <span class="dica">${e.x},${e.y}</span></button>`).join("")}</div>` : ""}`;
     const ligaTopo = () => {
       if ($("ed-desiste")) $("ed-desiste").onclick = () => { this.continuar = null; this.status("Ok, sem continuação."); this.desenhaPainel(); };
       $("ed-novo").onclick = () => { this.sel = null; this.aba("cat"); this.status("Escolha um personagem e arraste para o mapa (ou toque nele e depois no lugar)."); this.desenha(); };

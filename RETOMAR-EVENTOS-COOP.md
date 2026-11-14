@@ -46,3 +46,9 @@ eles jogam juntos. Ele disse: "não precisa ser hoje", então ficou para amanhã
 - Voo igual ao do Steven (script original 0x082C72C7) + pulo 0x46 quando o pássaro chega.
   O Sandro aprovou ("GOSTEI").
 - História do Wally: parte 1 na casa (22.0) e parte 2 na rota 0.32 ("anda junto" + voar).
+
+## RESOLVIDO (14/11/2026)
+
+Os eventos agora são de TODOS: uma lista só por ROM em `saves/139e2dcd…(sha1 "kirbynet-eventos-de-todos")/<sha1("kirbynet-eventos:"+rom)>`.
+Vale no coop e fora dele, para qualquer nome. Os eventos antigos de cada pessoa são juntados uma vez (o lugar antigo fica com `juntado`).
+Duas pessoas salvando juntas: cada mapa fica com a versão de quem mexeu nele. Teste: scratchpad 998197bf…/e2e_todos.js.
