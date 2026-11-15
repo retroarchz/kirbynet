@@ -452,7 +452,7 @@ const Editor = {
   // dados.musica = { "g.n": música } (o worker grava no cabeçalho do lugar ao Salvar); dados.musNomes = { música: "nome" }.
   // Lista do worker (EditorQZ.musicas): música de fundo do jogo com nome automático (o lugar onde ela toca) e categoria.
   MUS_CATS: [["nomes", "⭐ Com seu nome"], ["cidades", "🏙️ Cidades"], ["rotas", "🛤️ Rotas"], ["mar", "🌊 Mar"], ["cavernas", "🕳️ Cavernas"],
-    ["dentro", "🏠 Dentro de casas"], ["sem", "🎼 Sem lugar (lutas, cenas…)"], ["todas", "📋 Todas"]],
+    ["dentro", "🏠 Dentro de casas"], ["lutas", "⚔️ Lutas e encontros"], ["sem", "🎼 Outras (cenas, jingles, novas)"], ["todas", "📋 Todas"]],
   musCat: "cidades", musBusca: "",
   nomeMus(id) {
     const n = (this.dados.musNomes || {})[id]; if (n) return n;
@@ -467,7 +467,7 @@ const Editor = {
     let L = M.lista;
     if (this.musCat === "nomes") L = L.filter((x) => nomes[x.id]); else if (this.musCat !== "todas") L = L.filter((x) => x.cat === this.musCat);
     const b = this.musBusca.toLowerCase();
-    if (b) L = M.lista.filter((x) => (this.nomeMus(x.id) + " " + x.nome + " " + x.id + " " + x.onde.join(" ")).toLowerCase().includes(b));
+    if (b) L = M.lista.filter((x) => (this.nomeMus(x.id) + " " + x.nome + " " + x.id + " " + x.onde.join(" ") + " " + (x.quem || []).join(" ")).toLowerCase().includes(b));
     p.innerHTML = `<div class="fundo" style="margin-top:0"><b>🎵 Música deste lugar</b> <span class="dica">(mapa ${k})</span>
         <div style="margin:6px 0 4px;font-size:15px">${h(this.nomeMus(atual))} <span class="dica">#${atual}</span></div>
         <div class="ferr"><button class="ghost" data-ouvir="${atual}">▶ Ouvir</button><button class="ghost" data-ouvir="-1">⏹ Parar (volta a de agora)</button>
@@ -478,7 +478,7 @@ const Editor = {
       <div class="dica">${L.length} música(s). O nome automático é o lugar onde ela toca no jogo; ✏️ para dar o seu.</div>
       <div class="mus">${L.map((x) => `<div class="m${x.id === atual ? " on" : ""}">
         <button class="ghost" data-ouvir="${x.id}" title="Ouvir no jogo">▶</button>
-        <div class="t" title="${h(x.onde.join(", ") || "não toca em nenhum lugar do jogo")}">${nomes[x.id] ? "⭐ " : ""}${h(this.nomeMus(x.id))}<small>#${x.id}${x.n ? ` · ${x.n} lugar(es)` : ""}</small></div>
+        <div class="t" title="${h((x.quem && x.quem.length ? "Toca contra: " + x.quem.join(", ") + ". " : "") + (x.onde.join(", ") || "Não toca em nenhum lugar do mapa."))}">${nomes[x.id] ? "⭐ " : ""}${h(this.nomeMus(x.id))}<small>#${x.id}${x.quem && x.quem.length ? ` · ${h(x.quem.slice(0, 4).join(", "))}${x.quem.length > 4 ? "…" : ""}` : ""}${x.n ? ` · ${x.n} lugar(es)` : ""}</small></div>
         <button class="ghost" data-renom="${x.id}" title="Dar um nome">✏️</button>
         <button data-usar="${x.id}"${x.id === atual ? " disabled" : ""}>✓ Usar aqui</button></div>`).join("")}</div>`;
     p.querySelectorAll("[data-ouvir]").forEach((e) => e.onclick = () => { this.run.worker.postMessage({ t: "ed-ouvir", id: +e.dataset.ouvir }); this.status(+e.dataset.ouvir < 0 ? "⏹ Voltou a música do lugar." : `▶ Tocando “${this.nomeMus(+e.dataset.ouvir)}” no jogo.`); });
