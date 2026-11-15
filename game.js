@@ -744,6 +744,7 @@ function startRun(opts) {
   run.mkSala = mkSala;
   quetzalTipos(roms);   // ajustes fixos do Quetzal: valem sempre (também online, todos iguais)
   quetzalMato(roms);   // Cubchoo no mato da Rota 117 (antes de quetzalNuvem: vale mesmo se o hack não entrar)
+  quetzalBarco(roms);   // barco da Rota 104 pergunta se quer manobrar
   run.moto = quetzalNuvem(roms);   // deu certo: a tecla 0 pode trocar o desenho da moto
   worker.postMessage({ t: "start", module: Play.mod, n: run.n, rom: roms, saves: opts.saves,
                        net: !!run.net && !run.free, free: !!run.free || run.auto, auto: run.auto, me: run.slot | 0, slot: run.free ? 0 : run.slot,
@@ -1490,6 +1491,42 @@ function quetzalMato(rom) {
   if (String.fromCharCode(...rom.subarray(0xA0, 0xAB)) !== "PKM QUETZAL") return;
   const hex = (h) => Uint8Array.from(h.match(/../g), (b) => parseInt(b, 16));
   for (const [at, orig, novo] of QZ_MATO) { const o = hex(orig); if (o.every((b, i) => rom[at + i] === b)) rom.set(hex(novo), at); }
+}
+// Barco do Sr. Briney na Rota 104 (mapa 0.19, objeto 7, sprite 88, em 12,54; pedido 15/11): no jogo ele não tinha script.
+// Agora, apertando A nele: "Você consegue manobrar esse barco sozinho, gostaria de tentar?" (SIM/NÃO). Script e texto em
+// 0x09FF1800 (livre: 0x09FF173C..0x09FF1E00). Script: lock, msgbox SIM/NÃO (callstd 5), compare VAR_RESULT 0, goto_if_eq
+// fim; [SIM: por enquanto nada]; fim: closemessage, release, end. A cópia dos objetos no save (SB1 +0x1790) é acertada
+// pelo engine-worker (barcoVigia), senão quem salvou ali só veria o script depois de sair e voltar.
+// Do píer o A bate na água (12,53), não no barco: lá entra uma placa invisível (bg event 12 bytes: x, y, altura 0 = qualquer,
+// tipo 0 = script) com o mesmo script. A lista de placas do mapa é copiada para 0x09FF1880 com ela no fim.
+const QZ_BARCO = { at: 0x1FF1800, placas: 0x1FF1880, perto: [[12, 53]], mapa: [0, 19], obj: { id: 7, gfx: 88, x: 12, y: 54 },
+  dados: "6a0f003018ff090905210d80000006011418ff09686c02ffffffffffffffffffffffffffffffffffffffffffffffffffd0e3d71c00d7e3e2e7d9dbe9d900e1d5e2e3d6e6d5e600d9e7e7d900d6d5e6d7e3fee7e3eedde2dce3b800dbe3e7e8d5e6ddd500d8d900e8d9e2e8d5e6acff" };
+function quetzalBarco(rom) {
+  if (String.fromCharCode(...rom.subarray(0xA0, 0xAB)) !== "PKM QUETZAL") return;
+  const dv = new DataView(rom.buffer, rom.byteOffset, rom.byteLength), A = 0x08000000;
+  const p = (a) => { const v = a - A; return v >= 0 && v + 4 <= rom.length ? v : -1; };
+  const B = QZ_BARCO, dados = Uint8Array.from(B.dados.match(/../g), (b) => parseInt(b, 16));
+  const grupo = p(dv.getUint32(0x932FB8 + 4 * B.mapa[0], true)); if (grupo < 0) return;
+  const h = p(dv.getUint32(grupo + 4 * B.mapa[1], true)); if (h < 0) return;
+  const ev = p(dv.getUint32(h + 4, true)); if (ev < 0) return;
+  const n = rom[ev], lista = p(dv.getUint32(ev + 4, true)); if (lista < 0) return;
+  for (let i = 0; i < n; i++) {
+    const o = lista + 24 * i;
+    if (rom[o] !== B.obj.id || dv.getUint16(o + 2, true) !== B.obj.gfx || dv.getInt16(o + 4, true) !== B.obj.x || dv.getInt16(o + 6, true) !== B.obj.y) continue;
+    if (dv.getUint32(o + 16, true) !== 0) return;                                  // já tem script: não mexe
+    if (B.at + dados.length > rom.length || rom.subarray(B.at, B.at + dados.length).some((b) => b !== 0xFF)) return;
+    const nb = rom[ev + 3], bgs = p(dv.getUint32(ev + 16, true)), tam = 12 * (nb + B.perto.length);
+    if (nb && bgs < 0) return;
+    if (B.placas + tam > rom.length || rom.subarray(B.placas, B.placas + tam).some((b) => b !== 0xFF)) return;
+    rom.set(dados, B.at); dv.setUint32(o + 16, B.at + A, true);
+    if (nb) rom.copyWithin(B.placas, bgs, bgs + 12 * nb);
+    B.perto.forEach(([x, y], k) => {
+      const q = B.placas + 12 * (nb + k); rom.fill(0, q, q + 12);
+      dv.setInt16(q, x, true); dv.setInt16(q + 2, y, true); dv.setUint32(q + 8, B.at + A, true);
+    });
+    rom[ev + 3] = nb + B.perto.length; dv.setUint32(ev + 16, B.placas + A, true);
+    return;
+  }
 }
 function quetzalNuvem(rom) {
   if (String.fromCharCode(...rom.subarray(0xA0, 0xAB)) !== "PKM QUETZAL") return 0;

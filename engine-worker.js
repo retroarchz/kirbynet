@@ -297,6 +297,7 @@ function relogio() {
     if (run.cl && run.clPed) { run.cl.alvo(run.clPed.w); run.clPed = null; }
     if (run.cl) run.cl.quadro(run.frames);
   }
+  if (run.quetzal && !run.rb && !SNES && run.frames >= 120 && run.frames % 30 === 0) barcoVigia();
   if (!run.dn) return;
   run.dn.quadro();
   if (run.dnJogo && run.frames % 1800 === 0) postMessage({ t: "relogio", min: run.dn.minuto() });
@@ -567,6 +568,20 @@ function edAplica(m) {
 // salvo, usa essa cópia: o evento novo só nasceria depois de sair e voltar ao mapa. A cada 30 quadros: se o mapa carregado
 // usa a NOSSA lista (ponteiro de eventos do gMapHeader 0x02038CB4 dentro das faixas do editor) e a cópia está diferente,
 // copia a lista certa. O jogo cria quem faltar quando a câmera anda (TrySpawnObjectEvents lê essa cópia).
+// Barco da Rota 104 (game.js quetzalBarco): o jogo lê o script do objeto da cópia no save (SaveBlock1 +0x1790, 24 bytes
+// cada). Quem salvou na rota tem a cópia sem script: aqui ela recebe o ponteiro, se a ROM tem o script do barco.
+function barcoVigia() {
+  const ram = run.s.ram(0); if (!ram) return;
+  const s1 = ram.r32(0x030055BC); if (s1 < 0x02000000 || s1 >= 0x02040000 - 0x2000) return;
+  if (ram.r8(s1 + 0x474) !== 0 || ram.r8(s1 + 0x475) !== 19) return;
+  const bus = edBus(), SCR = 0x09FF1800; if (bus.r8(SCR) !== 0x6A || bus.r8(SCR + 1) !== 0x0F) return;
+  for (let i = 0; i < 64; i++) {
+    const o = s1 + 0x1790 + 24 * i;
+    if (ram.r8(o) !== 7 || ram.r16(o + 2) !== 88 || ram.r16(o + 4) !== 12 || ram.r16(o + 6) !== 54) continue;
+    if (ram.r32(o + 16) === 0) { ram.w16(o + 16, SCR & 0xFFFF); ram.w16(o + 18, SCR >>> 16); }
+    return;
+  }
+}
 function edVigia() {
   if (edVig.length && (edVigVoo || run.frames % 8 === 0) && edPode()) { const r = run.s.ram(0); if (r) edVigVoo = EditorQZ.vigiaVoo(r, edVig); }   // voar no fim do "anda junto" (a cada quadro durante o voo)
   if (!edOrig || !Object.keys(edOrig).length || run.frames % 30 || !edPode()) return;
