@@ -149,7 +149,7 @@ const Editor = {
   marcaBase() { this.base = JSON.parse(JSON.stringify(this.dados)); this.baseT = this.dados.t || 0; },
   junta(base, meu, deles) {
     const J = (x) => JSON.stringify(x === undefined ? null : x), out = JSON.parse(JSON.stringify(deles));
-    for (const campo of ["mapas", "pint"]) {
+    for (const campo of ["mapas", "pint", "musica", "musNomes"]) {
       const b = base[campo] || {}, m = meu[campo] || {}, o = out[campo] = out[campo] || {};
       for (const k of new Set([...Object.keys(b), ...Object.keys(m)])) if (J(b[k]) !== J(m[k])) { if (m[k] === undefined) delete o[k]; else o[k] = m[k]; }
     }
@@ -189,7 +189,7 @@ const Editor = {
     return mudou;
   },
   total() { return Object.values(this.dados.mapas || {}).reduce((s, l) => s + l.length, 0); },
-  temMapas() { return Object.keys(this.dados.pint || {}).length > 0 || (this.dados.novos || []).length > 0; },
+  temMapas() { return Object.keys(this.dados.pint || {}).length > 0 || (this.dados.novos || []).length > 0 || Object.keys(this.dados.musica || {}).length > 0; },
 
   // ---------- mensagens do worker ----------
   recebe(m) {
@@ -219,6 +219,7 @@ const Editor = {
       if (!m.silencioso) this.status("✅ Salvo! Eventos e pintura aparecem quando você entra no lugar: se já estiver nele, entre numa casa e saia (ou vá a outro mapa e volte)." + (m.avisos && m.avisos.length ? "  ⚠️ " + m.avisos.join(" · ") : ""));
       else if (m.avisos && m.avisos.length) toast("Eventos: " + m.avisos.join(" · "));
     }
+    else if (m.t === "ed-musicas") { this.mus = m; this.desenhaMusica(); }
     else if (m.t === "ed-erro") this.status("⚠️ " + m.msg);
   },
   canvasDe(w, h, rgba) {
@@ -269,6 +270,7 @@ const Editor = {
     $("ed-titulo").textContent = `🛠️ Eventos — mapa ${m.local.grupo}.${m.local.num}${this.novoAqui() ? " (seu fundo do mar)" : ""}`;
     this.status(`Você está em ${m.local.x}, ${m.local.y}. Arraste um personagem da lista para o mapa.`);
     if (this.continuar) { this.aba("painel"); this.avisaContinuar(); }
+    if (this.abaAtual === "musica") this.run.worker.postMessage({ t: "ed-musicas" });
     this.desenha(); this.desenhaPainel();
   },
   lista() { if (!this.mapa) return []; const k = this.mapa.local.grupo + "." + this.mapa.local.num; return this.dados.mapas[k] || (this.dados.mapas[k] = []); },
@@ -325,7 +327,13 @@ const Editor = {
 #ed .dica{color:#889;font-size:12px;margin-top:4px}
 #ed .perigo{background:#5a1f2a !important}
 #ed-pag{display:flex;gap:6px;align-items:center;margin-top:8px}
-#ed-pincel{flex:1;overflow:auto;padding:10px}
+#ed-pincel,#ed-musica{flex:1;overflow:auto;padding:10px}
+#ed .mus{display:flex;flex-direction:column;gap:4px;margin-top:8px}
+#ed .mus .m{display:flex;align-items:center;gap:6px;background:#1b1f2b;border:1px solid #2a2e38;border-radius:8px;padding:5px 6px}
+#ed .mus .m.on{border-color:#ff5fa2;background:#2a1f2a}
+#ed .mus .m .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#ed .mus .m .t small{color:#889;margin-left:4px}
+#ed .mus .m button{flex:0 0 auto;padding:4px 8px;font-size:13px;border-radius:6px;min-width:0}
 #ed-atlas{width:100%;image-rendering:pixelated;cursor:pointer;border:1px solid #333a4a;border-radius:6px;margin-top:6px;display:block}
 #ed .ferr{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
 #ed .ferr button{flex:1 1 auto;padding:7px 8px;font-size:13px;border-radius:8px;white-space:nowrap}
@@ -346,7 +354,7 @@ const Editor = {
 <div id="ed-corpo">
   <div id="ed-mapa"><canvas id="ed-cv"></canvas></div>
   <div id="ed-lado">
-    <div id="ed-abas"><button data-aba="cat" class="on">🧍 Personagens</button><button data-aba="painel">✏️ Evento</button><button data-aba="pincel">🎨 Pintar</button></div>
+    <div id="ed-abas"><button data-aba="cat" class="on">🧍 Personagens</button><button data-aba="painel">✏️ Evento</button><button data-aba="pincel">🎨 Pintar</button><button data-aba="musica">🎵 Música</button></div>
     <div id="ed-cat">
       <select id="ed-cats"></select>
       <input id="ed-busca" placeholder="Procurar pelo número ou nome (ex.: 10657, Wally)">
@@ -356,6 +364,7 @@ const Editor = {
     </div>
     <div id="ed-painel" class="hidden"></div>
     <div id="ed-pincel" class="hidden"></div>
+    <div id="ed-musica" class="hidden"></div>
   </div>
 </div>`;
     document.body.appendChild(d);
@@ -388,6 +397,13 @@ const Editor = {
     document.querySelectorAll("#ed-abas button").forEach((b) => b.classList.toggle("on", b.dataset.aba === qual));
     $("ed-cat").classList.toggle("hidden", qual !== "cat"); $("ed-painel").classList.toggle("hidden", qual !== "painel");
     $("ed-pincel").classList.toggle("hidden", qual !== "pincel");
+    $("ed-musica").classList.toggle("hidden", qual !== "musica");
+    if (qual === "musica") {
+      this.sel = null; this.colocar = null; this.escolhendoGat = null;
+      if (this.run) this.run.worker.postMessage({ t: "ed-musicas" });
+      this.desenhaMusica();
+      this.status("🎵 ▶ ouve no jogo; ✓ Usar aqui escolhe a música deste lugar; ✏️ dá um nome. Vale ao 💾 Salvar (para todos).");
+    }
     if (qual === "pincel") {
       this.sel = null; this.colocar = null; this.escolhendoGat = null;
       if (!this.pecas && this.mapa && this.run) { this.run.worker.postMessage({ t: "ed-pecas" }); }
@@ -432,6 +448,56 @@ const Editor = {
     const a = document.createElement("a"); a.download = `folha-${(P.ts2 >>> 0).toString(16)}.png`; a.href = cv.toDataURL("image/png"); a.click();
     this.status(`🔢 Folha baixada (tileset 0x${(P.ts2 >>> 0).toString(16).toUpperCase()}). Peça (x,y) de um objeto = 1ª + y×8 + x. Vermelho = parede no jogo.`);
   },
+  // ---------- música (pedido 15/11: "faixa de músicas em eventos que eu possa dar a lugares", com nome e renomear) ----------
+  // dados.musica = { "g.n": música } (o worker grava no cabeçalho do lugar ao Salvar); dados.musNomes = { música: "nome" }.
+  // Lista do worker (EditorQZ.musicas): música de fundo do jogo com nome automático (o lugar onde ela toca) e categoria.
+  MUS_CATS: [["nomes", "⭐ Com seu nome"], ["cidades", "🏙️ Cidades"], ["rotas", "🛤️ Rotas"], ["mar", "🌊 Mar"], ["cavernas", "🕳️ Cavernas"],
+    ["dentro", "🏠 Dentro de casas"], ["sem", "🎼 Sem lugar (lutas, cenas…)"], ["todas", "📋 Todas"]],
+  musCat: "cidades", musBusca: "",
+  nomeMus(id) {
+    const n = (this.dados.musNomes || {})[id]; if (n) return n;
+    const x = this.mus && this.mus.lista.find((y) => y.id === id); return x ? x.nome : "Música " + id;
+  },
+  desenhaMusica() {
+    const p = $("ed-musica"); if (!p) return;
+    const M = this.mus; if (!M) { p.innerHTML = '<div class="dica">Lendo as músicas do jogo…</div>'; return; }
+    const k = this.chaveAqui() || M.aqui, esc = (this.dados.musica || {})[k], atual = esc !== undefined ? esc : M.orig;
+    const nomes = this.dados.musNomes || {};
+    const h = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    let L = M.lista;
+    if (this.musCat === "nomes") L = L.filter((x) => nomes[x.id]); else if (this.musCat !== "todas") L = L.filter((x) => x.cat === this.musCat);
+    const b = this.musBusca.toLowerCase();
+    if (b) L = M.lista.filter((x) => (this.nomeMus(x.id) + " " + x.nome + " " + x.id + " " + x.onde.join(" ")).toLowerCase().includes(b));
+    p.innerHTML = `<div class="fundo" style="margin-top:0"><b>🎵 Música deste lugar</b> <span class="dica">(mapa ${k})</span>
+        <div style="margin:6px 0 4px;font-size:15px">${h(this.nomeMus(atual))} <span class="dica">#${atual}</span></div>
+        <div class="ferr"><button class="ghost" data-ouvir="${atual}">▶ Ouvir</button><button class="ghost" data-ouvir="-1">⏹ Parar (volta a de agora)</button>
+        ${esc !== undefined && esc !== M.orig ? `<button class="ghost" id="ed-mus-orig">↺ Voltar à original (${h(this.nomeMus(M.orig))})</button>` : ""}</div>
+        ${esc !== undefined ? '<div class="dica">Escolhida por você: vale para todo mundo ao 💾 Salvar.</div>' : ""}</div>
+      <div class="ferr" style="margin-top:10px">${this.MUS_CATS.map(([c, n]) => `<button class="ghost${this.musCat === c ? " on" : ""}" data-mcat="${c}">${n}</button>`).join("")}</div>
+      <input id="ed-mus-busca" placeholder="Procurar (nome, lugar ou número)" value="${h(this.musBusca)}" style="margin-top:8px">
+      <div class="dica">${L.length} música(s). O nome automático é o lugar onde ela toca no jogo; ✏️ para dar o seu.</div>
+      <div class="mus">${L.map((x) => `<div class="m${x.id === atual ? " on" : ""}">
+        <button class="ghost" data-ouvir="${x.id}" title="Ouvir no jogo">▶</button>
+        <div class="t" title="${h(x.onde.join(", ") || "não toca em nenhum lugar do jogo")}">${nomes[x.id] ? "⭐ " : ""}${h(this.nomeMus(x.id))}<small>#${x.id}${x.n ? ` · ${x.n} lugar(es)` : ""}</small></div>
+        <button class="ghost" data-renom="${x.id}" title="Dar um nome">✏️</button>
+        <button data-usar="${x.id}"${x.id === atual ? " disabled" : ""}>✓ Usar aqui</button></div>`).join("")}</div>`;
+    p.querySelectorAll("[data-ouvir]").forEach((e) => e.onclick = () => { this.run.worker.postMessage({ t: "ed-ouvir", id: +e.dataset.ouvir }); this.status(+e.dataset.ouvir < 0 ? "⏹ Voltou a música do lugar." : `▶ Tocando “${this.nomeMus(+e.dataset.ouvir)}” no jogo.`); });
+    p.querySelectorAll("[data-mcat]").forEach((e) => e.onclick = () => { this.musCat = e.dataset.mcat; this.musBusca = ""; this.desenhaMusica(); });
+    p.querySelectorAll("[data-usar]").forEach((e) => e.onclick = () => {
+      const id = +e.dataset.usar; this.dados.musica = this.dados.musica || {};
+      if (id === M.orig) delete this.dados.musica[k]; else this.dados.musica[k] = id;
+      this.mudou = true; this.desenhaMusica(); this.status(`✓ “${this.nomeMus(id)}” neste lugar. Aperte 💾 Salvar para valer (para todo mundo).`);
+    });
+    p.querySelectorAll("[data-renom]").forEach((e) => e.onclick = () => {
+      const id = +e.dataset.renom, n = prompt(`Nome para a música #${id} (vazio = volta ao automático):`, nomes[id] || this.nomeMus(id)); if (n === null) return;
+      this.dados.musNomes = this.dados.musNomes || {};
+      if (n.trim()) this.dados.musNomes[id] = n.trim().slice(0, 40); else delete this.dados.musNomes[id];
+      this.mudou = true; this.desenhaMusica(); this.status("✏️ Nome guardado. Aperte 💾 Salvar para valer para todo mundo.");
+    });
+    const o = $("ed-mus-orig"); if (o) o.onclick = () => { delete this.dados.musica[k]; this.mudou = true; this.desenhaMusica(); this.status("↺ Volta a música original ao 💾 Salvar."); };
+    const bb = $("ed-mus-busca"); bb.oninput = () => { this.musBusca = bb.value; const pos = bb.selectionStart; this.desenhaMusica(); const n2 = $("ed-mus-busca"); n2.focus(); n2.setSelectionRange(pos, pos); };
+  },
+
   // ---------- pintura ----------
   pintKey() { const k = this.chaveAqui(); this.dados.pint = this.dados.pint || {}; return this.dados.pint[k] || (this.dados.pint[k] = {}); },
   // colisão/altura padrão de uma peça: a mais usada com ela neste lugar; água = altura 1 (como o jogo), o resto 3

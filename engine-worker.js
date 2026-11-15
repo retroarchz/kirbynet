@@ -523,6 +523,10 @@ function edBus() {
   const s = run.s, r16 = (a) => s.read16(0, a) & 0xFFFF;
   return { r16, r8: (a) => (r16(a & ~1) >> ((a & 1) * 8)) & 255, r32: (a) => (r16(a) | (r16(a + 2) << 16)) >>> 0 };
 }
+// Música (aba 🎵 do editor): lista lida uma vez; cabeçalhos mudados -> música original; script de tocar (playbgm) num
+// pedaço livre da área do barco (0x09FF1DF0, 16 bytes; o site manda o jogo rodar pelo contexto de script 0x03000EF0).
+let edMusLista = null, edMusOrig = new Map();
+const MUS_TOCA = 0x09FF1DF0;
 function edAplica(m) {
   if (!run) { edPend = m; return; }
   if (!edPode()) return postMessage({ t: "ed-ok", avisos: ["Os eventos não valem nesta partida (sala por rollback)."] });
@@ -544,6 +548,13 @@ function edAplica(m) {
       for (const l of Object.values(ev.mapas)) for (const e of l) if (e.reset && e.marca) ramR.w8(s1 + (e.marca >> 3), ramR.r8(s1 + (e.marca >> 3)) & ~(1 << (e.marca & 7)));
   }
   edOrig = ev.orig || {}; edOrigScr = ev.origScr || null; edVig = r.vigias || [];
+  // músicas dos lugares (aba 🎵 Música): dados.musica = { "g.n": música }. Volta as antigas e grava as novas no cabeçalho +0x10
+  for (const [h, v] of edMusOrig) run.s.romWrite(h + 0x10 - 0x08000000, Uint8Array.of(v & 0xFF, v >> 8));
+  edMusOrig = new Map();
+  for (const [k, id] of Object.entries(m.ev && m.ev.musica || {})) {
+    const [g, n] = k.split(".").map(Number), h = EditorQZ.cabecalho(bus, g, n); if (!h || !(id >= 0)) continue;
+    edMusOrig.set(h, bus.r16(h + 0x10)); run.s.romWrite(h + 0x10 - 0x08000000, Uint8Array.of(id & 0xFF, id >> 8));
+  }
   // O jogo guarda na RAM uma cópia do cabeçalho do mapa atual (gMapHeader 0x02038CB0: +4 eventos, +8 scripts). Se
   // aplicamos com o jogador DENTRO de um mapa editado, essa cópia ainda aponta para a lista velha, que acabou de ser
   // apagada/regravada em outro lugar: as portas liam lixo e ninguém conseguia sair (relato 03/11, Wally no mapa 22.0).
@@ -559,6 +570,12 @@ function edAplica(m) {
       if (h && (novo || bus.r32(h) === ram.r32(0x02038CB0))) {
         if (novo) w32(0x02038CB0, bus.r32(h));
         w32(0x02038CB4, bus.r32(h + 4)); w32(0x02038CB8, bus.r32(h + 8)); w32(0x02038CBC, bus.r32(h + 0xC));   // +0xC ligações (mergulho)
+      }
+      if (h) {   // música deste lugar mudou: vale já (cópia do cabeçalho na RAM +0x10) e toca a nova ao salvar
+        const mus = bus.r16(h + 0x10);
+        if (ram.r16(0x02038CC0) !== mus) { ram.w16(0x02038CC0, mus);
+          if (!m.silencioso && ram.r8(0x03000EE8) === 2) { run.s.romWrite(MUS_TOCA - 0x08000000, Uint8Array.of(0x33, mus & 0xFF, mus >> 8, 0x00, 0x02));
+            const C = 0x03000EF0; ram.w8(C, 0); ram.w8(C + 1, 1); ram.w16(C + 8, MUS_TOCA & 0xFFFF); ram.w16(C + 10, MUS_TOCA >>> 16); ram.w8(0x03000EE8, 0); } }
       }
     }
   }
@@ -684,6 +701,15 @@ function edMsg(m) {
     const buf = M.rgba.buffer, info = Array.from(M.info), antes = info.slice();
     for (const [i, v] of Object.entries(edPintOrig[L.grupo + "." + L.num] || {})) antes[+i] = v;   // como era antes da pintura (borracha)
     postMessage({ t: "ed-mapa", local: L, w: M.w, h: M.h, rgba: buf, info, orig: antes, objs, portas, g0: EditorQZ.grupo0(bus) }, [buf]);
+  } else if (m.t === "ed-musicas") {
+    if (!edMusLista) edMusLista = EditorQZ.musicas(bus);
+    const L = EditorQZ.local(bus), h = EditorQZ.cabecalho(bus, L.grupo, L.num), k = L.grupo + "." + L.num;
+    postMessage({ t: "ed-musicas", lista: edMusLista, aqui: k, atual: h ? bus.r16(h + 0x10) : -1, orig: edMusOrig.has(h) ? edMusOrig.get(h) : (h ? bus.r16(h + 0x10) : -1) });
+  } else if (m.t === "ed-ouvir") {   // toca uma música no jogo (m.id; -1 = volta a música do lugar)
+    const ram = run.s.ram(0), id = m.id >= 0 ? m.id : ram.r16(0x02038CC0);
+    if (ram.r8(0x03000EE8) !== 2 || ram.r32(0x03002664) !== 0x080C2965) return postMessage({ t: "ed-erro", msg: "O jogo está ocupado (conversa, menu ou luta). Feche a conversa e tente de novo." });
+    run.s.romWrite(MUS_TOCA - 0x08000000, Uint8Array.of(0x33, id & 0xFF, id >> 8, 0x00, 0x02));   // playbgm id, sem guardar; end
+    const C = 0x03000EF0; ram.w8(C, 0); ram.w8(C + 1, 1); ram.w16(C + 8, MUS_TOCA & 0xFFFF); ram.w16(C + 10, MUS_TOCA >>> 16); ram.w8(0x03000EE8, 0);
   } else if (m.t === "ed-pecas") {
     const P = EditorQZ.pecas(bus);
     if (!P) return postMessage({ t: "ed-erro", msg: "Não consegui ler as peças deste lugar agora." });

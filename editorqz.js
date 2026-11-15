@@ -348,6 +348,50 @@ const EditorQZ = (() => {
     "”": 0xB2, "\"": 0xB1, "‘": 0xB3, "’": 0xB4, "'": 0xB4, ",": 0xB8, "/": 0xBA, ":": 0xF0, "%": 0x5B, "(": 0x5C, ")": 0x5D,
     "&": 0x2D, "+": 0x2E, "=": 0x35, ";": 0x36, "¿": 0x51, "¡": 0x52, "♂": 0xB5, "♀": 0xB6 });
   // quebra as linhas sozinho (~34 letras por linha, 2 linhas por caixa); linha em branco no texto = caixa nova
+  // ---------- músicas (pedido 15/11: "faixa de músicas em eventos que eu possa dar a lugares", com nome e renomear) ----------
+  // Tabela de sons do jogo 0x0938FFB0 (8 bytes: cabeçalho da música, tocador u16, ...; logo depois da tabela dos tocadores
+  // 0x0938FF68). Música de fundo = tocador 0, menos a "vazia" (o cabeçalho que mais se repete). A música de cada lugar fica
+  // no cabeçalho do mapa +0x10 (seção do mapa da região +0x14, tipo +0x17). Nome automático = o lugar onde ela mais toca
+  // (nomes em português da tabela de seções 0x092241F0: 8 bytes {grupo de nomes, x, y, w, h}; grupo de nomes +12 = PT).
+  const SONGS = 0x0938FFB0, SECOES = 0x092241F0;
+  let lerTxt = null;
+  function nomeSecao(bus, s) {
+    if (!lerTxt) { lerTxt = {}; for (const [ch, b] of Object.entries(TAB)) if (!(b in lerTxt)) lerTxt[b] = ch; }
+    const g = bus.r32(SECOES + 8 * s); if (!ok(g)) return ""; const p = bus.r32(g + 12); if (!ok(p)) return "";
+    let t = ""; for (let k = 0; k < 40; k++) { const b = bus.r8(p + k); if (b === 0xFF) break; t += lerTxt[b] || ""; }
+    return t.toLowerCase().replace(/(^|[\s-])(\S)/g, (m, a, c) => a + c.toUpperCase());   // ROTA 104 -> Rota 104
+  }
+  const CAT_TIPO = { 1: "cidades", 2: "cidades", 3: "rotas", 4: "cavernas", 5: "mar", 6: "mar", 8: "dentro", 9: "dentro" };
+  function musicas(bus) {
+    let n = 0; while (n < 2000 && ok(bus.r32(SONGS + 8 * n))) n++;
+    const cont = new Map(); for (let i = 0; i < n; i++) if (bus.r16(SONGS + 8 * i + 4) === 0) { const h = bus.r32(SONGS + 8 * i); cont.set(h, (cont.get(h) || 0) + 1); }
+    const vazia = [...cont.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    const usos = new Map();   // música -> [[g, n, seção, tipo]]
+    for (let g = 0; g < 64; g++) {
+      const l = bus.r32(GRUPOS + 4 * g); if (!ok(l)) break;
+      const prox = bus.r32(GRUPOS + 4 * (g + 1)), max = ok(prox) && prox > l ? Math.min(255, (prox - l) / 4) : 255;   // as listas dos grupos ficam grudadas
+      for (let i = 0; i < max; i++) {
+        const h = bus.r32(l + 4 * i); if (!ok(h)) break;
+        const m = bus.r16(h + 0x10); if (!usos.has(m)) usos.set(m, []); usos.get(m).push([g, i, bus.r8(h + 0x14), bus.r8(h + 0x17)]);
+      }
+    }
+    const lista = [];
+    for (let id = 0; id < n; id++) {
+      if (bus.r16(SONGS + 8 * id + 4) !== 0 || bus.r32(SONGS + 8 * id) === vazia) continue;
+      const L = usos.get(id) || [], porSec = new Map(), porCat = new Map();
+      for (const [, , sec, tipo] of L) { porSec.set(sec, (porSec.get(sec) || 0) + 1); const c = CAT_TIPO[tipo] || "outros"; porCat.set(c, (porCat.get(c) || 0) + 1); }
+      const top = (M) => [...M.entries()].sort((a, b) => b[1] - a[1]).map((x) => x[0]);
+      // nome: o lugar aberto (cidade/rota/mar/caverna) onde ela toca, senão o de dentro das casas
+      const fora = L.filter(([, , , tipo]) => CAT_TIPO[tipo] && CAT_TIPO[tipo] !== "dentro"), base = fora.length ? fora : L, porSecB = new Map();
+      for (const [, , sec] of base) porSecB.set(sec, (porSecB.get(sec) || 0) + 1);
+      const secs = [...new Set([...top(porSecB), ...top(porSec)])].map((x) => nomeSecao(bus, x)).filter(Boolean);
+      const nome = !secs.length ? "Música " + id : secs[0] + (fora.length ? "" : " (dentro)") + (secs.length > 1 ? ` +${secs.length - 1}` : "");
+      const cat = !L.length ? "sem" : ["cidades", "rotas", "mar", "cavernas", "dentro", "outros"].find((c) => porCat.has(c));
+      lista.push({ id, nome, cat, n: L.length, onde: secs.slice(0, 8), mapas: L.slice(0, 40).map(([g, i]) => g + "." + i) });
+    }
+    return lista;
+  }
+  function musicaDoLugar(bus, grupo, num) { const h = cabecalho(bus, grupo, num); return h ? bus.r16(h + 0x10) : -1; }
   function texto(s) {
     const out = [], caixas = String(s || "").replace(/\r/g, "").split(/\n\s*\n/);
     caixas.forEach((cx, ci) => {
@@ -826,6 +870,6 @@ const EditorQZ = (() => {
     }
     return ativo;
   }
-  return { usoTileset, pecas, montarMapas, grupo0, comportamento, PAREDE, CHAO, CHAO_SOBE, local, cabecalho, desenhaMapa, objetos, trajeto, caminhoAte, dadosMapa, desenhaSprite, infoSprite, catalogo, treinadores, itens, especies, texto, montar, vigiaVoo, desfazer, MOV, LIVRE, MARCAS };
+  return { usoTileset, pecas, montarMapas, grupo0, comportamento, PAREDE, CHAO, CHAO_SOBE, local, cabecalho, desenhaMapa, objetos, trajeto, caminhoAte, dadosMapa, desenhaSprite, infoSprite, catalogo, treinadores, itens, especies, texto, montar, vigiaVoo, desfazer, MOV, LIVRE, MARCAS, musicas, musicaDoLugar, nomeSecao };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = EditorQZ;
