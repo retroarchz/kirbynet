@@ -144,6 +144,24 @@ assert R[0x115A9C:0x115AAA].hex() == '201cc1f745fb207e0009c1f7b5fc', R[0x115A9C:
 SITE2 = Asm(0x08115A9C); SITE2.ldr_lit('r1', HOOK2 | 1); SITE2.bx('r1'); SITE2.pool()
 SITE2B = SITE2.build(); SITE2B = SITE2B + bytes([0xC0, 0x46] * ((14 - len(SITE2B)) // 2)); assert len(SITE2B) == 14, len(SITE2B)
 
+# ---- coop: o surf no coop é sempre a bolha cinza (0x08295E00 pergunta "coop ligado?" 0x080C5878 e, se sim, nem olha o
+# bicho). Com a marca do barco, pula a pergunta e vai à escolha do bicho (0x08295E70), que dá o barco. Sem a marca, igual.
+# Troca 8 bytes em 0x08295E00 (bl coop / cmp / beq / ldr r4) por ldr r3 + bx r3 + literal; o código refaz o ldr r4 e o r1.
+HOOK3 = 0x09FF1CC0
+a3 = Asm(HOOK3)
+a3.ldr_lit('r0', FLAG); a3.ldrb_i('r0', 'r0', 0); a3.cmpi('r0', 0); a3.bc('ne', 'bicho')
+a3.ldr_lit('r3', 0x080C5878 | 1); a3.bl('c3')
+a3.cmpi('r0', 0); a3.bc('eq', 'bicho')
+a3.ldr_lit('r4', 0x0203A730); a3.h(0x1D21)                        # adds r1, r4, #4
+a3.ldr_lit('r3', 0x08295E0C | 1); a3.bx('r3')
+a3.label('bicho'); a3.ldr_lit('r3', 0x08295E70 | 1); a3.bx('r3')
+a3.label('c3'); a3.bx('r3')
+a3.pool()
+HOOK3B = a3.build(); assert HOOK3 + len(HOOK3B) <= 0x09FF1D60
+assert R[0x295E00:0x295E0C].hex() == '2ff63afd002833d0164c211d', R[0x295E00:0x295E0C].hex()
+SITE3 = Asm(0x08295E00); SITE3.h(0x4B01); SITE3.bx('r3'); SITE3.h(0x46C0); SITE3.h(0x46C0); SITE3.word(HOOK3 | 1)
+SITE3B = SITE3.build(); assert len(SITE3B) == 12, len(SITE3B)
+
 # ---- tabelas com a 4ª vaga ----
 B = 0x090E2BD4 + 4 * 88; gi = u32(B)                             # sprite 88 = barco do Briney
 tag_barco = struct.unpack_from('<H', R, gi - A + 2)[0]
@@ -165,8 +183,9 @@ for velho, novo, onde in ((0x09977684, NPAL, (0x8295AB8, 0x8295B80, 0x8295F04)),
         fix.append([w - A, struct.pack('<I', velho).hex(), struct.pack('<I', novo).hex()])
 assert R[0x295A74:0x295A7C].hex() == '00b50004020c0021', R[0x295A74:0x295A7C].hex()
 fix.append([0x115A9C, R[0x115A9C:0x115AAA].hex(), SITE2B.hex()])
+fix.append([0x295E00, R[0x295E00:0x295E0C].hex(), SITE3B.hex()])
 
-novo = [[SCR0 - A, SCRB.hex()], [TXT - A, T.hex()], [HOOK - A, HOOKB.hex()], [HOOK2 - A, HOOK2B.hex()],
+novo = [[SCR0 - A, SCRB.hex()], [TXT - A, T.hex()], [HOOK - A, HOOKB.hex()], [HOOK2 - A, HOOK2B.hex()], [HOOK3 - A, HOOK3B.hex()],
         [NPAL - A, npal.hex()], [SPAL - A, spal.hex()], [TPL - A, tpl.hex()], [OVL - A, ovl.hex()]]
 for at, h in novo:
     n = len(h) // 2
