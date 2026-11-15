@@ -601,10 +601,11 @@ const BARCO = { FLAG: 0x0203FF39, V_EST: 0x409B, V_POS: 0x409D, V_DIR: 0x4065, I
 // no game.js). "Sem aura e vai se criando": fora do mar a tabela de imagens do 660 aponta para ele SEM aura, e desde o
 // pulo a aura sobe dos pés à cabeça (5 estágios, romWrite na tabela + o quadro é copiado de novo zerando a espera da
 // animação, sprite +0x2C) até os quadros finais. As cores dela (7 e 9 da paleta dele, que ele não usa a pé) também
-// clareiam até o azul; ao sair do mar voltam às da ROM (paleta 0x08F549D4, também a pé e na moto).
+// clareiam até o azul. Saindo do mar (pulo para a terra: ainda o 660, mas sem a marca 8 de surf, 32 quadros) é o
+// contrário: a aura desce da cabeça aos pés e some em SAI quadros; depois as cores voltam às da ROM (paleta 0x08F549D4, também a pé e na moto).
 // Lapras: com o 657 em jogo, os modelos do Lapras e do pescoço (vagas 0-2 das tabelas do barco) usam um OAM "apagado",
 // então ele nunca aparece, nem no 1º quadro. Barco (vaga 3, marca 0x0203FF39) fica de fora.
-const FLUTUA = { GFX: 10660, EU: [10657, 10665], PASSOS: 54, IDX: [7, 9], PAL: 0x08F549D4, REG: 0x09089094, TAB: 0x090F6000,
+const FLUTUA = { GFX: 10660, EU: [10657, 10665], PASSOS: 54, SAI: 26, IDX: [7, 9], PAL: 0x08F549D4, REG: 0x09089094, TAB: 0x090F6000,
   EST: 0x090F3000, FIM: 0x090F4E00, OAM: 0x090F6140, OAM_ORIG: 0x090663D8, MODELOS: [0x09FF19A0, 0x09FF19B8, 0x09FF19D0, 0x09FF1A60, 0x09FF1A78, 0x09FF1A90],
   DIR: [0, 1, 2, 0, 0, 1, 1, 2, 2], DE: [[56, 104, 168], [72, 128, 192]], PARA: [[40, 88, 200], [136, 200, 248]] };
 function flutuaVigia() {
@@ -631,7 +632,12 @@ function flutuaVigia() {
     return;
   }
   const f = run.flutua || (run.flutua = { t0: run.frames });
-  const t = Math.min(1, (run.frames - f.t0) / FLUTUA.PASSOS), e = t * t * (3 - 2 * t);
+  let t = Math.min(1, (run.frames - f.t0) / FLUTUA.PASSOS);
+  if (!(ram.r8(0x02039070) & 8)) {   // pulando para a terra: a aura volta ao mar
+    if (f.sai == null) f.sai = { f: run.frames, t };
+    t = Math.max(0, f.sai.t * (1 - (run.frames - f.sai.f) / FLUTUA.SAI));
+  } else f.sai = null;
+  const e = t * t * (3 - 2 * t);
   if (tabela(Math.min(5, Math.floor(t * 6)))) ram.w8(sp + 0x2C, ram.r8(sp + 0x2C) & 0xC0);   // copia o quadro de novo já no próximo
   FLUTUA.PARA.forEach((c, k) => {
     const rgb = c.map((x, j) => Math.round(FLUTUA.DE[k][j] + (x - FLUTUA.DE[k][j]) * e) >> 3), v = rgb[0] | rgb[1] << 5 | rgb[2] << 10;
