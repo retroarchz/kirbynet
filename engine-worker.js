@@ -615,28 +615,18 @@ const FLUTUA = { GFX: 10660, EU: [10657, 10665], PASSOS: 54, SAI: 26, IDX: [7, 9
 function flutuaVigia() {
   const ram = run.s.ram(0); if (!ram) return;
   const bus = edBus(), A = 0x08000000; if (bus.r32(FLUTUA.REG + 28) !== FLUTUA.TAB) return;   // ROM sem o QZ_FLUTUA
-  // Batalhas, menus e warps reutilizam a RAM dos sprites. Não tocar nela até o campo voltar.
-  if (ram.r32(0x03002664) !== 0x080C2965) { run.flutuaMusRetoma = true; return; }
   const rw = (a, bytes) => run.s.romWrite(a - A, Uint8Array.from(bytes)), u32 = (v) => [v & 255, (v >> 8) & 255, (v >> 16) & 255, v >>> 24];
-  const pi = ram.r8(0x02039075) & 0x7F;
-  if (pi >= 16) return;
-  const ob = 0x02038D10 + 0x24 * pi, si = ram.r8(ob + 0x23);
-  if (!(ram.r8(ob) & 1) || si >= 64) return;
-  const gfx = ram.r16(ob + 4), sp = 0x02020630 + 0x44 * si;
-  if (!(ram.r8(sp + 0x3E) & 1)) return;
-  const slot = ram.r8(sp + 5) >> 4;
+  const pi = ram.r8(0x02039075) & 0x7F, ob = 0x02038D10 + 0x24 * pi, gfx = ram.r16(ob + 4);
+  const sp = 0x02020630 + 0x44 * ram.r8(ob + 0x23), slot = ram.r8(sp + 5) >> 4;
   // Lapras invisível só para quem joga com o 657
   const eu = gfx >= FLUTUA.EU[0] && gfx <= FLUTUA.EU[1], oam = eu ? FLUTUA.OAM : FLUTUA.OAM_ORIG;
-  // A batalha restaura o áudio diretamente e pode deixar ATUAL com o valor anterior à luta.
-  // Ao voltar ao campo surfando, pedir a música de novo, mesmo quando o cache já diz NOVA.
-  // Em terra não mudar a fila: ela pode conter a música da casa para onde estamos indo.
-  if (eu && (ram.r8(0x02039070) & 8) && !ram.r8(BARCO.FLAG)) {
-    const estado = ram.r8(FLUTUA.MUS.EST), proxima = ram.r16(FLUTUA.MUS.PROX);
-    if (proxima === FLUTUA.MUS.SURF) { ram.w16(FLUTUA.MUS.PROX, FLUTUA.MUS.NOVA); run.flutuaMusRetoma = false; }
-    else if (estado === 2 && (ram.r16(FLUTUA.MUS.ATUAL) === FLUTUA.MUS.SURF || (run.flutuaMusRetoma && (!proxima || proxima === FLUTUA.MUS.NOVA)))) {
-      ram.w16(FLUTUA.MUS.PROX, FLUTUA.MUS.NOVA); ram.w8(FLUTUA.MUS.EST, 6); run.flutuaMusRetoma = false;
-    }
-  } else run.flutuaMusRetoma = false;
+  // música do surf (pedido 15/11): com o 657 a do Surf (365) vira a da Câmara Selada (438). O jogo põe a do surf na fila
+  // (próxima música 0x03000FFA, estado 6 = a atual sumindo); ao carregar um mapa surfando ela começa direto (atual
+  // 0x03000FF8): aí a de agora some e entra a outra.
+  if (eu) {
+    if (ram.r16(FLUTUA.MUS.PROX) === FLUTUA.MUS.SURF) ram.w16(FLUTUA.MUS.PROX, FLUTUA.MUS.NOVA);
+    else if (ram.r16(FLUTUA.MUS.ATUAL) === FLUTUA.MUS.SURF && ram.r8(FLUTUA.MUS.EST) === 2) { ram.w16(FLUTUA.MUS.PROX, FLUTUA.MUS.NOVA); ram.w8(FLUTUA.MUS.EST, 6); }
+  }
   for (const m of FLUTUA.MODELOS) { const v = bus.r32(m + 4); if ((v === FLUTUA.OAM || v === FLUTUA.OAM_ORIG) && v !== oam) rw(m + 4, u32(oam)); }
   // estágio da aura: -1 = sem aura (fora do mar), 0..4 crescendo, 5 = final
   const tabela = (e) => {
@@ -646,7 +636,7 @@ function flutuaVigia() {
   };
   // bonecos dos amigos surfando com o 657
   const fant = [];
-  for (let k = 0; k < 16; k++) { const o = 0x02038D10 + 0x24 * k, si = ram.r8(o + 0x23); if ((ram.r8(o) & 1) && ram.r8(o + 8) >= 200 && ram.r8(o + 8) < 208 && ram.r16(o + 4) === FLUTUA.GFX && !(ram.r8(o + 1) & 0x20) && si < 64) { const q = 0x02020630 + 0x44 * si; if (ram.r8(q + 0x3E) & 1) fant.push(q); } }
+  for (let k = 0; k < 16; k++) { const o = 0x02038D10 + 0x24 * k; if ((ram.r8(o) & 1) && ram.r8(o + 8) >= 200 && ram.r8(o + 8) < 208 && ram.r16(o + 4) === FLUTUA.GFX && !(ram.r8(o + 1) & 0x20)) fant.push(0x02020630 + 0x44 * ram.r8(o + 0x23)); }
   const cor = (sl, k, rgb) => { const i = 256 + sl * 16 + FLUTUA.IDX[k], v = (rgb[0] >> 3) | (rgb[1] >> 3) << 5 | (rgb[2] >> 3) << 10; ram.w16(0x020391FC + i * 2, v); ram.w16(0x020395FC + i * 2, v); };
   const devolve = (sl) => FLUTUA.IDX.forEach((c) => { const i = 256 + sl * 16 + c, v = bus.r16(FLUTUA.PAL + c * 2); ram.w16(0x020391FC + i * 2, v); ram.w16(0x020395FC + i * 2, v); });
   const slots = new Set(fant.map((q) => ram.r8(q + 5) >> 4));
@@ -691,9 +681,6 @@ function flutuaVigia() {
 }
 function barcoVigia() {
   const ram = run.s.ram(0); if (!ram) return;
-  if (ram.r32(0x03002664) !== 0x080C2965) return;
-  const jogador = ram.r8(0x02039075) & 0x7F;
-  if (jogador >= 16 || !(ram.r8(0x02038D10 + 0x24 * jogador) & 1)) return;
   const s1 = ram.r32(0x030055BC); if (s1 < 0x02000000 || s1 >= 0x0203E000) return;
   const bus = edBus(), A = 0x08000000, rw = (a, bytes) => run.s.romWrite(a - A, Uint8Array.from(bytes));
   const V = (v) => s1 + 0x1D4 + 2 * (v - 0x4000);
@@ -790,9 +777,6 @@ function barcoVigia() {
 const BARCO_OUT = { SCR: 0x09FF1C70, EV: 0x09FF1C90, ID0: 0xF1, FANT: 200 };
 function barcoOutros() {
   const ram = run.s.ram(0), b = run.barco; if (!ram || !b) return;
-  if (ram.r32(0x03002664) !== 0x080C2965) return;
-  const jogador = ram.r8(0x02039075) & 0x7F;
-  if (jogador >= 16 || !(ram.r8(0x02038D10 + 0x24 * jogador) & 1)) return;
   const s1 = ram.r32(0x030055BC); if (s1 < 0x02000000 || s1 >= 0x0203E000) return;
   const bus = edBus(), A = 0x08000000, rw = (a, bytes) => run.s.romWrite(a - A, Uint8Array.from(bytes));
   const campo = ram.r32(0x03002664) === 0x080C2965, livre = ram.r8(0x03000EE8) === 2;
