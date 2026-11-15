@@ -578,7 +578,7 @@ function edAplica(m) {
 // Falar com o barco: o jogo só conversa com objeto da mesma altura (barco na água = 1, você na areia = 3), então o barco
 // estacionado também ganha uma placa invisível (altura 0 = qualquer) no quadrado dele, na cópia das placas em 0x09FF6780.
 const BARCO = { FLAG: 0x0203FF39, V_EST: 0x409B, V_POS: 0x409D, V_DIR: 0x4065, ID: 0xF0, LISTA: 0x09FF1F30, MAXOBJ: 50, PLACAS: 0x09FF6780, MAXPL: 55,
-  POE: 0x9FF1C3E, TIRA7: 0x9FF1C42, PARADO: 0x9FF1B65, PIER: [0, 19], O7: { x: 12, y: 54 } };
+  POE: 0x9FF1C42, TIRA7: 0x9FF1C4B, TIRAF0: 0x9FF1C4F, PARADO: 0x9FF1B6C, PIER: [0, 19], O7: { x: 12, y: 54 } };
 function barcoVigia() {
   const ram = run.s.ram(0); if (!ram) return;
   const s1 = ram.r32(0x030055BC); if (s1 < 0x02000000 || s1 >= 0x0203E000) return;
@@ -591,6 +591,10 @@ function barcoVigia() {
   const u16 = (v) => [v & 255, (v >> 8) & 255], u32 = (v) => [v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >>> 24) & 255];
   const lanca = (ptr) => { if (!livre || !campo || run.frames - b.lanc < 60) return; b.lanc = run.frames; const C = 0x03000EF0;
     ram.w8(C, 0); ram.w8(C + 1, 1); ram.w16(C + 8, ptr & 0xFFFF); ram.w16(C + 10, ptr >>> 16); ram.w8(0x03000EE8, 0); };
+  // o barco em que você navega (sprite do surf, callback 0x081DCFD9) está na tela?
+  let blob = false; for (let i = 0; i < 64 && !blob; i++) { const sp = 0x02020630 + i * 0x44; if ((ram.r8(sp + 0x3E) & 1) && ram.r32(sp + 0x1C) === 0x081DCFD9) blob = true; }
+  const objBarco = (id) => { for (let k = 0; k < 16; k++) { const q = 0x02038D10 + 0x24 * k; if ((ram.r8(q) & 1) && ram.r8(q + 8) === id && ram.r16(q + 4) === 88) return q; } return 0; };
+  const esconde = (q, sim) => { const v = ram.r8(q + 1); if (!!(v & 0x20) !== sim) ram.w8(q + 1, sim ? v | 0x20 : v & ~0x20); };
   const cab = (g, n) => { const l = bus.r32(0x08932FB8 + 4 * g); return l >= A ? bus.r32(l + 4 * n) : 0; };
   let est = ram.r16(V(BARCO.V_EST));
   if (campo) { const d = agua ? 0 : ram.r8(ob + 0x18) & 0xF; if (ram.r16(V(BARCO.V_DIR)) !== d) ram.w16(V(BARCO.V_DIR), d); }
@@ -602,8 +606,10 @@ function barcoVigia() {
     if (bus.r16(b.o7.o + 4) !== quer[0]) rw(b.o7.o + 4, [...u16(quer[0]), ...u16(quer[1])]);
     if (est && mapa === 0x0013) for (let i = 0; i < 64; i++) { const o = s1 + 0x1790 + 24 * i;
       if (ram.r8(o) === 7 && ram.r16(o + 2) === 88 && ram.r16(o + 4) !== 0x7FFF) { ram.w16(o + 4, 0x7FFF); ram.w16(o + 6, 0x7FFF); } }
-    if (est && mapa === 0x0013 && est !== 1) for (let k = 0; k < 16; k++) { const o = 0x02038D10 + 0x24 * k;
-      if ((ram.r8(o) & 1) && ram.r8(o + 8) === 7 && ram.r16(o + 4) === 88 && ram.r8(o + 9) === 19 && ram.r8(o + 10) === 0) lanca(BARCO.TIRA7); } }
+    const o7 = mapa === 0x0013 ? objBarco(7) : 0;
+    if (est && o7 && (est !== 1 || blob)) { esconde(o7, true); lanca(BARCO.TIRA7); } }   // embarcando: some só quando o outro já está na tela
+  // embarcando no barco estacionado: ele some quando o barco de navegar aparece
+  if (est === 1 && blob) { const q = objBarco(BARCO.ID); if (q) { esconde(q, true); lanca(BARCO.TIRAF0); } }
   // navegando
   const navega = est === 1 && agua;
   if (est === 1) {
@@ -644,8 +650,12 @@ function barcoVigia() {
     } else { const o = lp + 24 * (cnt - 1); if (bus.r16(o + 4) !== bx || bus.r16(o + 6) !== by) { rw(o, tpl); rw(BARCO.PLACAS + 12 * (bus.r8(ev + 3) - 1), placa); } }
     if (mapa === (est & 0x7FFF)) {
       const o = s1 + 0x1790 + 24 * (cnt - 1); if (ram.r16(o + 4) !== bx || ram.r16(o + 6) !== by || ram.r8(o) !== BARCO.ID) tpl.forEach((v, i) => ram.w8(o + i, v));
-      let tem = false; for (let k = 0; k < 16; k++) { const q = 0x02038D10 + 0x24 * k; if ((ram.r8(q) & 1) && ram.r8(q + 8) === BARCO.ID) tem = true; }
-      if (!tem && Math.abs(bx - px) <= 7 && Math.abs(by - py) <= 5) lanca(BARCO.POE);
+      const q = objBarco(BARCO.ID);
+      if (q) esconde(q, blob);   // descendo: só aparece quando o barco em que você estava some (senão ficavam dois)
+      else if (Math.abs(bx - px) <= 7 && Math.abs(by - py) <= 5 && livre && campo && run.frames - b.lanc >= 60) {
+        rw(BARCO.POE + 6, [ram.r8(s1 + 0x474), ram.r8(s1 + 0x475)]);   // hideobjectat 0xF0 no mapa de agora: nasce escondido
+        lanca(BARCO.POE);
+      }
     }
   } else if (b.orig) {   // embarcou: as listas do mapa voltam
     const o = b.orig; rw(o.ev, [o.cnt, bus.r8(o.ev + 1), bus.r8(o.ev + 2), o.nb]); rw(o.ev + 4, u32(o.lp)); rw(o.ev + 16, u32(o.pb)); b.orig = null;
