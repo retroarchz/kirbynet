@@ -745,6 +745,7 @@ function startRun(opts) {
   quetzalTipos(roms);   // ajustes fixos do Quetzal: valem sempre (também online, todos iguais)
   quetzalMato(roms);   // Cubchoo no mato da Rota 117 (antes de quetzalNuvem: vale mesmo se o hack não entrar)
   quetzalBarco(roms);   // barco da Rota 104 pergunta se quer manobrar
+  quetzalFlutua(roms);   // surf do 657: a moça 379 flutuando com aura azul
   run.moto = quetzalNuvem(roms);   // deu certo: a tecla 0 pode trocar o desenho da moto
   worker.postMessage({ t: "start", module: Play.mod, n: run.n, rom: roms, saves: opts.saves,
                        net: !!run.net && !run.free, free: !!run.free || run.auto, auto: run.auto, me: run.slot | 0, slot: run.free ? 0 : run.slot,
@@ -1527,6 +1528,16 @@ function quetzalBarco(rom) {
   dv.setInt16(q, B.placa[0], true); dv.setInt16(q + 2, B.placa[1], true); rom[q + 4] = B.placa[2]; dv.setUint32(q + 8, B.script + A, true);
   rom[ev + 3] = nb + 1; dv.setUint32(ev + 16, B.placas + A, true);
   dv.setUint16(achou + 20, 0, true);   // sem marca: o "removeobject" ao embarcar não esconde o barco do píer para sempre (o site cuida)
+}
+// Surf do personagem 657 (pedido 15/11): no lugar dele em cima do Lapras, a moça do sprite 379 flutuando, sem a pokébola
+// (só os quadros parados/andando, com a aura em volta; o engine-worker flutuaVigia deixa a aura azul aos poucos e some
+// com o Lapras). Troca só o registro do sprite 660 (surf do 657), usado só pela tabela de sprites.
+const QZ_FLUTUA = [0x1089094, "ffffdf3aff1100022000200090010000d06306095c64060924620609dc030609e0324c08",
+  "ffffc03aff1100022000200090010000d8630609b06406099c5f060964c70509e0324c08"];
+function quetzalFlutua(rom) {
+  if (String.fromCharCode(...rom.subarray(0xA0, 0xAB)) !== "PKM QUETZAL") return;
+  const hex = (h) => Uint8Array.from(h.match(/../g), (b) => parseInt(b, 16)), [at, orig, novo] = QZ_FLUTUA, o = hex(orig);
+  if (o.every((b, i) => rom[at + i] === b)) rom.set(hex(novo), at);
 }
 function quetzalNuvem(rom) {
   if (String.fromCharCode(...rom.subarray(0xA0, 0xAB)) !== "PKM QUETZAL") return 0;

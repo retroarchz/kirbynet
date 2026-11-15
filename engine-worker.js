@@ -297,7 +297,7 @@ function relogio() {
     if (run.cl && run.clPed) { run.cl.alvo(run.clPed.w); run.clPed = null; }
     if (run.cl) run.cl.quadro(run.frames);
   }
-  if (run.quetzal && !run.rb && !SNES && run.frames >= 120) { barcoVigia(); barcoOutros(); }
+  if (run.quetzal && !run.rb && !SNES && run.frames >= 120) { barcoVigia(); barcoOutros(); flutuaVigia(); }
   if (!run.dn) return;
   run.dn.quadro();
   if (run.dnJogo && run.frames % 1800 === 0) postMessage({ t: "relogio", min: run.dn.minuto() });
@@ -597,6 +597,30 @@ function edAplica(m) {
 // estacionado também ganha uma placa invisível (altura 0 = qualquer) no quadrado dele, na cópia das placas em 0x09FF6780.
 const BARCO = { FLAG: 0x0203FF39, V_EST: 0x409B, V_POS: 0x409D, V_DIR: 0x4065, ID: 0xF0, LISTA: 0x09FF1F30, MAXOBJ: 50, PLACAS: 0x09FF6780, MAXPL: 55,
   POE: 0x9FF1C42, TIRA7: 0x9FF1C4B, TIRAF0: 0x9FF1C4F, PARADO: 0x9FF1B6C, PIER: [0, 19], O7: { x: 12, y: 54 } };
+// Surf flutuando do personagem 657 (pedido 15/11): o sprite de surf dele (660) virou a moça 379 sem a pokébola
+// (QZ_FLUTUA no game.js). Aqui: a aura em volta dela (cores 9 e 10 da paleta) vai ficando azul aos poucos desde o pulo
+// e o Lapras embaixo some (ela flutua sozinha; o balanço do surf continua). Barco (marca 0x0203FF39) fica de fora.
+const FLUTUA = { GFX: 10660, PASSOS: 48, DE: [[56, 104, 168], [72, 128, 192]], PARA: [[40, 88, 200], [136, 200, 248]] };
+function flutuaVigia() {
+  const ram = run.s.ram(0); if (!ram) return;
+  const pi = ram.r8(0x02039075) & 0x7F, ob = 0x02038D10 + 0x24 * pi;
+  if (ram.r16(ob + 4) !== FLUTUA.GFX || ram.r8(BARCO.FLAG)) { run.flutua = null; return; }
+  const f = run.flutua || (run.flutua = { t0: run.frames });
+  const sp = 0x02020630 + 0x44 * ram.r8(ob + 0x23), slot = ram.r8(sp + 5) >> 4;
+  const t = Math.min(1, (run.frames - f.t0) / FLUTUA.PASSOS), e = t * t * (3 - 2 * t);
+  FLUTUA.PARA.forEach((c, k) => {
+    const rgb = c.map((x, j) => Math.round(FLUTUA.DE[k][j] + (x - FLUTUA.DE[k][j]) * e) >> 3), v = rgb[0] | rgb[1] << 5 | rgb[2] << 10;
+    const i = 256 + slot * 16 + 9 + k;
+    ram.w16(0x020391FC + i * 2, v); ram.w16(0x020395FC + i * 2, v);
+  });   // todo quadro: se o jogo recarregar a paleta (menu, luta) volta azul; o dia e noite pinta por cima logo depois
+  // o Lapras embaixo dela some: o corpo (0x081DCFD9, segue o objeto em +0x32) e o pescoço por cima (0x08296329, no mesmo x/y)
+  const some = (q) => { const v = ram.r8(q + 0x3E); if (!(v & 4)) ram.w8(q + 0x3E, v | 4); };
+  for (let i = 0; i < 64; i++) {
+    const q = 0x02020630 + i * 0x44; if (!(ram.r8(q + 0x3E) & 1) || ram.r32(q + 0x1C) !== 0x081DCFD9 || ram.r16(q + 0x32) !== pi) continue;
+    some(q);
+    for (let j = 0; j < 64; j++) { const r = 0x02020630 + j * 0x44; if ((ram.r8(r + 0x3E) & 1) && ram.r32(r + 0x1C) === 0x08296329 && ram.r32(r + 0x20) === ram.r32(q + 0x20)) some(r); }
+  }
+}
 function barcoVigia() {
   const ram = run.s.ram(0); if (!ram) return;
   const s1 = ram.r32(0x030055BC); if (s1 < 0x02000000 || s1 >= 0x0203E000) return;
