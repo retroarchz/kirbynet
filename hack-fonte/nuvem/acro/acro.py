@@ -399,9 +399,14 @@ def code():
     a.ldr_lit('r2', 0x303); a.alu('tst', 'r1', 'r2'); a.bfar('eq', 'pose_nao')   # 0x175 + 0, 1, 8, 9
     a.b('pose_sim')
     a.label('pose_baia')   # pontuda da baía: 0x15E + 0, 1, 16, 17 (r0 = id - 0x175)
-    a.addi('r0', 0x17); a.cmpi('r0', 17); a.bfar('hi', 'pose_nao')
+    a.addi('r0', 0x17); a.cmpi('r0', 17); a.bfar('hi', 'pose_escura')
     a.mov('r1', 1); a.h(0x4000 | 2 << 6 | 0 << 3 | 1)                       # lsl r1, r0
     a.ldr_lit('r2', 0x30003); a.alu('tst', 'r1', 'r2'); a.bfar('eq', 'pose_nao')
+    a.b('pose_sim')
+    a.label('pose_escura')   # pedra escura do mar (mapa 0.30, pedido 15/11 "esse tipo de pedra tem a animação"): 0x348 + 0, 1, 8, 9 (r0 = id - 0x15E)
+    a.mov('r1', 0xF5); a.lsl('r1', 'r1', 1); a.sub_r('r0', 'r0', 'r1'); a.cmpi('r0', 9); a.bfar('hi', 'pose_nao')
+    a.mov('r1', 1); a.h(0x4000 | 2 << 6 | 0 << 3 | 1)                       # lsl r1, r0
+    a.ldr_lit('r2', 0x303); a.alu('tst', 'r1', 'r2'); a.bfar('eq', 'pose_nao')
     a.label('pose_sim')
     a.ldr_lit('r0', AVATAR); a.ldrb_i('r0', 'r0', 0); a.mov('r1', 1); a.alu('tst', 'r0', 'r1'); a.bfar('eq', 'pose_nao')
     a.ldr_i('r0', 'r4', 0xC); a.ldr_lit('r1', IMG657); a.alu('cmp', 'r0', 'r1'); a.bfar('ne', 'pose_nao')
