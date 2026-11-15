@@ -610,6 +610,7 @@ const BARCO = { FLAG: 0x0203FF39, V_EST: 0x409B, V_POS: 0x409D, V_DIR: 0x4065, I
 // cinza que o coop desenha embaixo dele (0x0825FA95) some.
 const FLUTUA = { GFX: 10660, EU: [10657, 10665], PASSOS: 54, SAI: 26, IDX: [7, 9], PAL: 0x08F549D4, REG: 0x09089094, TAB: 0x090F6000,
   EST: 0x090F3000, FIM: 0x090F4E00, OAM: 0x090F6140, OAM_ORIG: 0x090663D8, MODELOS: [0x09FF19A0, 0x09FF19B8, 0x09FF19D0, 0x09FF1A60, 0x09FF1A78, 0x09FF1A90],
+  MUS: { SURF: 365, NOVA: 438, ATUAL: 0x03000FF8, PROX: 0x03000FFA, EST: 0x03000FFC },
   DIR: [0, 1, 2, 0, 0, 1, 1, 2, 2], DE: [[56, 104, 168], [72, 128, 192]], PARA: [[40, 88, 200], [136, 200, 248]] };
 function flutuaVigia() {
   const ram = run.s.ram(0); if (!ram) return;
@@ -619,6 +620,13 @@ function flutuaVigia() {
   const sp = 0x02020630 + 0x44 * ram.r8(ob + 0x23), slot = ram.r8(sp + 5) >> 4;
   // Lapras invisível só para quem joga com o 657
   const eu = gfx >= FLUTUA.EU[0] && gfx <= FLUTUA.EU[1], oam = eu ? FLUTUA.OAM : FLUTUA.OAM_ORIG;
+  // música do surf (pedido 15/11): com o 657 a do Surf (365) vira a da Câmara Selada (438). O jogo põe a do surf na fila
+  // (próxima música 0x03000FFA, estado 6 = a atual sumindo); ao carregar um mapa surfando ela começa direto (atual
+  // 0x03000FF8): aí a de agora some e entra a outra.
+  if (eu) {
+    if (ram.r16(FLUTUA.MUS.PROX) === FLUTUA.MUS.SURF) ram.w16(FLUTUA.MUS.PROX, FLUTUA.MUS.NOVA);
+    else if (ram.r16(FLUTUA.MUS.ATUAL) === FLUTUA.MUS.SURF && ram.r8(FLUTUA.MUS.EST) === 2) { ram.w16(FLUTUA.MUS.PROX, FLUTUA.MUS.NOVA); ram.w8(FLUTUA.MUS.EST, 6); }
+  }
   for (const m of FLUTUA.MODELOS) { const v = bus.r32(m + 4); if ((v === FLUTUA.OAM || v === FLUTUA.OAM_ORIG) && v !== oam) rw(m + 4, u32(oam)); }
   // estágio da aura: -1 = sem aura (fora do mar), 0..4 crescendo, 5 = final
   const tabela = (e) => {
