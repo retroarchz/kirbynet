@@ -16,8 +16,16 @@
   const A = { G: 0x02039F3C, sb1: 0x030055BC, salvo: 0x49E, mapa: 0x02038CB0, cb2: 0x03002664, fade: 0x02039AC3, GRUPOS: 0x08932FB8 };
   const CAMPO = 0x080C2965, TIPOS = new Set([1, 2, 3, 6]), COMUM = new Set([0, 1, 2]);
   // código do tempo (WMO, open-meteo) -> clima do jogo
-  function doTempo(code, nuvens) {
+  // real (15/11, "está sol aqui"): a previsão às vezes espalha chuva que está a 5 km. Quando há medição, ela manda:
+  //  real.radar: radar de chuva no lugar (null = sem radar ali; 0 nada, 1 chuva, 2 chuva forte, 3 tempestade)
+  //  real.sol: nuvens pelo satélite de dia (null = de noite ou sem dado; 2 sol, 1 algumas nuvens, 11 nublado)
+  function doTempo(code, nuvens, real) {
     if (code == null) return null;
+    real = real || {};
+    const neve = (code >= 71 && code <= 77) || code === 85 || code === 86;
+    if (real.radar > 0) return neve ? 4 : [0, 3, 13, 5][real.radar];
+    if (real.radar === 0 && code >= 51) code = 3;                // radar sem chuva aqui: no máximo nublado
+    if (real.sol != null) return real.sol;
     if (code >= 95) return 5;                                   // trovoada
     if (code === 65 || code === 67 || code === 82) return 13;   // chuva forte
     if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return 3;   // garoa, chuva, pancadas

@@ -1425,11 +1425,50 @@ const ClimaReal = {
     try { const j = await (await fetch("https://ipwho.is/")).json(); if (j && j.success && j.latitude != null) c = { lat: j.latitude, lon: j.longitude }; } catch {}
     return c;
   },
+  // A previsão (open-meteo) é conta de computador e às vezes põe trovoada onde está sol (15/11: chuva a 5 km dali).
+  // Por isso a chuva vem do radar de verdade (RainViewer) e as nuvens de dia do satélite; a previsão fica para o resto.
+  async radar(lat, lon) {
+    const j = await (await fetch("https://api.rainviewer.com/public/weather-maps.json")).json();
+    const fr = j && j.radar && j.radar.past && j.radar.past[j.radar.past.length - 1];
+    if (!fr || Date.now() / 1000 - fr.time > 40 * 60) return null;
+    const z = 7, n = 2 ** z, xt = (lon + 180) / 360 * n, yt = (1 - Math.asinh(Math.tan(lat * Math.PI / 180)) / Math.PI) / 2 * n;
+    const x = Math.floor(xt), y = Math.floor(yt), px = Math.floor((xt - x) * 256), py = Math.floor((yt - y) * 256);
+    const img = async (u) => {
+      const bm = await createImageBitmap(await (await fetch(u)).blob());
+      const cv = document.createElement("canvas"); cv.width = cv.height = 256;
+      const g = cv.getContext("2d"); g.drawImage(bm, 0, 0); return g.getImageData(0, 0, 256, 256).data;
+    };
+    const cob = await img(`${j.host}/v2/coverage/0/256/${z}/${x}/${y}/0/0_0.png`);
+    if (cob[(py * 256 + px) * 4 + 3] > 128) return null;          // nenhum radar alcança esse lugar
+    const d = await img(`${j.host}${fr.path}/256/${z}/${x}/${y}/2/0_0.png`);
+    let f = 0;   // pior chuva a até ~1 km (1 pixel = 1,2 km): azul chuva, amarelo forte, laranja/vermelho tempestade
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {   // 2 pixels já pegava a chuva de Vila Velha (15/11)
+      const X = Math.min(255, Math.max(0, px + dx)), Y = Math.min(255, Math.max(0, py + dy)), k = (Y * 256 + X) * 4;
+      if (d[k + 3] < 200) continue;                               // transparente ou garoa fraquinha
+      f = Math.max(f, d[k] < 100 ? 1 : d[k + 1] >= 150 ? 2 : 3);
+    }
+    return f;
+  },
+  async satelite(lat, lon) {   // sol direto / sol total da última hora medida (só de dia)
+    const j = await (await fetch(`https://satellite-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&past_days=1&forecast_days=1&models=satellite_radiation_seamless&hourly=shortwave_radiation,direct_radiation&timeformat=unixtime`)).json();
+    const h = j && j.hourly; if (!h || !h.time) return null;
+    for (let i = h.time.length - 1; i >= 0; i--) {
+      const t = h.time[i], tot = h.shortwave_radiation[i], dir = h.direct_radiation[i];
+      if (tot == null || dir == null || t * 1000 > Date.now()) continue;
+      if (Date.now() - t * 1000 > 2.5 * 3600e3 || tot < 150) return null;   // velho demais, noite ou sol muito baixo
+      const r = dir / tot; return r >= 0.6 ? 2 : r >= 0.3 ? 1 : 11;
+    }
+    return null;
+  },
   async tempo() {
     const c = await this.lugar(); if (!c) return null;
-    const r = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${(+c.lat).toFixed(2)}&longitude=${(+c.lon).toFixed(2)}&current=weather_code,cloud_cover`);
-    const j = await r.json(); const a = j && j.current; if (!a) return null;
-    return Clima.doTempo(a.weather_code, a.cloud_cover);
+    const lat = (+c.lat).toFixed(2), lon = (+c.lon).toFixed(2), nada = () => null;
+    const [j, radar, sol] = await Promise.all([
+      fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=weather_code,cloud_cover`).then((r) => r.json()),
+      this.radar(+c.lat, +c.lon).catch(nada), this.satelite(lat, lon).catch(nada)]);
+    const a = j && j.current; if (!a) return null;
+    this.medido = { prev: a.weather_code, nuvens: a.cloud_cover, radar, sol };
+    return Clima.doTempo(a.weather_code, a.cloud_cover, { radar, sol });
   },
   async inicio(run) {
     clearTimeout(this.timer);
