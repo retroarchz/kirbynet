@@ -1493,14 +1493,14 @@ function quetzalMato(rom) {
   for (const [at, orig, novo] of QZ_MATO) { const o = hex(orig); if (o.every((b, i) => rom[at + i] === b)) rom.set(hex(novo), at); }
 }
 // Barco do Sr. Briney na Rota 104 (mapa 0.19; pedido 15/11): do píer (12,52), A virado para a água (12,53) pergunta
-// "Você consegue manobrar esse barco sozinho, gostaria de tentar?". SIM: o barco encosta, some e o Surf do jogo começa com
-// o desenho do BARCO no lugar do Lapras (marca 0x0203FF39); a pessoa navega com as regras do surf e, ao descer em terra, o
-// engine-worker (barcoVigia) desliga a marca. Fonte e explicação: hack-fonte/nuvem/barco/barco.py (gera fix/novo).
+// "Você consegue manobrar esse barco sozinho, gostaria de tentar?". SIM: você anda para dentro do barco (como na cena do
+// Sr. Briney), fica escondido nele e o Surf do jogo começa com o desenho do BARCO no lugar do Pokémon (marca 0x0203FF39).
+// Navegando não há batalhas; ao descer em terra o barco fica estacionado ali (engine-worker barcoVigia). Fonte e explicação: hack-fonte/nuvem/barco/barco.py (gera fix/novo).
 // A placa invisível (bg event 12 bytes: x, y, altura, tipo 0 = script) só vale na altura 4 do píer: surfando (altura 1)
 // por perto não pergunta. A lista de placas do mapa é copiada para B.placas com ela no fim.
-const QZ_BARCO = { mapa: [0, 19], barco: { id: 7, gfx: 88, x: 12, y: 54 }, placa: [12, 53, 4], script: 0x1FF1800, placas: 0x1FF18A0,
+const QZ_BARCO = { mapa: [0, 19], barco: { id: 7, gfx: 88, x: 12, y: 54 }, placa: [12, 53, 4], script: 0x1FF1B20, placas: 0x1FF18A0,
   fix: [[2710132, "00b50004020c0021", "004b18473119ff09"], [2710200, "84769709", "6019ff09"], [2710400, "84769709", "6019ff09"], [2711300, "84769709", "6019ff09"], [2710336, "9c769709", "8019ff09"], [2711236, "9c769709", "8019ff09"], [2710500, "d4789709", "a019ff09"], [2710592, "d4789709", "a019ff09"], [2711400, "d4789709", "a019ff09"], [2711492, "d4789709", "a019ff09"], [2710600, "64799709", "601aff09"], [2711500, "64799709", "601aff09"], [2711980, "64799709", "601aff09"]],
-  novo: [[33495040, "6a0f006018ff090905210d80000006012f18ff09684f07005018ff095107005907000013110139ff03029c09006c02686c02"], [33495120, "09fe"], [33495136, "d0e3d71c00d7e3e2e7d9dbe9d900e1d5e2e3d6e6d5e600d9e7e7d900d6d5e6d7e3fee7e3eedde2dce3b800dbe3e7e8d5e6ddd500d8d900e8d9e2e8d5e6acff"], [33495344, "00b5064b1b78002b02d0032002bc08470004020c0021024b1847c04639ff03027d5a2908"], [33495392, "342fa008bc1400009039a008be1400009c51a008c41400000000000005110000"], [33495424, "542fa008bd140000b039a008bf140000bc51a008c51400000000000005110000"], [33495456, "ffffbc14d8630609c478970964759709e0324c08d9cf1d08ffffbd14d8630609c478970964759709e0324c08d9cf1d08ffffbe14d8630609c4789709c4759709e0324c08d9cf1d08ffffbf14d8630609c4789709c4759709e0324c08d9cf1d08ffffc414d8630609c478970924769709e0324c08d9cf1d08ffffc514d8630609c478970924769709e0324c08d9cf1d08ffff0511d86306099c5f0609b4540409e0324c08d9cf1d08ffff0511d86306099c5f0609b4540409e0324c08d9cf1d08"], [33495648, "ffffbc14d8630609c478970994759709e0324c0829632908ffffbd14d8630609c478970994759709e0324c0829632908ffffbe14d8630609c4789709f4759709e0324c0829632908ffffbf14d8630609c4789709f4759709e0324c0829632908ffffc414d8630609c478970954769709e0324c0829632908ffffc514d8630609c478970954769709e0324c08296329080000bc14d8630609c478970994759709e0324c08296329080000bc14d8630609c478970994759709e0324c0829632908"]] };
+  novo: [[33495840, "6a219b4000000605631bff090f006018ff090905210d8000000601621bff09684fff00461cff0951000059ff000013530700169b400100110139ff03029c09006c02686c026a21654000000601631bff090f006018ff090905210d8000000601621bff096821654001000601b31bff0921654002000601d11bff0921654003000601ef1bff09216540040006010d1cff096c024fff00481cff0951000059ff0000004fff004a1cff09510000052b1cff094fff004d1cff0951000059ff0000004fff004f1cff09510000052b1cff094fff00521cff0951000059ff0000004fff00541cff09510000052b1cff094fff00571cff0951000059ff0000004fff00591cff09510000052b1cff0953f000169b400100110139ff03029c09006c0255f000025307000208fe08fe0900fe09fe0801fe0afe0b02fe0bfe0a03fe"], [33495136, "d0e3d71c00d7e3e2e7d9dbe9d900e1d5e2e3d6e6d5e600d9e7e7d900d6d5e6d7e3fee7e3eedde2dce3b800dbe3e7e8d5e6ddd500d8d900e8d9e2e8d5e6acff"], [33495344, "00b5064b1b78002b02d0032002bc08470004020c0021024b1847c04639ff03027d5a2908"], [33495392, "342fa008bc1400009039a008be1400009c51a008c41400000000000005110000"], [33495424, "542fa008bd140000b039a008bf140000bc51a008c51400000000000005110000"], [33495456, "ffffbc14d8630609c478970964759709e0324c08d9cf1d08ffffbd14d8630609c478970964759709e0324c08d9cf1d08ffffbe14d8630609c4789709c4759709e0324c08d9cf1d08ffffbf14d8630609c4789709c4759709e0324c08d9cf1d08ffffc414d8630609c478970924769709e0324c08d9cf1d08ffffc514d8630609c478970924769709e0324c08d9cf1d08ffff0511d86306099c5f0609b4540409e0324c08d9cf1d08ffff0511d86306099c5f0609b4540409e0324c08d9cf1d08"], [33495648, "ffffbc14d8630609c478970994759709e0324c0829632908ffffbd14d8630609c478970994759709e0324c0829632908ffffbe14d8630609c4789709f4759709e0324c0829632908ffffbf14d8630609c4789709f4759709e0324c0829632908ffffc414d8630609c478970954769709e0324c0829632908ffffc514d8630609c478970954769709e0324c08296329080000bc14d8630609c478970994759709e0324c08296329080000bc14d8630609c478970994759709e0324c0829632908"]] };
 function quetzalBarco(rom) {
   if (String.fromCharCode(...rom.subarray(0xA0, 0xAB)) !== "PKM QUETZAL") return;
   const dv = new DataView(rom.buffer, rom.byteOffset, rom.byteLength), A = 0x08000000, B = QZ_BARCO;
@@ -1510,10 +1510,10 @@ function quetzalBarco(rom) {
   const h = p(dv.getUint32(grupo + 4 * B.mapa[1], true)); if (h < 0) return;
   const ev = p(dv.getUint32(h + 4, true)); if (ev < 0) return;
   const n = rom[ev], lista = p(dv.getUint32(ev + 4, true)); if (lista < 0) return;
-  let achou = false;   // o barco tem que estar no lugar de sempre
-  for (let i = 0; i < n; i++) { const o = lista + 24 * i; if (rom[o] === B.barco.id && dv.getUint16(o + 2, true) === B.barco.gfx && dv.getInt16(o + 4, true) === B.barco.x && dv.getInt16(o + 6, true) === B.barco.y) achou = true; }
+  let achou = -1;   // o barco tem que estar no lugar de sempre
+  for (let i = 0; i < n; i++) { const o = lista + 24 * i; if (rom[o] === B.barco.id && dv.getUint16(o + 2, true) === B.barco.gfx && dv.getInt16(o + 4, true) === B.barco.x && dv.getInt16(o + 6, true) === B.barco.y) achou = o; }
   const nb = rom[ev + 3], bgs = p(dv.getUint32(ev + 16, true)), tam = 12 * (nb + 1);
-  if (!achou || (nb && bgs < 0)) return;
+  if (achou < 0 || (nb && bgs < 0)) return;
   // confere tudo antes de mudar (metade do mod aplicada quebraria o surf)
   for (const [at, orig] of B.fix) { const o = hex(orig); if (o.some((b, i) => rom[at + i] !== b)) return; }
   const livre = (at, k) => at + k <= rom.length && rom.subarray(at, at + k).every((b) => b === 0xFF);
@@ -1525,6 +1525,7 @@ function quetzalBarco(rom) {
   const q = B.placas + 12 * nb; rom.fill(0, q, q + 12);
   dv.setInt16(q, B.placa[0], true); dv.setInt16(q + 2, B.placa[1], true); rom[q + 4] = B.placa[2]; dv.setUint32(q + 8, B.script + A, true);
   rom[ev + 3] = nb + 1; dv.setUint32(ev + 16, B.placas + A, true);
+  dv.setUint16(achou + 20, 0, true);   // sem marca: o "removeobject" ao embarcar não esconde o barco do píer para sempre (o site cuida)
 }
 function quetzalNuvem(rom) {
   if (String.fromCharCode(...rom.subarray(0xA0, 0xAB)) !== "PKM QUETZAL") return 0;

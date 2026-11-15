@@ -21,7 +21,7 @@ u32 = lambda a: struct.unpack_from('<I', R, a - A)[0]
 FLAG = 0x0203FF39
 
 # ---- endereços na área livre 0x09FF1800..0x09FF1E00 ----
-SCR, MOV, TXT, PLACAS, HOOK = 0x09FF1800, 0x09FF1850, 0x09FF1860, 0x09FF18A0, 0x09FF1930
+TXT, PLACAS, HOOK = 0x09FF1860, 0x09FF18A0, 0x09FF1930
 NPAL, SPAL, TPL, OVL = 0x09FF1960, 0x09FF1980, 0x09FF19A0, 0x09FF1A60
 FIM_LIVRE = 0x09FF1E00
 
@@ -39,22 +39,61 @@ def texto(linhas):
     return bytes(out + [0xFF])
 T = texto(["Você consegue manobrar esse barco", "sozinho, gostaria de tentar?"])
 
-# ---- script ----
+# ---- scripts (área 0x09FF1B20..0x09FF1E00) ----
+# Estado no save (variáveis sem uso no Quetzal, zeradas no save do sandro; conferido 15/11):
+#   V_EST 0x409B: 0 = barco no píer da Rota 104, 1 = navegando, 0x8000 | grupo << 8 | num = estacionado nesse mapa
+#   V_POS 0x409D: x | y << 8 de onde ele ficou (coordenadas do mapa, sem o +7)
+#   V_DIR 0x4065: o site escreve a cada quadro a direção do jogador a pé/bike fora da água (1 S, 2 N, 3 O, 4 L), senão 0
+# O barco estacionado é um objeto de verdade (localId 0xF0) que o site põe na lista do mapa (engine-worker barcoVigia).
+V_EST, V_POS, V_DIR, ID_BARCO = 0x409B, 0x409D, 0x4065, 0xF0
+SCR0 = 0x09FF1B20
 def p32(v): return list(struct.pack('<I', v))
-s = [0x6A]                                                        # lock
-s += [0x0F, 0x00] + p32(TXT) + [0x09, 0x05]                       # msgbox SIM/NÃO
-s += [0x21, 0x0D, 0x80, 0x00, 0x00]                               # compare VAR_RESULT, 0 (NÃO)
-fim_ref = len(s) + 2; s += [0x06, 0x01, 0, 0, 0, 0]               # goto_if_eq fim
-s += [0x68]                                                       # closemessage
-s += [0x4F, 0x07, 0x00] + p32(MOV) + [0x51, 0x07, 0x00]           # applymovement barco (sobe 1 até o píer), waitmovement
-s += [0x59, 0x07, 0x00, 0x00, 0x13]                               # hideobjectat barco, 0.19 (volta ao entrar no mapa de novo)
-s += [0x11, 0x01] + p32(FLAG)                                     # writebytetoaddr 1, marca "de barco"
-s += [0x9C, 0x09, 0x00]                                           # dofieldeffect 9 (Surf: pula no barco)
-s += [0x6C, 0x02]                                                 # release, end
-fim = SCR + len(s); s[fim_ref:fim_ref + 4] = p32(fim)
-s += [0x68, 0x6C, 0x02]                                           # fim: closemessage, release, end
-assert SCR + len(s) <= MOV
-MOVIMENTO = bytes([0x09, 0xFE])                                   # andar devagar para cima (numeração do Emerald), fim
+def p16(v): return list(struct.pack('<H', v))
+class Scr:
+    def __init__(self, base): self.base, self.b, self.lab, self.ref = base, [], {}, []
+    def __call__(self, *x): self.b += list(x); return self
+    def L(self, n): self.lab[n] = self.base + len(self.b)
+    def P(self, n): self.ref.append((len(self.b), n)); self.b += [0, 0, 0, 0]
+    def build(self):
+        for at, n in self.ref:
+            v = self.lab[n] if isinstance(n, str) else n
+            self.b[at:at + 4] = p32(v)
+        return bytes(self.b)
+s = Scr(SCR0)
+def msg_simnao(): s(0x0F, 0x00); s.P(TXT); s(0x09, 0x05)                    # msgbox SIM/NÃO
+def se(var, val, cond, lab): s(0x21, *p16(var), *p16(val), 0x06, cond); s.P(lab)   # compare + goto_if (1 =, 5 ≠)
+def mover(quem, lab): s(0x4F, *p16(quem)); s.P(lab); s(0x51, 0x00, 0x00)   # applymovement + waitmovement 0
+def embarca(id_barco):   # tira o barco do mapa, liga a marca e começa o surf com o desenho do barco
+    s(0x53, *p16(id_barco))                                                 # removeobject (marca 0 no modelo: não grava nada)
+    s(0x16, *p16(V_EST), *p16(1))                                           # setvar V_EST, 1 (navegando)
+    s(0x11, 0x01); s.P(FLAG)                                                # writebytetoaddr 1, marca do desenho
+    s(0x9C, 0x09, 0x00, 0x6C, 0x02)                                         # dofieldeffect 9 (pulo escondido), release, end
+# píer da Rota 104: anda para dentro do barco (como o Sr. Briney faz), some e o barco sai com você dentro
+s.L('pier')
+s(0x6A); se(V_EST, 0, 5, 'mudo')                                            # barco não está no píer: nada
+msg_simnao(); se(0x800D, 0, 1, 'nao'); s(0x68)
+mover(0xFF, 'm_desce')                                                      # anda 1 para baixo, para dentro do barco
+s(0x59, 0xFF, 0x00, 0x00, 0x13)                                             # hideobjectat jogador (fica dentro do barco)
+embarca(7)
+s.L('nao'); s(0x68); s.L('mudo'); s(0x6C, 0x02)
+# barco estacionado (objeto 0xF0): anda para dentro dele, some, volta escondido e o surf "pula" para o barco
+s.L('parado')
+s(0x6A); se(V_DIR, 0, 1, 'mudo')                                            # na água (surfando) ou sem direção: nada
+msg_simnao(); se(0x800D, 0, 1, 'nao'); s(0x68)
+for d, nome in ((1, 'S'), (2, 'N'), (3, 'O'), (4, 'L')): se(V_DIR, d, 1, 'v' + nome)
+s(0x6C, 0x02)
+for nome in ('S', 'N', 'O', 'L'):
+    s.L('v' + nome); mover(0xFF, 'ida' + nome); s(0x59, 0xFF, 0x00, 0x00, 0x00); mover(0xFF, 'volta' + nome); s(0x05); s.P('sai')
+s.L('sai'); embarca(ID_BARCO)
+# chamados pelo site (sem trava): pôr o barco estacionado / tirar o barco do píer
+s.L('poe'); s(0x55, *p16(ID_BARCO), 0x02)                                   # addobject 0xF0
+s.L('tira7'); s(0x53, 0x07, 0x00, 0x02)                                     # removeobject 7
+# movimentos: 0x08-0x0B andar (baixo, cima, esq., dir.), 0x00-0x03 virar, 0xFE fim
+s.L('m_desce'); s(0x08, 0xFE)
+for nome, ida, volta, vira in (('S', 0x08, 0x09, 0x00), ('N', 0x09, 0x08, 0x01), ('O', 0x0A, 0x0B, 0x02), ('L', 0x0B, 0x0A, 0x03)):
+    s.L('ida' + nome); s(ida, 0xFE); s.L('volta' + nome); s(volta, vira, 0xFE)
+SCRB = s.build(); assert SCR0 + len(SCRB) <= 0x09FF1E00, hex(len(SCRB))
+SCRIPTS = {k: s.lab[k] for k in ('pier', 'parado', 'poe', 'tira7')}
 
 # ---- desvio da escolha do bicho ----
 a = Asm(HOOK)
@@ -88,11 +127,12 @@ for velho, novo, onde in ((0x09977684, NPAL, (0x8295AB8, 0x8295B80, 0x8295F04)),
         fix.append([w - A, struct.pack('<I', velho).hex(), struct.pack('<I', novo).hex()])
 assert R[0x295A74:0x295A7C].hex() == '00b50004020c0021', R[0x295A74:0x295A7C].hex()
 
-novo = [[SCR - A, bytes(s).hex()], [MOV - A, MOVIMENTO.hex()], [TXT - A, T.hex()], [HOOK - A, HOOKB.hex()],
+novo = [[SCR0 - A, SCRB.hex()], [TXT - A, T.hex()], [HOOK - A, HOOKB.hex()],
         [NPAL - A, npal.hex()], [SPAL - A, spal.hex()], [TPL - A, tpl.hex()], [OVL - A, ovl.hex()]]
 for at, h in novo:
     n = len(h) // 2
     assert all(b == 0xFF for b in R[at:at + n]), hex(at)
     assert at + A + n <= FIM_LIVRE
 
-print(json.dumps({'fix': fix, 'novo': novo, 'script': SCR - A, 'placas': PLACAS - A, 'flag': FLAG}))
+print(json.dumps({'fix': fix, 'novo': novo, 'script': SCRIPTS['pier'] - A, 'placas': PLACAS - A, 'flag': FLAG,
+                  'scripts': {k: v - A for k, v in SCRIPTS.items()}, 'vars': [V_EST, V_POS, V_DIR], 'id': ID_BARCO}))

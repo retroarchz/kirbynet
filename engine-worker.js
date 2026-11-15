@@ -297,7 +297,7 @@ function relogio() {
     if (run.cl && run.clPed) { run.cl.alvo(run.clPed.w); run.clPed = null; }
     if (run.cl) run.cl.quadro(run.frames);
   }
-  if (run.quetzal && !run.rb && !SNES && run.frames >= 120 && run.frames % 10 === 0) barcoVigia();
+  if (run.quetzal && !run.rb && !SNES && run.frames >= 120) barcoVigia();
   if (!run.dn) return;
   run.dn.quadro();
   if (run.dnJogo && run.frames % 1800 === 0) postMessage({ t: "relogio", min: run.dn.minuto() });
@@ -568,15 +568,88 @@ function edAplica(m) {
 // salvo, usa essa cópia: o evento novo só nasceria depois de sair e voltar ao mapa. A cada 30 quadros: se o mapa carregado
 // usa a NOSSA lista (ponteiro de eventos do gMapHeader 0x02038CB4 dentro das faixas do editor) e a cópia está diferente,
 // copia a lista certa. O jogo cria quem faltar quando a câmera anda (TrySpawnObjectEvents lê essa cópia).
-// Barco da Rota 104 (game.js quetzalBarco): o script liga a marca 0x0203FF39 = 1 e começa o Surf, que sai com o desenho
-// do barco. Aqui: surfando (ou mergulhado) a marca vira 2; de 2, voltou a pé = desceu em terra, a marca desliga e o próximo
-// surf volta a ser o Pokémon. Se o surf não começar (marca 1 por ~7 s), desliga também.
+// Barco da Rota 104 (game.js quetzalBarco; fonte hack-fonte/nuvem/barco/barco.py). Estado no save (variáveis sem uso):
+// V_EST 0x409B = 0 no píer, 1 navegando, 0x8000|grupo<<8|num estacionado; V_POS 0x409D = x|y<<8; V_DIR 0x4065 = direção
+// do jogador fora da água (o script do barco estacionado lê). A cada quadro: marca do desenho (0x0203FF39) e jogador
+// escondido dentro do barco enquanto navega; sem batalhas (encontros selvagens desligados e treinadores sem visão,
+// tudo devolvido ao descer); ao descer em terra o barco fica na água de onde você saiu, como objeto
+// 0xF0 na lista do mapa (cópia em 0x09FF1F30 com ele no fim, até 50 objetos) e o barco do píer (objeto 7) vai para longe.
+// O site manda o jogo rodar scripts pelo contexto global (0x03000EF0; situação 0x03000EE8: 2 = parado).
+// Falar com o barco: o jogo só conversa com objeto da mesma altura (barco na água = 1, você na areia = 3), então o barco
+// estacionado também ganha uma placa invisível (altura 0 = qualquer) no quadrado dele, na cópia das placas em 0x09FF6780.
+const BARCO = { FLAG: 0x0203FF39, V_EST: 0x409B, V_POS: 0x409D, V_DIR: 0x4065, ID: 0xF0, LISTA: 0x09FF1F30, MAXOBJ: 50, PLACAS: 0x09FF6780, MAXPL: 55,
+  POE: 0x9FF1C3E, TIRA7: 0x9FF1C42, PARADO: 0x9FF1B65, PIER: [0, 19], O7: { x: 12, y: 54 } };
 function barcoVigia() {
   const ram = run.s.ram(0); if (!ram) return;
-  const M = 0x0203FF39, v = ram.r8(M); if (v !== 1 && v !== 2) { run.barcoEsp = 0; return; }
-  const agua = ram.r8(0x02039070) & 0x18;
-  if (v === 1) { if (agua) ram.w8(M, 2); else if (++run.barcoEsp > 40) { ram.w8(M, 0); run.barcoEsp = 0; } return; }
-  if (!agua) ram.w8(M, 0);
+  const s1 = ram.r32(0x030055BC); if (s1 < 0x02000000 || s1 >= 0x0203E000) return;
+  const bus = edBus(), A = 0x08000000, rw = (a, bytes) => run.s.romWrite(a - A, Uint8Array.from(bytes));
+  const V = (v) => s1 + 0x1D4 + 2 * (v - 0x4000);
+  const b = run.barco || (run.barco = { esp: 0, trein: new Map(), desl: null, orig: null, o7: null, lanc: 0, ag: null });
+  const campo = ram.r32(0x03002664) === 0x080C2965, livre = ram.r8(0x03000EE8) === 2;
+  const pi = ram.r8(0x02039075) & 0x7F, ob = 0x02038D10 + 0x24 * pi, agua = ram.r8(0x02039070) & 0x18;
+  const px = ram.r16(ob + 0x10) - 7, py = ram.r16(ob + 0x12) - 7, mapa = (ram.r8(s1 + 0x474) << 8) | ram.r8(s1 + 0x475);
+  const u16 = (v) => [v & 255, (v >> 8) & 255], u32 = (v) => [v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >>> 24) & 255];
+  const lanca = (ptr) => { if (!livre || !campo || run.frames - b.lanc < 60) return; b.lanc = run.frames; const C = 0x03000EF0;
+    ram.w8(C, 0); ram.w8(C + 1, 1); ram.w16(C + 8, ptr & 0xFFFF); ram.w16(C + 10, ptr >>> 16); ram.w8(0x03000EE8, 0); };
+  const cab = (g, n) => { const l = bus.r32(0x08932FB8 + 4 * g); return l >= A ? bus.r32(l + 4 * n) : 0; };
+  let est = ram.r16(V(BARCO.V_EST));
+  if (campo) { const d = agua ? 0 : ram.r8(ob + 0x18) & 0xF; if (ram.r16(V(BARCO.V_DIR)) !== d) ram.w16(V(BARCO.V_DIR), d); }
+  // barco do píer (objeto 7 da Rota 104): longe quando o barco não está lá
+  if (!b.o7) { const h = cab(0, 19), ev = h ? bus.r32(h + 4) : 0, n = ev ? bus.r8(ev) : 0, l = ev ? bus.r32(ev + 4) : 0;
+    for (let i = 0; i < n && !b.o7; i++) { const o = l + 24 * i; if (bus.r8(o) === 7 && bus.r16(o + 2) === 88) b.o7 = { o, x: bus.r16(o + 4), y: bus.r16(o + 6) }; }
+    if (!b.o7) b.o7 = { o: 0 }; }
+  if (b.o7.o) { const quer = est ? [0x7FFF, 0x7FFF] : [b.o7.x, b.o7.y];
+    if (bus.r16(b.o7.o + 4) !== quer[0]) rw(b.o7.o + 4, [...u16(quer[0]), ...u16(quer[1])]);
+    if (est && mapa === 0x0013) for (let i = 0; i < 64; i++) { const o = s1 + 0x1790 + 24 * i;
+      if (ram.r8(o) === 7 && ram.r16(o + 2) === 88 && ram.r16(o + 4) !== 0x7FFF) { ram.w16(o + 4, 0x7FFF); ram.w16(o + 6, 0x7FFF); } }
+    if (est && mapa === 0x0013 && est !== 1) for (let k = 0; k < 16; k++) { const o = 0x02038D10 + 0x24 * k;
+      if ((ram.r8(o) & 1) && ram.r8(o + 8) === 7 && ram.r16(o + 4) === 88 && ram.r8(o + 9) === 19 && ram.r8(o + 10) === 0) lanca(BARCO.TIRA7); } }
+  // navegando
+  const navega = est === 1 && agua;
+  if (est === 1) {
+    if (ram.r8(BARCO.FLAG) === 0) ram.w8(BARCO.FLAG, agua ? 2 : 1);   // save carregado navegando: o desenho já sai como barco
+    if (agua) { ram.w8(BARCO.FLAG, 2); ram.w8(ob + 1, ram.r8(ob + 1) | 0x20); b.ag = { mapa, x: px, y: py, d: ram.r8(ob + 0x18) & 0xF }; b.esp = 0; }
+    else if (b.ag && ram.r8(BARCO.FLAG) === 2) {   // desceu em terra: o barco fica onde você estava
+      ram.w8(ob + 1, ram.r8(ob + 1) & ~0x20); ram.w8(BARCO.FLAG, 0);
+      if (b.ag.mapa === mapa) { est = 0x8000 | mapa; ram.w16(V(BARCO.V_POS), b.ag.x | (b.ag.y << 8)); } else est = 0;
+      ram.w16(V(BARCO.V_EST), est); b.lanc = 0;
+    } else if (campo && livre && ++b.esp > 120) { ram.w8(BARCO.FLAG, 0); est = 0; ram.w16(V(BARCO.V_EST), 0); b.esp = 0; }   // não começou a navegar
+  } else if (ram.r8(BARCO.FLAG)) ram.w8(BARCO.FLAG, 0);
+  // sem batalhas enquanto navega: 0x0203A720 = sWildEncountersDisabled (lido por 0x0810B6B4 no começo de todo encontro
+  // selvagem, inclusive as lutas duplas do mar) e treinadores com tipo 0 (não enxergam); tudo volta ao descer
+  if (navega) { if (b.desl == null) b.desl = ram.r8(0x0203A720); ram.w8(0x0203A720, 1); }
+  else if (b.desl != null) { ram.w8(0x0203A720, b.desl); b.desl = null; }
+  for (let k = 0; k < 16; k++) { const o = 0x02038D10 + 0x24 * k; if (!(ram.r8(o) & 1)) continue;
+    const ch = k + ":" + ram.r8(o + 8) + ":" + ram.r8(o + 9) + ":" + ram.r8(o + 10), t = ram.r8(o + 7);
+    if (navega && (t === 1 || t === 3)) { b.trein.set(ch, t); ram.w8(o + 7, 0); }
+    else if (!navega && t === 0 && b.trein.has(ch)) ram.w8(o + 7, b.trein.get(ch)); }
+  if (!navega && b.trein.size) b.trein.clear();
+  // estacionado: barco na lista do mapa (ROM e cópia do save) e na tela
+  if (est & 0x8000) {
+    const g = (est >> 8) & 0x7F, n = est & 0xFF, pos = ram.r16(V(BARCO.V_POS)), bx = pos & 0xFF, by = pos >> 8;
+    const h = cab(g, n), ev = h ? bus.r32(h + 4) : 0; if (!ev) return;
+    let cnt = bus.r8(ev), lp = bus.r32(ev + 4);
+    const dir = b.ag ? b.ag.d : 1, mov = [8, 8, 7, 9, 10][dir] || 8;
+    const tpl = [BARCO.ID, 0, ...u16(88), ...u16(bx), ...u16(by), 0, mov, 0, 0, 0, 0, 0, 0, ...u32(BARCO.PARADO), 0, 0, 0, 0];
+    const placa = [...u16(bx), ...u16(by), 0, 0, 0, 0, ...u32(BARCO.PARADO)];
+    if (lp !== BARCO.LISTA) {
+      const nb = bus.r8(ev + 3), pb = bus.r32(ev + 16);
+      if (cnt >= BARCO.MAXOBJ || nb >= BARCO.MAXPL) { ram.w16(V(BARCO.V_EST), 0); return; }   // lugar cheio demais: volta para o píer
+      b.orig = { ev, cnt, lp, nb, pb };
+      const dados = []; for (let i = 0; i < cnt * 24; i++) dados.push(bus.r8(lp + i));
+      const pl = []; for (let i = 0; i < nb * 12; i++) pl.push(bus.r8(pb + i));
+      rw(BARCO.LISTA, [...dados, ...tpl]); rw(BARCO.PLACAS, [...pl, ...placa]);
+      rw(ev, [cnt + 1, bus.r8(ev + 1), bus.r8(ev + 2), nb + 1]); rw(ev + 4, u32(BARCO.LISTA)); rw(ev + 16, u32(BARCO.PLACAS));
+      cnt++; lp = BARCO.LISTA;
+    } else { const o = lp + 24 * (cnt - 1); if (bus.r16(o + 4) !== bx || bus.r16(o + 6) !== by) { rw(o, tpl); rw(BARCO.PLACAS + 12 * (bus.r8(ev + 3) - 1), placa); } }
+    if (mapa === (est & 0x7FFF)) {
+      const o = s1 + 0x1790 + 24 * (cnt - 1); if (ram.r16(o + 4) !== bx || ram.r16(o + 6) !== by || ram.r8(o) !== BARCO.ID) tpl.forEach((v, i) => ram.w8(o + i, v));
+      let tem = false; for (let k = 0; k < 16; k++) { const q = 0x02038D10 + 0x24 * k; if ((ram.r8(q) & 1) && ram.r8(q + 8) === BARCO.ID) tem = true; }
+      if (!tem && Math.abs(bx - px) <= 7 && Math.abs(by - py) <= 5) lanca(BARCO.POE);
+    }
+  } else if (b.orig) {   // embarcou: as listas do mapa voltam
+    const o = b.orig; rw(o.ev, [o.cnt, bus.r8(o.ev + 1), bus.r8(o.ev + 2), o.nb]); rw(o.ev + 4, u32(o.lp)); rw(o.ev + 16, u32(o.pb)); b.orig = null;
+  }
 }
 function edVigia() {
   if (edVig.length && (edVigVoo || run.frames % 8 === 0) && edPode()) { const r = run.s.ram(0); if (r) edVigVoo = EditorQZ.vigiaVoo(r, edVig); }   // voar no fim do "anda junto" (a cada quadro durante o voo)
