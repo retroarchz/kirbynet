@@ -42,7 +42,8 @@ OFFS = [(0x150, 8, 8), (0x152, 8, 8), (0x154, 8, 8), (0x151, -8, 8), (0x153, -8,
         (0x164, 8, 8), (0x16C, 8, -8), (0x15A, 8, -8), (0x15B, -8, -8),
         (0x175, 8, 8), (0x176, -8, 8), (0x17D, 8, -8), (0x17E, -8, -8),
         (0x15E, 8, 8), (0x15F, -8, 8), (0x16E, 8, -8), (0x16F, -8, -8),        # pedra pontuda da baía (mapa 0.23)
-        (0x162, 8, 8), (0x16A, 8, -8), (0x163, -8, 8), (0x16B, -8, -8)]        # pedras do mar na beira da baía   # quadrado do bloco -> onde fica o centro da pedra (px)
+        (0x162, 8, 8), (0x16A, 8, -8), (0x163, -8, 8), (0x16B, -8, -8),
+        (0x348, 8, 8), (0x349, -8, 8), (0x350, 8, -8), (0x351, -8, -8)]        # pedra escura do mar (mapa 0.30, save 15/11)        # pedras do mar na beira da baía   # quadrado do bloco -> onde fica o centro da pedra (px)
 # A pé (pedido 02/11; 03/11 trocado de X para Z): virado para a pedra/cerca, apertando Z (= A do GBA) ele dá o pulinho do barranco para cima dela.
 # PlayerNotOnBikeMoving (0x080CB538, r5 = direção, r6 = teclas seguradas): no "bate na parede" (0x080CB58C) desvia.
 # Enquanto ele bate na parede o jogo não lê teclas, então o aperto do B fica guardado por 40 quadros (TRAVA_B, contado
@@ -106,7 +107,7 @@ HOP1 = 0x080CC43C            # pulinho de 1 casa com a roda levantada (o do jogo
 HOP2 = 0x080CC460            # pulo de 2 casas com a roda levantada (barranco)
 JUMP2 = 0x080CC364           # pulo de barranco normal (2 casas)
 
-PRIM, SEC = 0x087892D4, 0x0878934C
+PRIM, SEC, SEC_MAR = 0x087892D4, 0x0878934C, 0x0878937C   # SEC_MAR: secundário do mapa 0.30 (mar com pedras escuras)
 PLAT = [
     (PRIM, [0x0E2]),                                                     # pedrinha da areia
     (PRIM, [0x080, 0x081, 0x082, 0x088, 0x071, 0x08A, 0x090, 0x079, 0x092]),   # pedra grande marrom (3x3)
@@ -117,6 +118,7 @@ PLAT = [
     (PRIM, [0x175, 0x176, 0x17D, 0x17E]),                                # pedra pontuda do mar 2x2 (print 03/11 20:21, mapa 0.21)
     (PRIM, [0x172, 0x174, 0x17A, 0x17B, 0x17C, 0x182, 0x184, 0x0B4, 0x089]),   # pedra grande do mar (o meio é 0x071/0x079)
     (SEC, [0x280, 0x282, 0x288, 0x28A, 0x291, 0x292]),                   # cerca de troncos
+    (SEC_MAR, [0x348, 0x349, 0x350, 0x351]),                             # pedra escura do mar 2x2 (save do sandro 15/11, mapa 0.30 em 1,58)
 ]
 
 
@@ -310,7 +312,9 @@ def code():
     a.movh('r0', 'r7')
     # rápido (roda todo quadro): só procura na lista se o quadrado for 0x150..0x17E; sem alvo e sem deslocamento: nada
     a.lsl('r1', 'r0', 22); a.lsr('r1', 'r1', 22); a.mov('r2', 0xA8); a.lsl('r2', 'r2', 1); a.sub_r('r1', 'r1', 'r2')
-    a.mov('r6', 0); a.cmpi('r1', 0x2E); a.bc('hi', 'csem')
+    a.mov('r6', 0); a.cmpi('r1', 0x2E); a.bc('ls', 'cdes')
+    a.mov('r2', 0xFC); a.lsl('r2', 'r2', 1); a.sub_r('r1', 'r1', 'r2'); a.cmpi('r1', 9); a.bc('hi', 'csem')   # ou 0x348..0x351 (pedra escura)
+    a.label('cdes')
     a.bl('desloc'); a.movh('r6', 'r0')                                     # alvo
     a.label('csem')
     a.ldr_lit('r2', MAIN_NEW); a.ldrh_i('r0', 'r2', 0); a.ldr_lit('r2', TRAVA_B); a.ldrb_i('r1', 'r2', 0)
