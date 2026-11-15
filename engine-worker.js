@@ -597,20 +597,28 @@ function edAplica(m) {
 // estacionado também ganha uma placa invisível (altura 0 = qualquer) no quadrado dele, na cópia das placas em 0x09FF6780.
 const BARCO = { FLAG: 0x0203FF39, V_EST: 0x409B, V_POS: 0x409D, V_DIR: 0x4065, ID: 0xF0, LISTA: 0x09FF1F30, MAXOBJ: 50, PLACAS: 0x09FF6780, MAXPL: 55,
   POE: 0x9FF1C42, TIRA7: 0x9FF1C4B, TIRAF0: 0x9FF1C4F, PARADO: 0x9FF1B6C, PIER: [0, 19], O7: { x: 12, y: 54 } };
-// Surf flutuando do personagem 657 (pedido 15/11): o sprite de surf dele (660) virou a moça 379 sem a pokébola
-// (QZ_FLUTUA no game.js). Aqui: a aura em volta dela (cores 9 e 10 da paleta) vai ficando azul aos poucos desde o pulo
-// e o Lapras embaixo some (ela flutua sozinha; o balanço do surf continua). Barco (marca 0x0203FF39) fica de fora.
-const FLUTUA = { GFX: 10660, PASSOS: 48, DE: [[56, 104, 168], [72, 128, 192]], PARA: [[40, 88, 200], [136, 200, 248]] };
+// Surf flutuando do personagem 657 (pedido 15/11): o sprite de surf dele (660) é ele com uma aura em volta (QZ_FLUTUA
+// no game.js). Aqui: a aura (cores 7 e 9 da paleta dele, que ele não usa a pé) vai ficando azul aos poucos desde o pulo
+// e o Lapras embaixo some (ele flutua sozinho; o balanço do surf continua). Ao sair do mar as 2 cores voltam às da ROM
+// (paleta 0x08F549D4; a moto usa a mesma paleta). Barco (marca 0x0203FF39) fica de fora.
+const FLUTUA = { GFX: 10660, PASSOS: 48, IDX: [7, 9], PAL: 0x08F549D4, DE: [[56, 104, 168], [72, 128, 192]], PARA: [[40, 88, 200], [136, 200, 248]] };
 function flutuaVigia() {
   const ram = run.s.ram(0); if (!ram) return;
   const pi = ram.r8(0x02039075) & 0x7F, ob = 0x02038D10 + 0x24 * pi;
-  if (ram.r16(ob + 4) !== FLUTUA.GFX || ram.r8(BARCO.FLAG)) { run.flutua = null; return; }
-  const f = run.flutua || (run.flutua = { t0: run.frames });
   const sp = 0x02020630 + 0x44 * ram.r8(ob + 0x23), slot = ram.r8(sp + 5) >> 4;
+  if (ram.r16(ob + 4) !== FLUTUA.GFX || ram.r8(BARCO.FLAG)) {
+    if (run.flutua) {   // saiu do mar: as cores da aura voltam às originais (a mesma paleta é a dele a pé e na moto)
+      const bus = edBus();
+      FLUTUA.IDX.forEach((c) => { const i = 256 + slot * 16 + c, v = bus.r16(FLUTUA.PAL + c * 2); ram.w16(0x020391FC + i * 2, v); ram.w16(0x020395FC + i * 2, v); });
+      run.flutua = null;
+    }
+    return;
+  }
+  const f = run.flutua || (run.flutua = { t0: run.frames });
   const t = Math.min(1, (run.frames - f.t0) / FLUTUA.PASSOS), e = t * t * (3 - 2 * t);
   FLUTUA.PARA.forEach((c, k) => {
     const rgb = c.map((x, j) => Math.round(FLUTUA.DE[k][j] + (x - FLUTUA.DE[k][j]) * e) >> 3), v = rgb[0] | rgb[1] << 5 | rgb[2] << 10;
-    const i = 256 + slot * 16 + 9 + k;
+    const i = 256 + slot * 16 + FLUTUA.IDX[k];
     ram.w16(0x020391FC + i * 2, v); ram.w16(0x020395FC + i * 2, v);
   });   // todo quadro: se o jogo recarregar a paleta (menu, luta) volta azul; o dia e noite pinta por cima logo depois
   // o Lapras embaixo dela some: o corpo (0x081DCFD9, segue o objeto em +0x32) e o pescoço por cima (0x08296329, no mesmo x/y)
