@@ -11,7 +11,8 @@
               sb2: 0x030055C0, opcao: 0x2B9, clima: 0x02039F3C, mapa: 0x02038CB0, oam: 0x03002698, terreno: 0x02022FC0, BAT_INI: 0x0803D24D, BAT: 0x0803F431 };
   const K = 8.226, TIPOS = new Set([1, 2, 3, 6]);
   const gamaN = new Uint8Array(32), gamaA = new Uint8Array(32);   // tabelas do escurecido do clima no quadro atual
-  const CLIMA_FADE = new Set([3, 4, 5, 11, 13]);                  // climas que fazem a volta da tela preta sozinhos (FadeScreen)
+  const CLIMA_FADE = new Set([3, 4, 5, 11, 13]);
+  const CEU_FECHADO = new Set([3, 4, 5, 6, 9, 11, 13]);           // chuva, neve, tempestade, neblina (2 tipos), nublado, chuva forte                  // climas que fazem a volta da tela preta sozinhos (FadeScreen)
   const ENTRADA = 0x080C2959;                                     // mapa durante a entrada da batalha
   const CAMPO = new Set([0x080C2965, ENTRADA]);
   const SEM_CEU = new Set([3, 7, 8]);                             // terrenos debaixo d'água, caverna e prédio
@@ -141,7 +142,11 @@
         if (!CAMPO.has(cb2)) devolve();
         const sb = ram.r32(A.sb2);
         if ((!CAMPO.has(cb2) && !naBatalha) || sb < 0x02000000 || !(ram.r8(sb + A.opcao) & 0x80) || !TIPOS.has(ram.r8(A.mapa + 0x17))) return devolve(semFade());
-        const [a, n] = fase(m), p = Math.round(a * 64) * 65 + Math.round(n * 64);
+        // céu fechado (pedido 15/11: "está nublado e meu jogo ainda está meio alaranjado"): nublado, chuva, tempestade,
+        // neve, neblina e chuva forte quase não têm o laranja da tarde (fica 1/4); a noite chega igual
+        const fechado = CEU_FECHADO.has(ram.r8(A.clima + 0x6D0));
+        let [a, n] = fase(m); if (fechado) a *= 0.25;
+        const p = Math.round(a * 64) * 65 + Math.round(n * 64);
         if (p !== passo) { passo = p; cache.clear(); fundo.fill(0); }
         if (naBatalha) return batalha(a, n);
         // escurecendo para sair do lugar com chuva/tempestade/nublado: o jogo copia a tela (já com a cor da hora e o
