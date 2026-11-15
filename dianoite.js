@@ -7,10 +7,11 @@
   const TARDE = {"M":[[0.664,0.275,0.041,0.043],[0.159,0.621,0.106,-0.021],[0.061,-0.102,0.704,0.04]],"R":[[[115,198,165],[10.4,4.7,-15.3]],[[165,214,198],[13.4,14.3,-4.0]],[[66,181,132],[17.0,6.6,-10.8]],[[24,165,107],[25.3,7.8,-7.3]],[[74,115,173],[-8.9,-10.1,-4.9]],[[99,165,222],[-9.3,-14.3,4.1]],[[189,206,231],[14.3,14.0,4.5]],[[222,231,239],[4.2,12.4,13.4]],[[255,255,255],[-6.0,9.5,16.6]],[[156,181,222],[-5.5,-8.3,2.3]],[[206,66,82],[14.8,-13.0,-11.8]],[[239,148,115],[7.9,6.4,3.3]],[[132,132,140],[-13.7,-1.4,0.5]],[[99,99,123],[-18.0,-9.8,5.1]],[[66,74,107],[-17.5,-8.4,3.9]],[[57,82,0],[-13.3,3.5,18.6]],[[57,140,49],[0.7,-1.7,8.0]],[[132,198,99],[-14.2,-7.0,-5.9]],[[181,255,132],[-22.7,-21.7,-0.3]],[[57,156,90],[10.6,12.0,4.7]],[[156,255,189],[-10.5,-17.7,-4.9]],[[132,90,90],[-5.1,-7.0,-12.5]],[[99,66,82],[-8.2,-2.0,-9.3]],[[222,181,165],[9.0,8.3,-1.5]],[[156,115,115],[3.1,-1.0,-9.0]],[[189,148,140],[9.1,6.6,-1.3]],[[0,0,0],[13.1,17.4,13.7]]],"S":2312};
   // árvores à noite: as cores do próprio jogo, escolhidas pelo usuário, só para estas cores exatas do mapa
   const ARVORES = {"327":[24,33,0],"13072":[57,82,57],"6695":[24,57,24],"17398":[74,115,74],"6376":[24,24,24],"11629":[41,33,49]};
-  const A = { hora: 0x0203FF58, local: 0x030054F8, un: 0x020391FC, fa: 0x020395FC, cb2: 0x03002664, fade: 0x02039AC3, fadeY: 0x02039AC0,
+  const A = { hora: 0x0203FF58, local: 0x030054F8, un: 0x020391FC, fa: 0x020395FC, cb2: 0x03002664, fade: 0x02039AC3, fadeY: 0x02039AC0, fadeSel: 0x02039ABC,
               sb2: 0x030055C0, opcao: 0x2B9, clima: 0x02039F3C, mapa: 0x02038CB0, oam: 0x03002698, terreno: 0x02022FC0, BAT_INI: 0x0803D24D, BAT: 0x0803F431 };
   const K = 8.226, TIPOS = new Set([1, 2, 3, 6]);
   const gamaN = new Uint8Array(32), gamaA = new Uint8Array(32);   // tabelas do escurecido do clima no quadro atual
+  const CLIMA_FADE = new Set([3, 4, 5, 11, 13]);                  // climas que fazem a volta da tela preta sozinhos (FadeScreen)
   const ENTRADA = 0x080C2959;                                     // mapa durante a entrada da batalha
   const CAMPO = new Set([0x080C2965, ENTRADA]);
   const SEM_CEU = new Set([3, 7, 8]);                             // terrenos debaixo d'água, caverna e prédio
@@ -51,7 +52,11 @@
     // A transição de tela do jogo parte das cores originais (Unfaded): por isso as cores novas ficam lá também, com a
     // cópia do jogo guardada aqui. Senão a tela pisca a cor de dia ao entrar ou sair de um lugar.
     const orig = new Uint16Array(512), feito = new Uint16Array(512), pintado = new Uint8Array(512);
-    const semFade = () => !(ram.r8(A.fade) & 0x80) && !((ram.r16(A.fadeY) >> 6) & 31);
+    // Com chuva, tempestade, neve e nublado a volta da tela preta é feita pelo clima (gWeather + 0x6C6: 1 clareando,
+    // 2 escurecendo), não pelo fade comum. Repintar a tela nessa hora mostrava o lugar claro e só depois o clima (15/11).
+    const fadeComum = () => !(ram.r8(A.fade) & 0x80) && !((ram.r16(A.fadeY) >> 6) & 31);
+    const fadeClima = () => CLIMA_FADE.has(ram.r8(A.clima + 0x6D0)) && (ram.r8(A.clima + 0x6C6) - 1) >>> 0 < 2;
+    const semFade = () => fadeComum() && !fadeClima();
     // naTela: sem transição para refazer as cores (opção desligada no menu, que abre por cima do mapa), a tela volta aqui
     const devolve = (naTela) => {
       for (let i = 0; i < 512; i++) {
@@ -98,7 +103,7 @@
       // Fade por hardware (fim de animação que troca o fundo): quem escurece é o brilho do GBA, e a tela mostra a paleta
       // diretamente. Sem cor nova aqui, o fundo clareia de dia e só vira noite quando o fade acaba.
       const fadeHw = (ram.r8(A.fade + 2) & 3) === 2;
-      const tela = fadeHw || semFade();
+      const tela = fadeHw || fadeComum();
       for (let k = 0; k < 32; k++) {
         const i = 0x20 + k, c = ram.r16(A.un + i * 2);
         if (fundo[k] && c === fundo[k]) {                         // animação que troca o fundo devolve a cor crua só na tela
@@ -139,13 +144,27 @@
         const [a, n] = fase(m), p = Math.round(a * 64) * 65 + Math.round(n * 64);
         if (p !== passo) { passo = p; cache.clear(); fundo.fill(0); }
         if (naBatalha) return batalha(a, n);
+        // escurecendo para sair do lugar com chuva/tempestade/nublado: o jogo copia a tela (já com a cor da hora e o
+        // escurecido) para a Unfaded e escurece a partir dela. Repintar aqui escurecia de novo e a tela despencava.
+        if (fadeClima() && ram.r8(A.clima + 0x6C6) === 2) return;
         // sem transição: a tela recebe a cor direto. Tela já branca ou preta, esperando o mapa novo, fica como está
         // Na entrada da batalha o jogo pisca a tela misturando a Unfaded com cinza. A Unfaded já tem a cor da hora: basta não
         // repintar a tela por cima, senão o piscar some.
         const entrada = cb2 === ENTRADA, tela = !entrada && semFade();
+        // volta da tela preta pelo clima: o jogo não usa a cor da hora (de noite clareava até a metade e pulava). Aqui a
+        // tela vai da cor de partida (+0x6C4) à cor da hora com o escurecido alvo (+0x6C1), no contador do jogo (+0x6C7, 0 a 16).
+        // O fade comum (sol) também: de noite ele clareava até a metade e pulava. Mesma conta, com y (0 a 16) e a cor dele.
+        const comum = !fadeComum(), selec = comum ? ram.r32(A.fadeSel) : 0;
+        const volta = entrada ? -1 : comum ? (ram.r8(A.fade) & 0x80 ? (ram.r16(A.fadeY) >> 6) & 31 : -1)
+          : fadeClima() && ram.r8(A.clima + 0x6C6) === 1 ? 16 - Math.min(16, ram.r8(A.clima + 0x6C7)) : -1;
+        const dest = comum ? ram.r16(A.fade - 1) & 0x7FFF : ram.r16(A.clima + 0x6C4), dR = dest & 31, dG = (dest >> 5) & 31, dB = (dest >> 10) & 31;
+        const mistura = (v) => { const k = volta, R = v & 31, G = (v >> 5) & 31, B = (v >> 10) & 31;
+          return (R + (((dR - R) * k) >> 4)) | ((G + (((dG - G) * k) >> 4)) << 5) | ((B + (((dB - B) * k) >> 4)) << 10); };
+        const poe = (i, v) => { if (tela) { if (ram.r16(A.fa + i * 2) !== v) ram.w16(A.fa + i * 2, v); } else if (volta >= 0 && (!comum || (selec >>> (i >> 4)) & 1)) ram.w16(A.fa + i * 2, mistura(v)); };
         // chuva, nublado e tempestade escurecem a tela (clima.js): o jogo passa a cor por uma tabela (gWeather + 0x200 nos
         // fundos 0-12, + 0x460 nos bonecos) com o índice em gWeather + 0x6C0. A cor da hora recebe o mesmo escurecido.
-        const g = (ram.r8(A.clima + 0x6C0) << 24) >> 24;
+        let g = (ram.r8(A.clima + 0x6C0) << 24) >> 24;
+        if (g <= 0 && volta >= 0 && !comum) g = (ram.r8(A.clima + 0x6C1) << 24) >> 24;
         if (g > 0) for (let k = 0; k < 32; k++) { gamaN[k] = ram.r8(A.clima + 0x200 + (g - 1) * 32 + k); gamaA[k] = ram.r8(A.clima + 0x460 + (g - 1) * 32 + k); }
         const gama = (i, v) => { if (g <= 0) return v; const t = i < 256 ? gamaN : gamaA; return t[v & 31] | (t[(v >> 5) & 31] << 5) | (t[(v >> 10) & 31] << 10); };
         for (let i = 0; i < 512; i++) {
@@ -157,14 +176,14 @@
             const acesa = n > 0 && m >= 360 && m < 1200;
             feito[i] = entrada && acesa ? cor(c, i, a, n) | 0x8000 : atual;  // o piscar parte da Unfaded: a luz acesa fica lá
             if (feito[i] !== atual) ram.w16(A.un + i * 2, feito[i]);
-            if (tela && acesa) ram.w16(A.fa + i * 2, cor(c, i, a, n));
+            if (acesa) poe(i, cor(c, i, a, n));
             continue;
           }
           const v = cor(c, i, a, n);
           if (atual !== v) ram.w16(A.un + i * 2, v);
           feito[i] = v;
           const vf = gama(i, v);
-          if (tela && ram.r16(A.fa + i * 2) !== vf) ram.w16(A.fa + i * 2, vf);
+          poe(i, vf);
         }
         sombras(a);
       },
