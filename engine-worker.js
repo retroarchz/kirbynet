@@ -297,7 +297,7 @@ function relogio() {
     if (run.cl && run.clPed) { run.cl.alvo(run.clPed.w); run.clPed = null; }
     if (run.cl) run.cl.quadro(run.frames);
   }
-  if (run.quetzal && !run.rb && !SNES && run.frames >= 120) barcoVigia();
+  if (run.quetzal && !run.rb && !SNES && run.frames >= 120) { barcoVigia(); barcoOutros(); }
   if (!run.dn) return;
   run.dn.quadro();
   if (run.dnJogo && run.frames % 1800 === 0) postMessage({ t: "relogio", min: run.dn.minuto() });
@@ -387,6 +387,7 @@ function tick() {
             run.hle.aoVolta = (snap, quem) => { run.s.restore(snap); postMessage({ t: "caboVolta", quem }); };
           }
           if (run.hle) { run.hle.aoCapacete = (v) => postMessage({ t: "capOutro", v }); if (run.capV != null) run.hle.capacete(run.capV); }
+          if (run.hle) run.hle.aoBarco = (from, m) => (run.barcoOut || (run.barcoOut = new Map())).set(from, { est: m.est, pos: m.pos, dir: m.dir, t: run.frames });
           if (run.hle) for (const d of run.caboEarly.splice(0)) d.left != null ? run.hle.left(d.left) : run.hle.recv(d.from, d.m);
         }
         if (run.hle && run.meNovo != null && run.hle.troca(run.meNovo)) { run.me = run.meNovo; run.meNovo = null; }
@@ -609,7 +610,8 @@ function barcoVigia() {
   const lanca = (ptr) => { if (!livre || !campo || run.frames - b.lanc < 60) return; b.lanc = run.frames; const C = 0x03000EF0;
     ram.w8(C, 0); ram.w8(C + 1, 1); ram.w16(C + 8, ptr & 0xFFFF); ram.w16(C + 10, ptr >>> 16); ram.w8(0x03000EE8, 0); };
   // o barco em que você navega (sprite do surf, callback 0x081DCFD9) está na tela?
-  let blob = false; for (let i = 0; i < 64 && !blob; i++) { const sp = 0x02020630 + i * 0x44; if ((ram.r8(sp + 0x3E) & 1) && ram.r32(sp + 0x1C) === 0x081DCFD9) blob = true; }
+  // (só o meu: o sprite guarda em +0x32 o objeto que ele segue; os barcos dos amigos seguem os bonecos deles)
+  let blob = false; for (let i = 0; i < 64 && !blob; i++) { const sp = 0x02020630 + i * 0x44; if ((ram.r8(sp + 0x3E) & 1) && ram.r32(sp + 0x1C) === 0x081DCFD9 && ram.r16(sp + 0x32) === pi) blob = true; }
   const objBarco = (id) => { for (let k = 0; k < 16; k++) { const q = 0x02038D10 + 0x24 * k; if ((ram.r8(q) & 1) && ram.r8(q + 8) === id && ram.r16(q + 4) === 88) return q; } return 0; };
   const esconde = (q, sim) => { const v = ram.r8(q + 1); if (!!(v & 0x20) !== sim) ram.w8(q + 1, sim ? v | 0x20 : v & ~0x20); };
   const cab = (g, n) => { const l = bus.r32(0x08932FB8 + 4 * g); return l >= A ? bus.r32(l + 4 * n) : 0; };
@@ -647,6 +649,11 @@ function barcoVigia() {
     if (navega && (t === 1 || t === 3)) { b.trein.set(ch, t); ram.w8(o + 7, 0); }
     else if (!navega && t === 0 && b.trein.has(ch)) ram.w8(o + 7, b.trein.get(ch)); }
   if (!navega && b.trein.size) b.trein.clear();
+  // os amigos no cabo veem meu barco (mensagem 17 do linkhle): quando muda e a cada 2 s
+  if (run.hle && run.hle.barco) {
+    const st = { est, pos: ram.r16(V(BARCO.V_POS)), dir: b.ag ? b.ag.d : 1 }, k = st.est + ":" + st.pos + ":" + st.dir;
+    if (k !== b.envio || run.frames - (b.envioT || 0) >= 120) { b.envio = k; b.envioT = run.frames; run.hle.barco(st); }
+  }
   // estacionado: barco na lista do mapa (ROM e cópia do save) e na tela
   if (est & 0x8000) {
     const g = (est >> 8) & 0x7F, n = est & 0xFF, pos = ram.r16(V(BARCO.V_POS)), bx = pos & 0xFF, by = pos >> 8;
@@ -677,6 +684,96 @@ function barcoVigia() {
   } else if (b.orig) {   // embarcou: as listas do mapa voltam
     const o = b.orig; rw(o.ev, [o.cnt, bus.r8(o.ev + 1), bus.r8(o.ev + 2), o.nb]); rw(o.ev + 4, u32(o.lp)); rw(o.ev + 16, u32(o.pb)); b.orig = null;
   }
+}
+// Barcos dos amigos (coop; pedido 15/11 "faz os amigos verem meu barco"). run.barcoOut = vaga -> {est, pos, dir, t}, do
+// linkhle (mensagem 17, repetida a cada 2 s; sem notícia por 10 s = esquece). Navegando: o boneco dele (objeto 200+vaga)
+// fica escondido e o jogo cria para ele o mesmo barco do surf (dofieldeffect 8 com a marca 0x0203FF39 ligada só nesse
+// quadro), que segue o boneco sozinho (o sprite guarda o objeto em +0x32); ao descer, o sprite se apaga (callback =
+// DestroySprite 0x08007A60). Estacionado no mapa onde estou: objeto 0xF1+vaga no fim da cópia dos objetos do save
+// (SB1+0x1790), com a contagem numa cópia do bloco de eventos do mapa na ROM (0x09FF1C90) apontada pela cópia do
+// cabeçalho na RAM (0x02038CB4); ao mudar de mapa o jogo refaz o cabeçalho. Scripts curtos do site em 0x09FF1C70.
+const BARCO_OUT = { SCR: 0x09FF1C70, EV: 0x09FF1C90, ID0: 0xF1, FANT: 200 };
+function barcoOutros() {
+  const ram = run.s.ram(0), b = run.barco; if (!ram || !b) return;
+  const s1 = ram.r32(0x030055BC); if (s1 < 0x02000000 || s1 >= 0x0203E000) return;
+  const bus = edBus(), A = 0x08000000, rw = (a, bytes) => run.s.romWrite(a - A, Uint8Array.from(bytes));
+  const campo = ram.r32(0x03002664) === 0x080C2965, livre = ram.r8(0x03000EE8) === 2;
+  const mapa = (ram.r8(s1 + 0x474) << 8) | ram.r8(s1 + 0x475), u16 = (v) => [v & 255, (v >> 8) & 255];
+  const pi = ram.r8(0x02039075) & 0x7F, ob = 0x02038D10 + 0x24 * pi, px = ram.r16(ob + 0x10) - 7, py = ram.r16(ob + 0x12) - 7;
+  const roda = (bytes) => { if (!livre || !campo || run.frames - (b.lancOut || 0) < 20) return false; b.lancOut = run.frames;
+    rw(BARCO_OUT.SCR, bytes); const C = 0x03000EF0, p = BARCO_OUT.SCR;
+    ram.w8(C, 0); ram.w8(C + 1, 1); ram.w16(C + 8, p & 0xFFFF); ram.w16(C + 10, p >>> 16); ram.w8(0x03000EE8, 0); return true; };
+  const objId = (id) => { for (let k = 0; k < 16; k++) { const q = 0x02038D10 + 0x24 * k; if ((ram.r8(q) & 1) && ram.r8(q + 8) === id) return k; } return -1; };
+  const esconde = (q, sim) => { const v = ram.r8(q + 1); if (!!(v & 0x20) !== sim) ram.w8(q + 1, sim ? v | 0x20 : v & ~0x20); };
+  // barco de um boneco: sprite com o desenho do barco (0x090454B4) que guarda o objeto k em +0x32 (criado com o comportamento
+  // do surf 0x081DCFD9, que eu troco pelo vazio 0x08007E59)
+  const blobDe = (k) => { for (let i = 0; i < 64; i++) { const sp = 0x02020630 + i * 0x44, cb = ram.r32(sp + 0x1C);
+    if ((ram.r8(sp + 0x3E) & 1) && (cb === 0x081DCFD9 || cb === 0x08007E59) && ram.r32(sp + 0xC) === 0x090454B4 && ram.r16(sp + 0x32) === k) return sp; } return 0; };
+  const apaga = (sp) => { ram.w16(sp + 0x1C, 0x7A61); ram.w16(sp + 0x1E, 0x0800); };   // callback = DestroySprite
+  const fresco = (st) => run.frames - st.t < 600;
+  b.fant = b.fant || new Map();   // vaga -> objeto do boneco dele que tem barco
+  const outros = run.barcoOut || new Map();
+  // navegando
+  for (const v of new Set([...outros.keys(), ...b.fant.keys()])) {
+    const st = outros.get(v), k = objId(BARCO_OUT.FANT + v), q = k >= 0 ? 0x02038D10 + 0x24 * k : 0;
+    const quer = !!st && fresco(st) && st.est === 1 && k >= 0;
+    const velho = b.fant.get(v), sp = velho != null ? blobDe(velho) : 0;
+    if (quer) {
+      esconde(q, true);
+      if (velho != null && velho !== k && sp) apaga(sp);   // o boneco mudou de objeto: refaz
+      const meu = blobDe(k);
+      if (meu) {
+        b.fant.set(v, k);
+        // o coop desenha o boneco (sprite em +0x23 do objeto) e uma bolha cinza embaixo dele (comportamento 0x0825FA95):
+        // o barco fica parado sozinho (comportamento vazio 0x08007E59) e copia, a cada quadro, a posição, o balanço e a
+        // direção dessa bolha, que some. Sem bolha (ainda não surfa no jogo dele): barco escondido.
+        if (ram.r32(meu + 0x1C) !== 0x08007E59) { ram.w16(meu + 0x1C, 0x7E59); ram.w16(meu + 0x1E, 0x0800); }
+        const gs = 0x02020630 + 0x44 * ram.r8(q + 0x23), gx = ram.r16(gs + 0x20);
+        let cz = 0; for (let i = 0; i < 64 && !cz; i++) { const t = 0x02020630 + i * 0x44; if ((ram.r8(t + 0x3E) & 1) && ram.r32(t + 0x1C) === 0x0825FA95 && Math.abs(((ram.r16(t + 0x20) - gx) << 16) >> 16) <= 2) cz = t; }
+        const vis = ram.r8(meu + 0x3E);
+        if (cz) {
+          for (const d of [0x20, 0x22, 0x24, 0x26]) ram.w16(meu + d, ram.r16(cz + d));
+          ram.w8(cz + 0x3E, ram.r8(cz + 0x3E) | 4);   // a bolha cinza some
+          if (vis & 4) ram.w8(meu + 0x3E, vis & ~4);
+          const an = ram.r8(cz + 0x2A);
+          if (ram.r8(meu + 0x2A) !== an) { ram.w8(meu + 0x2A, an); ram.w8(meu + 0x2B, 0); ram.w8(meu + 0x2C, ram.r8(meu + 0x2C) & 0x80); ram.w8(meu + 0x3F, (ram.r8(meu + 0x3F) & ~0x10) | 4); }
+        } else if (!(vis & 4)) ram.w8(meu + 0x3E, vis | 4);
+      }
+      if (!meu && ram.r8(BARCO.FLAG) !== 1) {   // cria o barco para o boneco (a marca vale só neste quadro se eu não navego)
+        if (roda([0x9D, 0x00, ...u16(ram.r16(q + 0x10)), 0x9D, 0x01, ...u16(ram.r16(q + 0x12)), 0x9D, 0x02, ...u16(k), 0x9C, 0x08, 0x00, 0x02])) {
+          if (!ram.r8(BARCO.FLAG)) ram.w8(BARCO.FLAG, 1);
+          b.fant.set(v, k);
+        }
+      }
+    } else if (velho != null) {
+      if (sp) apaga(sp);
+      if (k >= 0) esconde(q, false);
+      b.fant.delete(v);
+    }
+  }
+  // estacionados no mapa onde estou
+  const R = [...outros].filter(([, st]) => fresco(st) && (st.est & 0x8000) && (st.est & 0x7FFF) === mapa)
+    .map(([v, st]) => ({ id: BARCO_OUT.ID0 + v, x: st.pos & 255, y: st.pos >> 8, mov: [8, 8, 7, 9, 10][st.dir] || 8 }));
+  const evRam = ram.r32(0x02038CB4);
+  if (evRam !== BARCO_OUT.EV) b.evBase = evRam;
+  const base = b.evBase;
+  if (R.length && base >= A) {
+    const n = bus.r8(base);
+    if (n + R.length <= 64) {
+      const copia = []; for (let i = 0; i < 20; i++) copia.push(bus.r8(base + i)); copia[0] = n + R.length;
+      if (copia.some((x, i) => bus.r8(BARCO_OUT.EV + i) !== x)) rw(BARCO_OUT.EV, copia);
+      if (evRam !== BARCO_OUT.EV) { ram.w16(0x02038CB4, BARCO_OUT.EV & 0xFFFF); ram.w16(0x02038CB6, BARCO_OUT.EV >>> 16); }
+      R.forEach((r, i) => {
+        const o = s1 + 0x1790 + 24 * (n + i), tpl = [r.id, 0, ...u16(88), ...u16(r.x), ...u16(r.y), 0, r.mov, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        if (tpl.some((x, j) => ram.r8(o + j) !== x)) tpl.forEach((x, j) => ram.w8(o + j, x));
+        const k = objId(r.id);
+        if (k >= 0) { const q = 0x02038D10 + 0x24 * k; if (ram.r16(q + 0x10) - 7 !== r.x || ram.r16(q + 0x12) - 7 !== r.y) roda([0x53, r.id, 0x00, 0x02]); }   // mudou de lugar: tira e põe de novo
+        else if (Math.abs(r.x - px) <= 8 && Math.abs(r.y - py) <= 6) roda([0x55, r.id, 0x00, 0x02]);   // addobject
+      });
+    }
+  } else if (evRam === BARCO_OUT.EV && base >= A) { ram.w16(0x02038CB4, base & 0xFFFF); ram.w16(0x02038CB6, base >>> 16); }
+  // barco estacionado de quem embarcou ou foi embora: tira da tela
+  for (let v = 0; v < 8; v++) { const id = BARCO_OUT.ID0 + v; if (R.some((r) => r.id === id)) continue; if (objId(id) >= 0) roda([0x53, id, 0x00, 0x02]); }
 }
 function edVigia() {
   if (edVig.length && (edVigVoo || run.frames % 8 === 0) && edPode()) { const r = run.s.ram(0); if (r) edVigVoo = EditorQZ.vigiaVoo(r, edVig); }   // voar no fim do "anda junto" (a cada quadro durante o voo)

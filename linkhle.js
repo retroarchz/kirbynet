@@ -371,6 +371,7 @@ const LinkHLE = (() => {
     const evita = new Map();      // vaga -> até quando fica de fora: quem fez a ligação falhar não derruba os outros
     const avisados = new Map();   // vaga -> { n: nível (0 ocupado, 1 livre e sozinho, 2 parado no coop), t }
     let cap = 0, capOutro = null, aoCap = null;   // capacete: o meu; o último que recebi do dono da moto; quem aplica
+    let aoBc = null;   // barco da Rota 104 dos outros (engine-worker barcoVigia): quem recebe
     // Volta para antes da luta (08/11, pedido do usuário: alguém sair no meio da luta pelo cabo derrubava o jogo de quem ficou).
     // Ligados no mapa, sem script nem menu, guarda uma foto da memória inteira do motor a cada FOTO_QUADROS (aoFoto). Da espera
     // do treinador até voltar ao mapa depois da luta (luta), quem estava na luta comigo sair = cada um que ficou volta para a
@@ -890,6 +891,10 @@ const LinkHLE = (() => {
       // o jogador trocou o capacete: quem está no cabo vê a mesma moto (só vale para o dono dela)
       capacete(v) { cap = v ? 1 : 0; if (souDono()) send({ k: "cap", v: cap }); },
       set aoCapacete(f) { aoCap = f; },
+      // barco (pedido 15/11 "os amigos verem meu barco"): estado do meu barco para os outros; o engine-worker manda de novo
+      // a cada 2 s (quem chegou depois também vê). v = { est, pos, dir } (ver BARCO no engine-worker)
+      barco(v) { send({ k: "bc", est: v.est & 0xFFFF, pos: v.pos & 0xFFFF, dir: v.dir & 0xFF }); },
+      set aoBarco(f) { aoBc = f; },
       set aoCaixas(f) { aoCaixas = f; if (f && G.tela) for (const [at, b] of G.tela) f(at, new Uint8Array(b)); },   // f(endereço na ROM, bytes): quem sabe escrever na ROM da partida
       // tem um dono da moto no cabo e não sou eu: a tecla 0 não mexe na moto dele
       get motoAlheia() { return capOutro != null && !souDono(); },
@@ -949,6 +954,7 @@ const LinkHLE = (() => {
         else if (m.k === "rv") { if (C) aplicaReserva(m.v); }
         else if (m.k === "esc") { if (ids && from === cur()[0] && Array.isArray(m.v)) escudoFases = m.v; }
         else if (m.k === "cap") { if (m.v !== capOutro && !souDono()) { capOutro = m.v; if (aoCap) aoCap(m.v); } }
+        else if (m.k === "bc") { if (aoBc) aoBc(from, m); }
         else if (m.k === "st") {
           const known = peers.has(from);
           peers.set(from, { open: !!m.open, master: !!m.master, t: now() });
@@ -1014,7 +1020,7 @@ const LinkHLE = (() => {
   //   coop de teste: 4 = pedido do host (tipo, vagas), 5/6 = aceito/recusado, 7 = entrei na dupla (vagas), 8 = saí da dupla
   //   coop automático: 10 = nível (0 ocupado, 1 livre, 2 parado no coop), 11 = largada (vagas), 12 = soltem o cabo, 13 = capacete,
   //   14 = fase do escudo do Protetor Glacial em cada lugar, 15 = alguém da luta saiu: voltem para antes dela (vaga de quem saiu),
-  //   16 = troquei a reserva com o Pokémon do banco (luta dos 3)
+  //   16 = troquei a reserva com o Pokémon do banco (luta dos 3), 17 = meu barco (estado u16, posição u16, direção)
   // Pokémon Quetzal, tecla Alt: alterna o valor de trapaça do save (embaralhado com o ID de treinador) entre 1 e 0.
   // Sem trapaça, os personagens de fim de jogo também somem: eles entregariam a visita à Fronteira de Batalha.
   // É ele que a troca compara. Só vale para quem começou com cheats: save+0x2CE fica marcado, mesmo com o valor em 0.
@@ -1077,6 +1083,7 @@ const LinkHLE = (() => {
     if (m.k === "esc") return new Uint8Array([from, 14, ...m.v]);
     if (m.k === "vt") return new Uint8Array([from, 15, m.s]);
     if (m.k === "rv") return new Uint8Array([from, 16, m.v]);
+    if (m.k === "bc") return new Uint8Array([from, 17, m.est & 255, m.est >> 8, m.pos & 255, m.pos >> 8, m.dir & 255]);
     return null;
   }
   function decode(b) {
@@ -1098,6 +1105,7 @@ const LinkHLE = (() => {
     if (b[1] === 14 && b.length >= 8) return { from, m: { k: "esc", v: Array.from(b.subarray(2, 8)) } };
     if (b[1] === 15 && b.length >= 3) return { from, m: { k: "vt", s: b[2] } };
     if (b[1] === 16 && b.length >= 3) return { from, m: { k: "rv", v: b[2] } };
+    if (b[1] === 17 && b.length >= 7) return { from, m: { k: "bc", est: b[2] | b[3] << 8, pos: b[4] | b[5] << 8, dir: b[6] } };
     return null;
   }
   // Com trapaça (Alt), golpes de campo sem insígnia (pedido 08/11: "libere o surf pra testar" o mergulho do editor).
