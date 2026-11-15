@@ -598,17 +598,33 @@ function edAplica(m) {
 const BARCO = { FLAG: 0x0203FF39, V_EST: 0x409B, V_POS: 0x409D, V_DIR: 0x4065, ID: 0xF0, LISTA: 0x09FF1F30, MAXOBJ: 50, PLACAS: 0x09FF6780, MAXPL: 55,
   POE: 0x9FF1C42, TIRA7: 0x9FF1C4B, TIRAF0: 0x9FF1C4F, PARADO: 0x9FF1B6C, PIER: [0, 19], O7: { x: 12, y: 54 } };
 // Surf flutuando do personagem 657 (pedido 15/11): o sprite de surf dele (660) é ele com uma aura em volta (QZ_FLUTUA
-// no game.js). Aqui: a aura (cores 7 e 9 da paleta dele, que ele não usa a pé) vai ficando azul aos poucos desde o pulo
-// e o Lapras embaixo some (ele flutua sozinho; o balanço do surf continua). Ao sair do mar as 2 cores voltam às da ROM
-// (paleta 0x08F549D4; a moto usa a mesma paleta). Barco (marca 0x0203FF39) fica de fora.
-const FLUTUA = { GFX: 10660, PASSOS: 48, IDX: [7, 9], PAL: 0x08F549D4, DE: [[56, 104, 168], [72, 128, 192]], PARA: [[40, 88, 200], [136, 200, 248]] };
+// no game.js). "Sem aura e vai se criando": fora do mar a tabela de imagens do 660 aponta para ele SEM aura, e desde o
+// pulo a aura sobe dos pés à cabeça (5 estágios, romWrite na tabela + o quadro é copiado de novo zerando a espera da
+// animação, sprite +0x2C) até os quadros finais. As cores dela (7 e 9 da paleta dele, que ele não usa a pé) também
+// clareiam até o azul; ao sair do mar voltam às da ROM (paleta 0x08F549D4, também a pé e na moto).
+// Lapras: com o 657 em jogo, os modelos do Lapras e do pescoço (vagas 0-2 das tabelas do barco) usam um OAM "apagado",
+// então ele nunca aparece, nem no 1º quadro. Barco (vaga 3, marca 0x0203FF39) fica de fora.
+const FLUTUA = { GFX: 10660, EU: [10657, 10665], PASSOS: 54, IDX: [7, 9], PAL: 0x08F549D4, REG: 0x09089094, TAB: 0x090F6000,
+  EST: 0x090F3000, FIM: 0x090F4E00, OAM: 0x090F6140, OAM_ORIG: 0x090663D8, MODELOS: [0x09FF19A0, 0x09FF19B8, 0x09FF19D0, 0x09FF1A60, 0x09FF1A78, 0x09FF1A90],
+  DIR: [0, 1, 2, 0, 0, 1, 1, 2, 2], DE: [[56, 104, 168], [72, 128, 192]], PARA: [[40, 88, 200], [136, 200, 248]] };
 function flutuaVigia() {
   const ram = run.s.ram(0); if (!ram) return;
-  const pi = ram.r8(0x02039075) & 0x7F, ob = 0x02038D10 + 0x24 * pi;
+  const bus = edBus(), A = 0x08000000; if (bus.r32(FLUTUA.REG + 28) !== FLUTUA.TAB) return;   // ROM sem o QZ_FLUTUA
+  const rw = (a, bytes) => run.s.romWrite(a - A, Uint8Array.from(bytes)), u32 = (v) => [v & 255, (v >> 8) & 255, (v >> 16) & 255, v >>> 24];
+  const pi = ram.r8(0x02039075) & 0x7F, ob = 0x02038D10 + 0x24 * pi, gfx = ram.r16(ob + 4);
   const sp = 0x02020630 + 0x44 * ram.r8(ob + 0x23), slot = ram.r8(sp + 5) >> 4;
-  if (ram.r16(ob + 4) !== FLUTUA.GFX || ram.r8(BARCO.FLAG)) {
-    if (run.flutua) {   // saiu do mar: as cores da aura voltam às originais (a mesma paleta é a dele a pé e na moto)
-      const bus = edBus();
+  // Lapras invisível só para quem joga com o 657
+  const eu = gfx >= FLUTUA.EU[0] && gfx <= FLUTUA.EU[1], oam = eu ? FLUTUA.OAM : FLUTUA.OAM_ORIG;
+  for (const m of FLUTUA.MODELOS) { const v = bus.r32(m + 4); if ((v === FLUTUA.OAM || v === FLUTUA.OAM_ORIG) && v !== oam) rw(m + 4, u32(oam)); }
+  // estágio da aura: -1 = sem aura (fora do mar), 0..4 crescendo, 5 = final
+  const tabela = (e) => {
+    if (run.flutuaEst === e) return false; run.flutuaEst = e;
+    const b = []; for (let f = 0; f < 9; f++) b.push(...u32(e >= 5 ? FLUTUA.FIM + 512 * f : FLUTUA.EST + 512 * (3 * Math.max(0, e) + FLUTUA.DIR[f])), 0, 2, 0, 0);
+    rw(FLUTUA.TAB, b); return true;
+  };
+  if (gfx !== FLUTUA.GFX || ram.r8(BARCO.FLAG)) {
+    tabela(-1);
+    if (run.flutua) {   // saiu do mar: as cores da aura voltam às originais
       FLUTUA.IDX.forEach((c) => { const i = 256 + slot * 16 + c, v = bus.r16(FLUTUA.PAL + c * 2); ram.w16(0x020391FC + i * 2, v); ram.w16(0x020395FC + i * 2, v); });
       run.flutua = null;
     }
@@ -616,12 +632,13 @@ function flutuaVigia() {
   }
   const f = run.flutua || (run.flutua = { t0: run.frames });
   const t = Math.min(1, (run.frames - f.t0) / FLUTUA.PASSOS), e = t * t * (3 - 2 * t);
+  if (tabela(Math.min(5, Math.floor(t * 6)))) ram.w8(sp + 0x2C, ram.r8(sp + 0x2C) & 0xC0);   // copia o quadro de novo já no próximo
   FLUTUA.PARA.forEach((c, k) => {
     const rgb = c.map((x, j) => Math.round(FLUTUA.DE[k][j] + (x - FLUTUA.DE[k][j]) * e) >> 3), v = rgb[0] | rgb[1] << 5 | rgb[2] << 10;
     const i = 256 + slot * 16 + FLUTUA.IDX[k];
     ram.w16(0x020391FC + i * 2, v); ram.w16(0x020395FC + i * 2, v);
   });   // todo quadro: se o jogo recarregar a paleta (menu, luta) volta azul; o dia e noite pinta por cima logo depois
-  // o Lapras embaixo dela some: o corpo (0x081DCFD9, segue o objeto em +0x32) e o pescoço por cima (0x08296329, no mesmo x/y)
+  // garantia: se algum Lapras nascer de outro jeito, some
   const some = (q) => { const v = ram.r8(q + 0x3E); if (!(v & 4)) ram.w8(q + 0x3E, v | 4); };
   for (let i = 0; i < 64; i++) {
     const q = 0x02020630 + i * 0x44; if (!(ram.r8(q + 0x3E) & 1) || ram.r32(q + 0x1C) !== 0x081DCFD9 || ram.r16(q + 0x32) !== pi) continue;
