@@ -605,6 +605,9 @@ const BARCO = { FLAG: 0x0203FF39, V_EST: 0x409B, V_POS: 0x409D, V_DIR: 0x4065, I
 // contrário: a aura desce da cabeça aos pés e some em SAI quadros; depois as cores voltam às da ROM (paleta 0x08F549D4, também a pé e na moto).
 // Lapras: com o 657 em jogo, os modelos do Lapras e do pescoço (vagas 0-2 das tabelas do barco) usam um OAM "apagado",
 // então ele nunca aparece, nem no 1º quadro. Barco (vaga 3, marca 0x0203FF39) fica de fora.
+// Coop: o boneco de um amigo (objeto 200+vaga) surfando com o 657 usa o mesmo sprite 660; enquanto há um assim na tela
+// (e eu não estou surfando com o 657) a tabela fica nos quadros finais, a aura dele ganha as cores azuis e a bolha
+// cinza que o coop desenha embaixo dele (0x0825FA95) some.
 const FLUTUA = { GFX: 10660, EU: [10657, 10665], PASSOS: 54, SAI: 26, IDX: [7, 9], PAL: 0x08F549D4, REG: 0x09089094, TAB: 0x090F6000,
   EST: 0x090F3000, FIM: 0x090F4E00, OAM: 0x090F6140, OAM_ORIG: 0x090663D8, MODELOS: [0x09FF19A0, 0x09FF19B8, 0x09FF19D0, 0x09FF1A60, 0x09FF1A78, 0x09FF1A90],
   DIR: [0, 1, 2, 0, 0, 1, 1, 2, 2], DE: [[56, 104, 168], [72, 128, 192]], PARA: [[40, 88, 200], [136, 200, 248]] };
@@ -623,8 +626,24 @@ function flutuaVigia() {
     const b = []; for (let f = 0; f < 9; f++) b.push(...u32(e >= 5 ? FLUTUA.FIM + 512 * f : FLUTUA.EST + 512 * (3 * Math.max(0, e) + FLUTUA.DIR[f])), 0, 2, 0, 0);
     rw(FLUTUA.TAB, b); return true;
   };
+  // bonecos dos amigos surfando com o 657
+  const fant = [];
+  for (let k = 0; k < 16; k++) { const o = 0x02038D10 + 0x24 * k; if ((ram.r8(o) & 1) && ram.r8(o + 8) >= 200 && ram.r8(o + 8) < 208 && ram.r16(o + 4) === FLUTUA.GFX && !(ram.r8(o + 1) & 0x20)) fant.push(0x02020630 + 0x44 * ram.r8(o + 0x23)); }
+  const cor = (sl, k, rgb) => { const i = 256 + sl * 16 + FLUTUA.IDX[k], v = (rgb[0] >> 3) | (rgb[1] >> 3) << 5 | (rgb[2] >> 3) << 10; ram.w16(0x020391FC + i * 2, v); ram.w16(0x020395FC + i * 2, v); };
+  const devolve = (sl) => FLUTUA.IDX.forEach((c) => { const i = 256 + sl * 16 + c, v = bus.r16(FLUTUA.PAL + c * 2); ram.w16(0x020391FC + i * 2, v); ram.w16(0x020395FC + i * 2, v); });
+  const slots = new Set(fant.map((q) => ram.r8(q + 5) >> 4));
+  for (const sl of run.flutuaSlots || []) if (!slots.has(sl) && sl !== slot) devolve(sl);
+  run.flutuaSlots = slots;
+  if (fant.length && !(gfx === FLUTUA.GFX && !ram.r8(BARCO.FLAG))) {
+    if (tabela(5)) fant.forEach((q) => ram.w8(q + 0x2C, ram.r8(q + 0x2C) & 0xC0));   // copia o quadro de novo
+    for (const sl of slots) FLUTUA.PARA.forEach((c, k) => cor(sl, k, c));
+  }
+  for (let i = 0; i < 64 && fant.length; i++) {   // bolha cinza embaixo deles
+    const q = 0x02020630 + i * 0x44; if (!(ram.r8(q + 0x3E) & 1) || ram.r32(q + 0x1C) !== 0x0825FA95) continue;
+    if (fant.some((b) => Math.abs((ram.r16(q + 0x20) << 16 >> 16) - (ram.r16(b + 0x20) << 16 >> 16)) <= 4 && Math.abs((ram.r16(q + 0x22) << 16 >> 16) - (ram.r16(b + 0x22) << 16 >> 16)) <= 20)) { const v = ram.r8(q + 0x3E); if (!(v & 4)) ram.w8(q + 0x3E, v | 4); }
+  }
   if (gfx !== FLUTUA.GFX || ram.r8(BARCO.FLAG)) {
-    tabela(-1);
+    if (!fant.length) tabela(-1);
     if (run.flutua) {   // saiu do mar: as cores da aura voltam às originais
       FLUTUA.IDX.forEach((c) => { const i = 256 + slot * 16 + c, v = bus.r16(FLUTUA.PAL + c * 2); ram.w16(0x020391FC + i * 2, v); ram.w16(0x020395FC + i * 2, v); });
       run.flutua = null;
