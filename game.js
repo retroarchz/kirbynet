@@ -1443,7 +1443,8 @@ const ClimaReal = {
     };
     const cob = await img(`${j.host}/v2/coverage/0/256/${z}/${x}/${y}/0/0_0.png`);
     if (cob[(py * 256 + px) * 4 + 3] > 128) return null;          // nenhum radar alcança esse lugar
-    const d = await img(`${j.host}${fr.path}/256/${z}/${x}/${y}/2/0_0.png`);
+    const nivel = async (q) => {
+    const d = await img(`${j.host}${q.path}/256/${z}/${x}/${y}/2/0_0.png`);
     let f = 0;   // pior chuva a até ~1 km (1 pixel = 1,2 km): azul chuva, amarelo forte, laranja/vermelho tempestade
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {   // 2 pixels já pegava a chuva de Vila Velha (15/11)
       const X = Math.min(255, Math.max(0, px + dx)), Y = Math.min(255, Math.max(0, py + dy)), k = (Y * 256 + X) * 4;
@@ -1454,6 +1455,12 @@ const ClimaReal = {
       f = Math.max(f, r >= 180 && g < 150 ? 3 : bl >= r || bl > 100 ? 1 : g >= 200 ? 2 : 3);
     }
     return f;
+    };
+    // Chuva aparece já na primeira leitura; chuva forte/tempestade só se a leitura de 10 min antes também era forte
+    // (16/11: a tempestade chegando pintou amarelo/vermelho em cima dele enquanto o MSN dizia "Chuva leve").
+    const agora = await nivel(fr), antes = j.radar.past[j.radar.past.length - 2];
+    if (agora < 2 || !antes) return Math.min(agora, 1);
+    return Math.max(1, Math.min(agora, await nivel(antes)));
   },
   async satelite(lat, lon) {   // sol direto / sol total da última hora medida (só de dia)
     const j = await (await fetch(`https://satellite-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&past_days=1&forecast_days=1&models=satellite_radiation_seamless&hourly=shortwave_radiation,direct_radiation&timeformat=unixtime`)).json();
