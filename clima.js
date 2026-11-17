@@ -23,9 +23,7 @@
     if (code == null) return null;
     real = real || {};
     const neve = (code >= 71 && code <= 77) || code === 85 || code === 86;
-    // radar com chuva aqui + previsão de trovoada (95-99) = tempestade com raios (16/11: trovoando em Vitória, radar azul).
-    // Sem chuva no radar a trovoada da previsão não vale (15/11: previsão dava 95 com sol).
-    if (real.radar > 0) return neve ? 4 : code >= 95 ? 5 : [0, 3, 13, 5][real.radar];
+    if (real.radar > 0) return neve ? 4 : [0, 3, 13, 5][real.radar];
     if (real.radar === 0 && code >= 51) code = 3;                // radar sem chuva aqui: no máximo nublado
     if (real.sol != null) return real.sol;
     if (code >= 95) return 5;                                   // trovoada
