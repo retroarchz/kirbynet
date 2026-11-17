@@ -622,10 +622,12 @@ function flutuaVigia() {
   const eu = gfx >= FLUTUA.EU[0] && gfx <= FLUTUA.EU[1], oam = eu ? FLUTUA.OAM : FLUTUA.OAM_ORIG;
   // música do surf (pedido 15/11): com o 657 a do Surf (365) vira a da Câmara Selada (438). O jogo põe a do surf na fila
   // (próxima música 0x03000FFA, estado 6 = a atual sumindo); ao carregar um mapa surfando ela começa direto (atual
-  // 0x03000FF8): aí a de agora some e entra a outra.
+  // 0x03000FF8, também na volta da luta): aí troca a atual por 438 com o estado 1 (o jogo toca a atual no quadro
+  // seguinte e vai para 2). NÃO usar o estado 6 aqui: ele espera a música sumir e ninguém mandou sumir, a música
+  // ficava presa no Surf (e a porta de casa travava esperando ela parar).
   if (eu) {
     if (ram.r16(FLUTUA.MUS.PROX) === FLUTUA.MUS.SURF) ram.w16(FLUTUA.MUS.PROX, FLUTUA.MUS.NOVA);
-    else if (ram.r16(FLUTUA.MUS.ATUAL) === FLUTUA.MUS.SURF && ram.r8(FLUTUA.MUS.EST) === 2) { ram.w16(FLUTUA.MUS.PROX, FLUTUA.MUS.NOVA); ram.w8(FLUTUA.MUS.EST, 6); }
+    else if (ram.r16(FLUTUA.MUS.ATUAL) === FLUTUA.MUS.SURF && ram.r8(FLUTUA.MUS.EST) === 2) { ram.w16(FLUTUA.MUS.ATUAL, FLUTUA.MUS.NOVA); ram.w16(FLUTUA.MUS.PROX, 0); ram.w8(FLUTUA.MUS.EST, 1); }
   }
   for (const m of FLUTUA.MODELOS) { const v = bus.r32(m + 4); if ((v === FLUTUA.OAM || v === FLUTUA.OAM_ORIG) && v !== oam) rw(m + 4, u32(oam)); }
   // estágio da aura: -1 = sem aura (fora do mar), 0..4 crescendo, 5 = final
