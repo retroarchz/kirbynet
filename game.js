@@ -1448,7 +1448,10 @@ const ClimaReal = {
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {   // 2 pixels já pegava a chuva de Vila Velha (15/11)
       const X = Math.min(255, Math.max(0, px + dx)), Y = Math.min(255, Math.max(0, py + dy)), k = (Y * 256 + X) * 4;
       if (d[k + 3] < 200) continue;                               // transparente ou garoa fraquinha
-      f = Math.max(f, d[k] < 100 ? 1 : d[k + 1] >= 150 ? 2 : 3);
+      // azuis (claro ou escuro) e bege da garoa = chuva; só amarelo de verdade = forte; laranja/vermelho/roxo (vermelho alto, verde baixo) = tempestade.
+      // (16/11: o azul claro 6cd1eb tem vermelho 108 e verde 209 e virava "forte" com chuva fraca no aeroporto de Vitória)
+      const r = d[k], g = d[k + 1], bl = d[k + 2];
+      f = Math.max(f, r >= 180 && g < 150 ? 3 : bl >= r || bl > 100 ? 1 : g >= 200 ? 2 : 3);
     }
     return f;
   },
