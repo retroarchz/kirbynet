@@ -1445,16 +1445,19 @@ const ClimaReal = {
     if (cob[(py * 256 + px) * 4 + 3] > 128) return null;          // nenhum radar alcança esse lugar
     const nivel = async (q) => {
     const d = await img(`${j.host}${q.path}/256/${z}/${x}/${y}/2/0_0.png`);
-    let f = 0;   // pior chuva a até ~1 km (1 pixel = 1,2 km): azul chuva, amarelo forte, laranja/vermelho tempestade
+    const v = [];   // chuva nos 9 pixels em volta (1 pixel = 1,2 km): 0 nada, 1 azul chuva, 2 amarelo forte, 3 laranja/vermelho tempestade
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {   // 2 pixels já pegava a chuva de Vila Velha (15/11)
       const X = Math.min(255, Math.max(0, px + dx)), Y = Math.min(255, Math.max(0, py + dy)), k = (Y * 256 + X) * 4;
-      if (d[k + 3] < 200) continue;                               // transparente ou garoa fraquinha
+      if (d[k + 3] < 200) { v.push(0); continue; }                // transparente ou garoa fraquinha
       // azuis (claro ou escuro) e bege da garoa = chuva; só amarelo de verdade = forte; laranja/vermelho/roxo (vermelho alto, verde baixo) = tempestade.
       // (16/11: o azul claro 6cd1eb tem vermelho 108 e verde 209 e virava "forte" com chuva fraca no aeroporto de Vitória)
       const r = d[k], g = d[k + 1], bl = d[k + 2];
-      f = Math.max(f, r >= 180 && g < 150 ? 3 : bl >= r || bl > 100 ? 1 : g >= 200 ? 2 : 3);
+      v.push(r >= 180 && g < 150 ? 3 : bl >= r || bl > 100 ? 1 : g >= 200 ? 2 : 3);
     }
-    return f;
+    // chuva (1) se chove em pelo menos 3 dos 9 (pegava a chuva de Vila Velha a 2 pixels, 15/11); a força é a do MEIO
+    // (mediana) e não a pior: 16/11 a borda de uma tempestade a 1 km fazia o jogo trovejar com "Chuva leve" no MSN.
+    v.sort((p, q) => p - q);
+    return v[4] > 0 ? v[4] : v[6] > 0 ? 1 : 0;
     };
     // Chuva aparece já na primeira leitura; chuva forte/tempestade só se a leitura de 10 min antes também era forte
     // (16/11: a tempestade chegando pintou amarelo/vermelho em cima dele enquanto o MSN dizia "Chuva leve").
