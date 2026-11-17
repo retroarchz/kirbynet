@@ -746,6 +746,7 @@ function startRun(opts) {
   quetzalMato(roms);   // Cubchoo no mato da Rota 117 (antes de quetzalNuvem: vale mesmo se o hack não entrar)
   quetzalBarco(roms);   // barco da Rota 104 pergunta se quer manobrar
   quetzalFlutua(roms);   // surf do 657: ele flutua com aura azul, sem o Lapras
+  quetzalOndas(roms);   // rastro de ondinhas também no mar (como no lago)
   run.moto = quetzalNuvem(roms);   // deu certo: a tecla 0 pode trocar o desenho da moto
   worker.postMessage({ t: "start", module: Play.mod, n: run.n, rom: roms, saves: opts.saves,
                        net: !!run.net && !run.free, free: !!run.free || run.auto, auto: run.auto, me: run.slot | 0, slot: run.free ? 0 : run.slot,
@@ -1546,6 +1547,16 @@ function quetzalFlutua(rom) {
   const d = Uint8Array.from(atob(F.b64), (c) => c.charCodeAt(0));
   if (F.dados + d.length > rom.length || rom.subarray(F.dados, F.dados + d.length).some((b) => b !== 0)) return;   // a faixa tem que estar zerada
   rom.set(d, F.dados); rom.set(hex(F.novo), F.reg);
+}
+// Rastro de ondinhas no mar (pedido 16/11): MetatileBehavior_HasRipples (0x080C8CE8) só aceitava lago 0x10, poça 0x16 e
+// água funda de Sootopolis 0x14. Agora aceita toda água 0x10-0x16 menos a cachoeira 0x13, e as correntezas 0x50-0x53
+// (mesmos 28 bytes, sem push: lsl/lsr; sub #0x10; cmp #6; bls água; sub #0x40; cmp #3; bls sim; não: 0; bx lr; água:
+// cmp #3; beq não; sim: 1; bx lr). Igual na Alpha 9 e na Coop 3. O engine-worker ondaVigia faz pulsar parado.
+const QZ_ONDAS = [[0xC8CE8, "00b50006000e102803d0162801d0142801d1012000e0002002bc0847", "0006000e1038062804d94038032803d9002070470328fbd001207047"]];
+function quetzalOndas(rom) {
+  if (String.fromCharCode(...rom.subarray(0xA0, 0xAB)) !== "PKM QUETZAL") return;
+  const hex = (h) => Uint8Array.from(h.match(/../g), (b) => parseInt(b, 16));
+  for (const [at, orig, novo] of QZ_ONDAS) { const o = hex(orig); if (o.every((b, i) => rom[at + i] === b)) rom.set(hex(novo), at); }
 }
 function quetzalNuvem(rom) {
   if (String.fromCharCode(...rom.subarray(0xA0, 0xAB)) !== "PKM QUETZAL") return 0;

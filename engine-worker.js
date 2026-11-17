@@ -297,7 +297,7 @@ function relogio() {
     if (run.cl && run.clPed) { run.cl.alvo(run.clPed.w); run.clPed = null; }
     if (run.cl) run.cl.quadro(run.frames);
   }
-  if (run.quetzal && !run.rb && !SNES && run.frames >= 120) { barcoVigia(); barcoOutros(); flutuaVigia(); }
+  if (run.quetzal && !run.rb && !SNES && run.frames >= 120) { barcoVigia(); barcoOutros(); flutuaVigia(); ondaVigia(); }
   if (!run.dn) return;
   run.dn.quadro();
   if (run.dnJogo && run.frames % 1800 === 0) postMessage({ t: "relogio", min: run.dn.minuto() });
@@ -680,6 +680,31 @@ function flutuaVigia() {
     some(q);
     for (let j = 0; j < 64; j++) { const r = 0x02020630 + j * 0x44; if ((ram.r8(r + 0x3E) & 1) && ram.r32(r + 0x1C) === 0x08296329 && ram.r32(r + 0x20) === ram.r32(q + 0x20)) some(r); }
   }
+}
+// Ondinhas na água (pedido 16/11): o rastro de ondinhas do lago vale também no mar (game.js QZ_ONDAS muda
+// MetatileBehavior_HasRipples 0x080C8CE8). Parado na água (surfando, fora do barco), uma ondinha nasce embaixo de você a
+// cada ONDA.CADA quadros (pulsando): script setfieldeffectargument 0..3 + dofieldeffect 5 (FLDEFF_RIPPLE, os mesmos
+// argumentos do DoRippleFieldEffect do jogo: x do sprite, y + altura/2 - 2, 151, 3) gravado em ONDA.SCR (faixa zerada
+// depois do QZ_FLUTUA) e rodado pelo contexto global de script só com ele parado (0x03000EE8 = 2), dura um quadro.
+const ONDA = { FUNC: 0x080C8CE8, NOVA: 0x28063810, SCR: 0x090F6400, CADA: 44, PARADO: 20 };
+function ondaVigia() {
+  const ram = run.s.ram(0); if (!ram) return;
+  const bus = edBus(), o = run.onda || (run.onda = { k: "", t: 0, ult: 0 });
+  if (bus.r32(ONDA.FUNC + 4) !== ONDA.NOVA) return;   // ROM sem o QZ_ONDAS
+  const pi = ram.r8(0x02039075) & 0x7F, ob = 0x02038D10 + 0x24 * pi, si = ram.r8(ob + 0x23), sp = 0x02020630 + 0x44 * si;
+  if (pi >= 16 || si >= 64 || !(ram.r8(ob) & 1) || !(ram.r8(sp + 0x3E) & 1) || ram.r32(0x03002664) !== 0x080C2965 ||
+      !(ram.r8(0x02039070) & 8) || ram.r8(BARCO.FLAG)) { o.k = ""; return; }
+  const x = ram.r16(sp + 0x20) << 16 >> 16, y = (ram.r16(sp + 0x22) << 16 >> 16) + 14;
+  const k = [ram.r16(ob + 0x10), ram.r16(ob + 0x12), x, y].join();
+  if (k !== o.k) { o.k = k; o.t = run.frames; o.ult = 0; return; }   // andou: o rastro do jogo cuida
+  const parado = run.frames - o.t;
+  if (parado < ONDA.PARADO || run.frames - o.ult < ONDA.CADA || ram.r8(0x03000EE8) !== 2 || x < 0 || y < 0 || x > 0x3FFF || y > 0x3FFF) return;
+  const scr = ONDA.SCR, z = bus.r8(scr);
+  if (z !== 0 && z !== 0x9D) return;   // faixa ocupada por outra coisa: não mexe
+  const arg = (i, v) => [0x9D, i, v & 255, v >> 8];
+  run.s.romWrite(scr - 0x08000000, Uint8Array.from([...arg(0, x), ...arg(1, y), ...arg(2, 151), ...arg(3, 3), 0x9C, 5, 0, 0x02]));
+  const C = 0x03000EF0; ram.w8(C, 0); ram.w8(C + 1, 1); ram.w16(C + 8, scr & 0xFFFF); ram.w16(C + 10, scr >>> 16); ram.w8(0x03000EE8, 0);
+  o.ult = run.frames;
 }
 function barcoVigia() {
   const ram = run.s.ram(0); if (!ram) return;
