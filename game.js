@@ -1096,6 +1096,7 @@ const QZ_TIPOS = [
   [0x54BDF0, "14285a191e5a0707", "14285a191e5a0711"],   // Duskull (#355): Ghost/Ghost -> Ghost/Dark
   [0x54BE14, "284682193c820707", "284682193c820711"],   // Dusclops (#356)
   [0x54CF18, "2d64872d41870707", "2d64872d41870711"],   // Dusknoir (#477)
+  [0x5505A8, "3e875f4144520101", "3e875f4144520c11"],   // Sirfetch'd (#865): Fighting -> Grass/Dark
 ];
 function quetzalTipos(rom) {
   if (String.fromCharCode(...rom.subarray(0xA0, 0xAB)) !== "PKM QUETZAL") return 0;
