@@ -51,7 +51,7 @@ DEFAULT, EFEITO_OK, PUSH_SCRIPT = 0x08058604, 0x080583AE, 0x08058D05
 ID_MSG = 757                                 # texto da batalha novo (índice 745 da tabela copiada)
 N_ANIM_FLORESTA, N_ANIM_PRESA = 64, 65       # animações gerais novas
 TERRENO = 0x02022FC0                         # gBattleTerrain: 0 mato, 1 mato alto, 2 areia, 3 debaixo d'água, 4 mar,
-SEM_MATA = 1 << 3 | 1 << 4 | 1 << 5 | 1 << 7  # 5 lago, 6 montanha, 7 caverna, 8 construção, 9 chão; sem mata = 3,4,5,7
+SEM_MATA = 1 << 2 | 1 << 3 | 1 << 4 | 1 << 5 | 1 << 7  # 5 lago, 6 montanha, 7 caverna, 8 construção, 9 chão; sem mata = 2,3,4,5,7
 
 # --- espaços: imagens de frente antigas (só a tabela de frente apontava para elas)
 S1, S1_N = 0x09B4EEAC, 892                   # Sirfetch'd (imagem nova em 0x09FEC588)
