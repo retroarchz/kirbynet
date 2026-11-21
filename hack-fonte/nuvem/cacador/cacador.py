@@ -488,11 +488,74 @@ code_n1[z[0] - N1:z[0] - N1 + 4] = p32(SCRIPT2)
 assert N1 + len(code_n1) <= N1_FIM, hex(N1 + len(code_n1))
 assert ROM[0x53E52:0x53E5C] == bytes.fromhex('0d480188832900d19de2')
 
+# ============================ Sacred Sword do Sirfetch'd: espada verde ============================
+# O golpe 533 ganha um script: carrega os gráficos como o original, uma tarefa vê se o atacante é o Sirfetch'd (865);
+# se for, pinta de verde a espada/corte (paleta 0x2851) e as cores azuis do brilho (0x2715), põe gBattleAnimArgs[7] = 1
+# e a animação segue numa cópia com o clarão verde (no lugar do ciano 32754); senão segue no script original.
+N3, N3_FIM = 0x09FFF520, 0x09FFF600          # área livre depois da tabela de descrições longas
+for R in ROMS: assert all(b == 0xFF for b in R[N3 - 0x08000000:N3_FIM - 0x08000000])
+SS_MOVE, SS_ORIG = 533, w32(0x0846AB1C + 4 * 533)
+ANIM_ARGS, ANIM_ATK = 0x02039F06, 0x02039F1E
+assert SS_ORIG == 0x08475628 and ROM[SS_ORIG - 0x08000000:SS_ORIG - 0x08000000 + 12] == bytes.fromhex('009a27001527005128004c28')
+sys.path.insert(0, os.path.join(AQUI, '..'))
+from lz import lz77
+def verde(c):
+    R_, G_, B_ = c & 31, c >> 5 & 31, c >> 10 & 31
+    return (R_ // 2) | B_ << 5 | (G_ // 2) << 10            # azul -> verde de alho-poró
+def pal_tag(tag):
+    p = w32(0x09128A38 - 63 * 8 + (tag - 0x2710) * 8)
+    return list(struct.unpack('<16H', lz77(ROM, p - 0x08000000)[0][:32]))
+P2851 = pal_tag(0x2851); P2851 = [P2851[0]] + [verde(c) for c in P2851[1:]]
+P2715 = pal_tag(0x2715); P2715[4] = verde(P2715[4]); P2715[6] = verde(P2715[6])
+VERDE_CLARAO = 10 | 31 << 5 | 12 << 10       # no lugar de 32754 (ciano claro)
+N4, N4_FIM = 0x09FEBDC0, 0x09FEBE00          # as 2 paletas (depois da tabela de textos, com folga para mais 4 textos)
+for R in ROMS: assert all(b == 0xFF for b in R[N4 - 0x08000000:N4_FIM - 0x08000000])
+n4 = struct.pack('<16H', *P2851) + struct.pack('<16H', *P2715)
+L_P2851, L_P2715 = N4, N4 + 32
+n3 = bytearray()
+def at3(): return N3 + len(n3)
+t = Asm(at3())
+t.push(['r4', 'r5'], lr=True)
+t.movh('r5', 'r0')
+t.ldr_lit('r4', ANIM_ARGS); t.mov('r0', 0); t.strh_i('r0', 'r4', 14)          # gBattleAnimArgs[7] = 0
+t.ldr_lit('r0', ANIM_ATK); t.ldrb_i('r0', 'r0', 0); t.mov('r1', 0x60); t.alu('mul', 'r0', 'r1')
+t.ldr_lit('r1', MONS_LIT); t.ldr_i('r1', 'r1', 0); t.add_r('r0', 'r0', 'r1'); t.ldrh_i('r0', 'r0', 0)   # espécie
+t.ldr_lit('r1', 865); t.alu('cmp', 'r0', 'r1'); t.bc('ne', 'fim')
+t.mov('r0', 1); t.strh_i('r0', 'r4', 14)                                    # gBattleAnimArgs[7] = 1
+for tag, pal, nome in ((0x2851, L_P2851, 'p1'), (0x2715, L_P2715, 'p2')):
+    t.ldr_lit('r0', tag); t.ldr_lit('r1', 0x03000CF0); t.mov('r2', 0)
+    t.label(nome + 'l'); t.ldr_i('r3', 'r1', 0); t.alu('cmp', 'r3', 'r0'); t.bc('eq', nome + 'a')
+    t.addi('r1', 4); t.addi('r2', 1); t.cmpi('r2', 16); t.bc('lo', nome + 'l'); t.b(nome)
+    t.label(nome + 'a'); t.lsl('r1', 'r2', 4); t.addi('r1', 0x80); t.addi('r1', 0x80)
+    t.ldr_lit('r0', pal); t.mov('r2', 0x20); t.ldr_lit('r3', 0x080F196D); t.bl('c3')
+    t.label(nome)
+t.label('fim')
+t.movh('r0', 'r5'); t.ldr_lit('r3', 0x080F43A9); t.bl('c3')
+t.pop(['r4', 'r5']); t.pop(['r0']); t.bx('r0')
+t.label('c3'); t.bx('r3')
+t.pool()
+SS_TASK = t.base; n3 += t.build()
+SS_SCRIPT = (N1 + len(code_n1) + 3) & ~3     # o script vai no fim da área N1 (sobra espaço lá)
+resto = bytearray(ROM[0x08475634 - 0x08000000:0x0847565F - 0x08000000])      # do monbg até o clarão (createvisualtask)
+i_cor = resto.index(h16(32754)); resto[i_cor:i_cor + 2] = h16(VERDE_CLARAO)
+resto += b'' + p32(0x0847565F)                                          # e volta para o original
+ss = ROM[SS_ORIG - 0x08000000:SS_ORIG - 0x08000000 + 12]                     # os 4 loadspritegfx
+ss += b'\x03' + p32(SS_TASK | 1) + b'\x05\x00' + b'\x05'                     # tarefa + waitforvisualfinish
+ss_verde = SS_SCRIPT + len(ss) + 8 + 5
+ss += b'\x21\x07' + h16(1) + p32(ss_verde)                                   # jumpargeq 7, 1, versão verde
+ss += b'\x13' + p32(0x08475634)                                              # goto resto original
+ss += resto
+assert SS_SCRIPT + len(ss) <= N1_FIM, hex(SS_SCRIPT + len(ss))
+assert N3 + len(n3) <= N3_FIM, hex(N3 + len(n3))
+
 def orig(addr, n_): return ROM[addr - 0x08000000:addr - 0x08000000 + n_].hex()
 saida = {
   'novos': [
     [N1 - 0x08000000, bytes(code_n1).hex(), "Caçador, fim de rodada: desvio (321 -> floresta ataca; o resto segue para o Distúrbio) e dano de 1/16"],
     [N2 - 0x08000000, bytes(n2).hex(), "Caçador, fim de rodada: texto, animação 66 (folhas do Leaf Tornado sem o redemoinho) e script"],
+    [SS_SCRIPT - 0x08000000, bytes(ss).hex(), "Sacred Sword: script (tarefa da cor; se for o Sirfetch'd, clarão verde)"],
+    [N4 - 0x08000000, bytes(n4).hex(), "Sacred Sword do Sirfetch'd: paletas verdes da espada (0x2851) e do brilho (0x2715)"],
+    [N3 - 0x08000000, bytes(n3).hex(), "Sacred Sword do Sirfetch'd com espada verde: paletas, tarefa e script (os outros Pokémon seguem no azul)"],
   ],
   'fix_novos': [
     [S1 - 0x08000000, orig(S1, len(s1)), bytes(s1).hex(), "Caçador (habilidade 321): nome, fuga, entrada, script, animações e textos (no lugar da imagem antiga do Sirfetch'd)"],
@@ -500,6 +563,7 @@ saida = {
     [ESC_FN - 0x08000000, orig(ESC_FN, 8), (struct.pack('<HH', 0x4B00, 0x4718) + p32(ESC_HOOK | 1)).hex(), "IsAbilityPreventingEscape: Caçador do outro lado prende sempre"],
     [0x5505C0, '500000007100', struct.pack('<3H', HAB, HAB, HAB).hex(), "Sirfetch'd: Caçador nas 3 vagas"],
     [ARB_PAL_VELHA - 0x08000000, orig(ARB_PAL_VELHA, 40), ARB_PAL_NOVA.hex(), "Arboliva: paleta nova no lugar da antiga (era 0x09FFF700)"],
+    [0x46AB1C + 4 * SS_MOVE, orig(0x0846AB1C + 4 * SS_MOVE, 4), p32(SS_SCRIPT).hex(), "animação do Sacred Sword -> script com a espada verde do Sirfetch'd"],
   ],
   'fix_trocas': {   # endereço -> novo valor
     '0x52600': '3f010000',
