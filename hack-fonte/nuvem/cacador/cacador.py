@@ -77,6 +77,12 @@ a.bl('presente'); a.movh('r4', 'r0')
 a.bl('marca'); a.movh('r5', 'r0')
 a.cmpi('r4', 0); a.bc('eq', 't_sem')
 a.cmpi('r5', 0); a.bc('ne', 't_fim')
+# recém-criada: espera 60 quadros (a animação 64 escurece e o desvio desenha a floresta uma vez só; sem animações
+# de batalha nas opções, a tarefa desenha depois desse tempo)
+a.lsl('r1', 'r7', 2); a.add_r('r1', 'r1', 'r7'); a.lsl('r1', 'r1', 3); a.ldr_lit('r0', GTASKS); a.add_r('r1', 'r1', 'r0')
+a.ldrh_i('r0', 'r1', 8); a.cmpi('r0', 60); a.bc('hs', 't_desenha')
+a.addi('r0', 1); a.strh_i('r0', 'r1', 8); a.b('t_fim')
+a.label('t_desenha')
 a.bl('desenha'); a.b('t_fim')
 a.label('t_sem')                              # o Caçador saiu: devolve o fundo normal (ou o céu do Distúrbio) e acaba
 a.cmpi('r5', 0); a.bc('eq', 't_mata')
@@ -247,6 +253,27 @@ a.addi('r1', 1); a.cmpi('r1', 14); a.bc('lo', 'm_fil')
 a.pop(['r4', 'r5', 'r6', 'r7']); a.movh(8, 'r4'); a.movh(9, 'r5'); a.movh(10, 'r6'); a.movh(11, 'r7')
 a.pop(['r4', 'r5', 'r6', 'r7']); a.pop(['r0']); a.bx('r0')
 a.pool()
+# ---- tarefa visual da animação 65: as raízes (tag 0x27EF) ficam verde-escuro de cipó (só aqui; o Ingrain fica igual)
+a.label('raiz')
+a.push(['r4'], lr=True)
+a.movh('r4', 'r0')
+a.ldr_lit('r0', 0x27EF); a.ldr_lit('r1', 0x03000CF0); a.mov('r2', 0)   # sSpritePaletteTags (u32 por vaga)
+a.label('r_laco'); a.ldr_i('r3', 'r1', 0); a.alu('cmp', 'r3', 'r0'); a.bc('eq', 'r_achou')
+a.addi('r1', 4); a.addi('r2', 1); a.cmpi('r2', 16); a.bc('lo', 'r_laco'); a.b('r_fim')
+a.label('r_achou')
+a.lsl('r1', 'r2', 4); a.addi('r1', 0x80); a.addi('r1', 0x80)          # 0x100 + vaga*16 (paletas de sprite)
+a.ldr_lit('r0', 0); a.mov('r2', 0x20); a.ldr_lit('r3', 0x080F196D); a.bl('c3')   # LoadPalette (placeholder: paleta)
+a.label('r_fim')
+a.movh('r0', 'r4'); a.ldr_lit('r3', 0x080F43A9); a.bl('c3')          # DestroyAnimVisualTask
+a.pop(['r4']); a.pop(['r0']); a.bx('r0')
+a.pool()
+# paleta das raízes: a rampa marrom (cores 1 clara .. 9 escura) vira verde-escuro de cipó
+CIPO = [(0, 0, 0), (120, 168, 72), (96, 148, 56), (80, 128, 48), (64, 112, 40), (52, 96, 32), (44, 80, 28), (36, 66, 24),
+        (28, 52, 20), (20, 40, 16)] + [(0, 0, 0)] * 6
+a.label('cipo')
+for k_ in range(0, 16, 2):
+    c0, c1 = [(r_ >> 3) | (g_ >> 3) << 5 | (b_ >> 3) << 10 for r_, g_, b_ in CIPO[k_:k_ + 2]]
+    a.word(c0 | c1 << 16)
 L_TAREFA = a.labels['tarefa']
 code2 = a.build()
 
@@ -296,14 +323,16 @@ c.label('c3'); c.bx('r3')
 c.pool()
 CRIA = c.base; s1 += c.build(); alinha()
 
-# animação geral 64 (no Sirfetch'd): a floresta aparece; o restorebg chama o fundo normal, e o desvio põe a floresta
-# com as bases de musgo
+# animação geral 64 (no Sirfetch'd): o fundo escurece uma vez e volta já como a floresta com as bases de musgo (o
+# restorebg chama o DrawMainBattleBackground e o desvio desenha a floresta)
 ANIM_FLORESTA = at1()
-s1 += bytes.fromhex('1448') + bytes.fromhex('17') + bytes.fromhex('0428') + bytes.fromhex('15') + bytes.fromhex('17') + b'\x08'
+s1 += bytes.fromhex('15') + bytes.fromhex('17') + b'\x08'      # restorebg, waitbgfadein, end
 # animação geral 65 (no adversário: atacante = alvo = ele): raízes do Ingrain + armadilha do Snap Trap que morde
 def trecho(de, ate): return ROM[de - 0x08000000:ate - 0x08000000]
 ANIM_PRESA = at1()
-s1 += trecho(0x08499D8E, 0x08499DF0)          # Ingrain: carrega as raízes e faz 4 raízes nascerem (com o som)
+s1 += trecho(0x08499D8E, 0x08499D94)          # Ingrain: carrega as raízes
+s1 += b'\x03' + p32(a.labels['raiz'] | 1) + b'\x05\x00' + b'\x05'   # raízes verde-cipó (espera a tarefa acabar)
+s1 += trecho(0x08499D94, 0x08499DF0)          # 4 raízes nascem (com o som)
 s1 += trecho(0x08482D04, 0x08482DE5)          # Snap Trap inteiro até o clearmonbg (dentes, folhas, tremor)
 s1 += bytes.fromhex('0d') + bytes.fromhex('0401') + b'\x08'   # blendoff, delay 1, end
 alinha()
@@ -359,8 +388,8 @@ lits0 = []
 for nm, addr in a.labels.items():
     if nm.startswith('_lit') and addr - S2 + 4 <= len(code2) and code2[addr - S2:addr - S2 + 4] == b'\0\0\0\0': lits0.append((addr, nm))
 lits0.sort()
-assert len(lits0) == 3, lits0
-for (addr, nm), v in zip(lits0, [L_TAREFA | 1, L_TAREFA | 1, L_LTAB]):
+assert len(lits0) == 4, lits0
+for (addr, nm), v in zip(lits0, [L_TAREFA | 1, L_TAREFA | 1, L_LTAB, a.labels['cipo']]):
     code2[addr - S2:addr - S2 + 4] = p32(v)
 assert len(code2) <= S2_N, (len(code2), S2_N)
 
