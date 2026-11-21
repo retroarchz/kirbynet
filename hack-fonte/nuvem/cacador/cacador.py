@@ -411,8 +411,89 @@ ARB_PAL_VELHA = 0x09C67B6C
 ARB_PAL_NOVA = bytes.fromhex('102000000053532b300410fa78001a79000093600d200004085638ff7b882c00fc62b8482c2c230c')
 for R in ROMS: assert struct.unpack_from('<I', R, 0x4E5D2C)[0] == ARB_PAL_VELHA
 
+# ============================ fim de cada rodada: a floresta ataca ============================
+# Em cada adversário: folhas do Leaf Tornado (sem o redemoinho) girando nele, tremor e 1/16 da vida máxima.
+# Áreas livres (0xFF) depois das tabelas copiadas (cada tabela tem folga para mais 4 habilidades/textos):
+N1, N1_FIM = 0x09FFE910, 0x09FFEA00          # desvio do fim de rodada + dano
+N2, N2_FIM = 0x09FFEF20, 0x09FFF000          # script, texto e animação 66
+ID_MSG2, N_ANIM_FOLHAS = 758, 66
+D_TRAMP_VELHO = 0x09FEEB61                   # desvio do Distúrbio (320) no fim de rodada
+MAGIC_GUARD = 98
+for R in ROMS:
+    for ini, fim_ in ((N1, N1_FIM), (N2, N2_FIM)):
+        assert all(b == 0xFF for b in R[ini - 0x08000000:fim_ - 0x08000000]), hex(ini)
+assert ROM[0x0847578E - 0x08000000:0x0847578E - 0x08000000 + 3] == bytes.fromhex('001927')
+
+n2 = bytearray()
+def at2(): return N2 + len(n2)
+T_MSG2 = at2(); n2 += bytes([0xFD, 0x10]) + enc(' foi atacado\npela floresta!')   # "<alvo> foi atacado pela floresta!"
+ANIM_FOLHAS = at2()
+n2 += bytes.fromhex('004f27')                     # loadspritegfx folhas
+n2 += bytes.fromhex('1984003f')                   # som do Leaf Tornado
+n2 += b'\x03' + p32(0x08141361) + b'\x05\x05' + b''.join(h16(v) for v in (1, 0, 2, 47, 1))   # tremor do alvo
+n2 += (b'\x0e' + p32(0x084757D7)) * 3            # 3 rajadas de folhas girando no alvo (sem o redemoinho)
+n2 += bytes.fromhex('05') + bytes.fromhex('2f') + b'\x08'   # waitforvisualfinish, stopsound, end
+while len(n2) % 4: n2.append(0)
+
+# native: 1/16 da vida máxima do alvo em gBattleMoveDamage (mínimo 1); avança 5 bytes
+d = Asm(N1)
+d.label('dano')
+d.ldr_lit('r0', 0x02023205); d.ldrb_i('r0', 'r0', 0); d.mov('r1', 0x60); d.alu('mul', 'r0', 'r1')
+d.ldr_lit('r1', MONS_LIT); d.ldr_i('r1', 'r1', 0); d.add_r('r0', 'r0', 'r1'); d.ldrh_i('r0', 'r0', 0x2E)
+lsr(d, 0, 0, 4); d.cmpi('r0', 0); d.bc('ne', 'ok'); d.mov('r0', 1)
+d.label('ok'); d.ldr_lit('r1', 0x020231E8); d.str_i('r0', 'r1', 0)
+d.ldr_lit('r1', 0x0202320C); d.ldr_i('r0', 'r1', 0); d.addi('r0', 5); d.str_i('r0', 'r1', 0)
+d.bx('lr')
+d.pool()
+# desvio no fim de rodada (r2 = batalhador, fica intacto): 321 -> script da floresta; o resto segue para o do Distúrbio
+d.label('tramp')
+d.ldr_lit('r0', 0x02023202); d.ldrh_i('r1', 'r0', 0)
+d.ldr_lit('r3', HAB); d.alu('cmp', 'r1', 'r3'); d.bc('eq', 'meu')
+d.ldr_lit('r3', D_TRAMP_VELHO); d.bx('r3')
+d.label('meu')
+d.ldr_lit('r3', a.labels['lugar'] | 1); d.bl('c3'); d.cmpi('r0', 0); d.bc('ne', 'nada')   # mar/lago/caverna/areia: sem floresta
+d.ldr_lit('r0', 0); d.ldr_lit('r3', PUSH_SCRIPT); d.bl('c3')    # placeholder: script
+d.ldr_lit('r3', 0x08057E16); d.h(0x469F)                          # efeito++ e fim do switch
+d.label('nada'); d.ldr_lit('r3', DEFAULT); d.h(0x469F)
+d.label('c3'); d.bx('r3')
+d.pool()
+DANO16, TRAMP = d.labels['dano'], d.labels['tramp']
+
+# script do fim de rodada (molde: o dreno do Distúrbio)
+s = bytearray(); lab = {}; fix = []
+s += bytes.fromhex('760136392000')                # balão da habilidade
+s += bytes.fromhex('2e0532020200')                # alvo = 0
+lab['laco'] = len(s)
+s += bytes.fromhex('760137'); jmp('prox')         # aliado
+s += bytes.fromhex('760061'); jmp('prox')         # ausente
+s += bytes.fromhex('ff3998080800'); jmp('prox')   # desmaiado
+s += bytes([0x1E, 0x00, MAGIC_GUARD, 0x00]); jmp('prox')
+s += bytes([0x45, 0x00, N_ANIM_FOLHAS]) + p32(0x02023500) + b'\x0a'   # folhas no alvo e espera
+s += b'\xff' + p32(DANO16 | 1)                    # dano = 1/16 da vida máxima
+s += bytes.fromhex('357432020200011000') + bytes.fromhex('0b000c00')  # barra de vida do alvo
+s += bytes([0x10]) + h16(ID_MSG2) + bytes.fromhex('124000')         # "<alvo> foi atacado pela floresta!"
+s += bytes.fromhex('19000000000000')              # tryfaintmon alvo
+lab['prox'] = len(s)
+s += bytes.fromhex('2f0532020201')
+s += bytes.fromhex('2d053202024430020201'); jmp('laco')
+s += bytes.fromhex('760f62390f003f')              # fecha o balão, pausa, end3
+SCRIPT2 = at2()
+for at, name in fix: s[at:at + 4] = p32(SCRIPT2 + lab[name])
+n2 += s
+assert N2 + len(n2) <= N2_FIM, hex(N2 + len(n2))
+code_n1 = bytearray(d.build())
+z = [ad for nm, ad in d.labels.items() if nm.startswith('_lit') and code_n1[ad - N1:ad - N1 + 4] == b'\0\0\0\0']
+assert len(z) == 1, z
+code_n1[z[0] - N1:z[0] - N1 + 4] = p32(SCRIPT2)
+assert N1 + len(code_n1) <= N1_FIM, hex(N1 + len(code_n1))
+assert ROM[0x53E52:0x53E5C] == bytes.fromhex('0d480188832900d19de2')
+
 def orig(addr, n_): return ROM[addr - 0x08000000:addr - 0x08000000 + n_].hex()
 saida = {
+  'novos': [
+    [N1 - 0x08000000, bytes(code_n1).hex(), "Caçador, fim de rodada: desvio (321 -> floresta ataca; o resto segue para o Distúrbio) e dano de 1/16"],
+    [N2 - 0x08000000, bytes(n2).hex(), "Caçador, fim de rodada: texto, animação 66 (folhas do Leaf Tornado sem o redemoinho) e script"],
+  ],
   'fix_novos': [
     [S1 - 0x08000000, orig(S1, len(s1)), bytes(s1).hex(), "Caçador (habilidade 321): nome, fuga, entrada, script, animações e textos (no lugar da imagem antiga do Sirfetch'd)"],
     [S2 - 0x08000000, orig(S2, len(code2)), bytes(code2).hex(), "Caçador: floresta com bases de musgo, tarefa e desvio do fundo (no lugar da imagem antiga da Arboliva)"],
@@ -424,6 +505,7 @@ saida = {
     '0x52600': '3f010000',
     '0xA5628': (struct.pack('<HH', 0x4900, 0x4708) + p32(NOME_HOOK | 1)).hex(),
     '0x3C06C': (struct.pack('<HH', 0x4B00, 0x4718) + p32(a.labels['entra'] | 1)).hex(),
+    '0x53E52': (struct.pack('<HHH', 0x4801, 0x4700, 0x46C0) + p32(TRAMP | 1)).hex(),
   },
   'fix_remover': ['0x4E5D2C'],
   'novo_remover': ['0x1FFF700'],
@@ -431,8 +513,8 @@ saida = {
     '0x1FFE400': [320, [CASE]],
     '0x1FFEA00': [322, [T_CURTA]],
     '0x1FFF000': [322, [T_LONGA]],
-    '0x1FFF600': [66, [ANIM_FLORESTA, ANIM_PRESA]],
-    '0x1FEB200': [746, [T_MSG]],
+    '0x1FFF600': [67, [ANIM_FLORESTA, ANIM_PRESA, ANIM_FOLHAS]],
+    '0x1FEB200': [747, [T_MSG, T_MSG2]],
   },
 }
 json.dump(saida, open(os.path.join(AQUI, 'entradas.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)

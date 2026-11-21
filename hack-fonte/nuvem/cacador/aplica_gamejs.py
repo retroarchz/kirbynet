@@ -27,11 +27,19 @@ bloco = CAB
 for at, orig, novo, com in e['fix_novos']:
     bloco += '    [0x%X, "%s",\n               "%s"],   // %s\n' % (at, orig, novo, com)
 s = s[:fim] + bloco + s[fim:]
+# entradas "novo" (área livre 0xFF) do QZ_NUVEM: tira as antigas com o mesmo endereço e põe no começo da lista
+for at, dados, com in e.get('novos', []):
+    m = re.search(r'    \[0x%X, "[0-9a-f]+"\],   // [^\n]*\n' % at, s)
+    if m: s = s[:m.start()] + s[m.end():]
+ini = s.index('const QZ_NUVEM = {')
+pos = s.index('  novo: [\n', ini) + len('  novo: [\n')
+s = s[:pos] + ''.join('    [0x%X, "%s"],   // %s\n' % (at, dados, com) for at, dados, com in e.get('novos', [])) + s[pos:]
 # tabelas: total novo; os valores do Caçador (nos espaços 0x09B4xxxx/0x09B5xxxx) são trocados pelos atuais
 for to, (total, extra) in e['tabelas'].items():
     m = re.search(r'\[(0x[0-9A-Fa-f]+), %s, (\d+), (\d+), (0x[0-9A-Fa-f]+|0), \[([^\]]*)\]\]' % re.escape(to), s)
     assert m, to
-    velhos = [v.strip() for v in m.group(5).split(',') if v.strip() and not (0x09B40000 <= int(v, 16) < 0x09B70000)]
+    meu = lambda v: 0x09B40000 <= v < 0x09B70000 or 0x09FFEF20 <= v < 0x09FFF000
+    velhos = [v.strip() for v in m.group(5).split(',') if v.strip() and not meu(int(v, 16))]
     vals = ', '.join(velhos + ['0x%08X' % v for v in extra])
     novo = '[%s, %s, %s, %d, %s, [%s]]' % (m.group(1), to, m.group(2), total, m.group(4), vals)
     s = s[:m.start()] + novo + s[m.end():]
