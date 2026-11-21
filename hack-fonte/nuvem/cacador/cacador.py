@@ -50,6 +50,8 @@ NOME_VELHO = 0x09FFE081                      # desvio do GetAbilityName da Nuvem
 DEFAULT, EFEITO_OK, PUSH_SCRIPT = 0x08058604, 0x080583AE, 0x08058D05
 ID_MSG = 757                                 # texto da batalha novo (índice 745 da tabela copiada)
 N_ANIM_FLORESTA, N_ANIM_PRESA = 64, 65       # animações gerais novas
+TERRENO = 0x02022FC0                         # gBattleTerrain: 0 mato, 1 mato alto, 2 areia, 3 debaixo d'água, 4 mar,
+SEM_MATA = 1 << 3 | 1 << 4 | 1 << 5 | 1 << 7  # 5 lago, 6 montanha, 7 caverna, 8 construção, 9 chão; sem mata = 3,4,5,7
 
 # --- espaços: imagens de frente antigas (só a tabela de frente apontava para elas)
 S1, S1_N = 0x09B4EEAC, 892                   # Sirfetch'd (imagem nova em 0x09FEC588)
@@ -102,8 +104,15 @@ a.label('embatalha')                          # gMain.inBattle
 a.ldr_lit('r0', 0x03002A99); a.ldrb_i('r0', 'r0', 0); a.mov('r1', 2); a.alu('and_', 'r0', 'r1'); a.bx('lr')
 a.label('marca')                              # 1 se a floresta está no mapa (paleta 12 no canto)
 a.ldr_lit('r0', 0x0600D000); a.ldrh_i('r0', 'r0', 0); lsr(a, 0, 0, 12); a.cmpi('r0', PAL_N); a.bc('eq', 'sim'); a.b('nao')
+a.label('lugar')                              # 1 se a luta é num lugar sem mata: mar, debaixo d'água, lago ou caverna
+a.ldr_lit('r0', TERRENO); a.ldrb_i('r0', 'r0', 0); a.cmpi('r0', 8); a.bc('hs', 'nao')
+a.mov('r1', SEM_MATA); a.h(0x40C1)            # lsrs r1, r0
+a.mov('r0', 1); a.alu('and_', 'r0', 'r1'); a.bx('lr')
 a.label('presente')                           # 1 se alguém com Caçador tem vida e não há Distúrbio nem gelo do Imperador
 a.push(['r4', 'r5'])
+a.ldr_lit('r0', TERRENO); a.ldrb_i('r0', 'r0', 0); a.cmpi('r0', 8); a.bc('hs', 'p_lugar_ok')
+a.mov('r1', SEM_MATA); a.h(0x40C1); a.lsl('r1', 'r1', 31); a.bc('ne', 'p_nao')   # lugar sem mata: nada de floresta
+a.label('p_lugar_ok')
 a.ldr_lit('r0', IMP15); a.ldrb_i('r0', 'r0', 0); a.lsl('r0', 'r0', 31); a.bc('ne', 'p_nao')
 a.ldr_lit('r0', MONS_LIT); a.ldr_i('r0', 'r0', 0)
 a.ldr_lit('r1', COUNT); a.ldrb_i('r1', 'r1', 0)
@@ -303,8 +312,11 @@ NOME_HOOK = n.base; s1 += n.build(); alinha()
 e = Asm(at1())
 e.push(['r4', 'r5'], lr=True)
 e.movh('r5', 'r0')
+e.bl(a.labels['lugar']); e.cmpi('r0', 0); e.bc('ne', 'segue')   # mar/lago/caverna: o Caçador não prende
+e.movh('r0', 'r5')
 e.ldr_lit('r1', HAB); e.ldr_lit('r3', ISABILITY_OPP); e.bl('c3')
 e.cmpi('r0', 0); e.bc('ne', 'preso')
+e.label('segue')
 e.movh('r0', 'r5'); e.mov('r1', 0); e.mov('r2', 0)
 e.ldr_lit('r3', ESC_FN + 8 + 1); e.bx('r3')   # segue na função (o bl de 0x08058B04 em diante)
 e.label('preso'); e.pop(['r4', 'r5']); e.pop(['r1']); e.bx('r1')
@@ -368,6 +380,7 @@ s1 += s; alinha()
 
 # caso no switch "ao entrar" (igual ao da Nuvem Tóxica: sl = batalhador)
 k = Asm(at1())
+k.bl(a.labels['lugar']); k.cmpi('r0', 0); k.bc('ne', 'ja')   # mar/lago/caverna: sem balão nem floresta
 k.ldr_lit('r0', 0x080533C0); k.ldr_i('r0', 'r0', 0)
 k.movh('r5', 10); k.lsl('r1', 'r5', 1); k.h(0x4451); k.lsl('r1', 'r1', 3); k.add_r('r3', 'r1', 'r0')
 k.ldrb_i('r0', 'r3', 0x10); k.lsl('r0', 'r0', 0x1E); k.cmpi('r0', 0); k.bc('lt', 'ja')
