@@ -559,6 +559,10 @@ SEMI_FN, EFEITO_TAB, EF_SEMI = 0x08085D80, 0x084A9994, 0x96
 assert ROM[SEMI_FN - 0x08000000:SEMI_FN - 0x08000000 + 8] == bytes.fromhex('10b509490b680948')
 rb = bytearray()
 def atb(): return BB_R0 + len(rb)
+# sprite do mergulho do Fly (0x092095F4) com a paleta preta da subida do Behemoth Blade (tag 0x27AA)
+TMPL_DESCE = atb()
+_tm = bytearray(ROM[0x092095F4 - 0x08000000:0x092095F4 - 0x08000000 + 24]); assert _tm[0:4] == bytes.fromhex('ac27ac27')
+_tm[2:4] = h16(0x27AA); rb += _tm
 # setsemiinvulnerablebit: Behemoth Blade -> no ar (os endereços vêm dos literais do próprio jogo: o Coop 3 mudou gStatuses3)
 h = Asm(atb())
 h.ldr_lit('r0', 0x08085DAC); h.ldr_i('r0', 'r0', 0); h.ldrh_i('r2', 'r0', 0)     # gCurrentMove
@@ -597,12 +601,17 @@ t1 += trecho_bb(0x08482EF2, 0x08482F19)        # monbg 01, setalpha, som, ele so
 t1 += bytes.fromhex('05') + bytes.fromhex('0b01') + bytes.fromhex('0d')   # espera, clearmonbg 01, blendoff
 t1 += CLAREIA + b'\x08'
 t2 = bytearray()
-t2 += bytes.fromhex('003128')                 # cortezinhos brancos (tag 0x2831)
-t2 += bytes.fromhex('2c00')                    # visible atacante: ele volta
-t2 += trecho_bb(0x08482F70, 0x08482F81)        # tremor do alvo
-t2 += b'\x0e' + p32(0x0848309B)                # os cortezinhos do Behemoth Blade original (8 riscos com som)
-t2 += bytes.fromhex('05') + bytes.fromhex('013128')   # espera, unloadspritegfx
-t2 += b'\x08'                                  # fim (sem escuro, sem o corte grande e sem a explosão)
+t2 += bytes.fromhex('00ac27') + bytes.fromhex('00aa27') + bytes.fromhex('009727') + bytes.fromhex('003128')   # mergulho (preto), pancada, cortezinhos
+_fly2 = bytearray(ROM[0x08497CB5 - 0x08000000:0x08497CEF - 0x08000000])
+_i = _fly2.index(p32(0x092095F4)); _fly2[_i:_i + 4] = p32(TMPL_DESCE)
+t2 += _fly2                                    # o 2º turno do Fly (mergulho preto): ele desce do alto no alvo,
+assert t2[-17:-13] == bytes.fromhex('19880003')[:0] + t2[-17:-13]   # pancada, tremor forte e som
+t2 += b'\x0e' + p32(0x0848309B)                # rajada dos cortezinhos do Behemoth Blade original (8 riscos com som)
+t2 += trecho_bb(0x08482F70, 0x08482F81)        # mais um tremor no alvo
+t2 += bytes.fromhex('05') + bytes.fromhex('0b03') + bytes.fromhex('0d')   # espera, clearmonbg 03, blendoff
+t2 += bytes.fromhex('2c00') + bytes.fromhex('013128')   # visible atacante (garantia), unloadspritegfx
+t2 += b'\x08'                                  # fim (sem o corte grande e sem a explosão)
+assert ROM[0x08497CB5 - 0x08000000] == 0x0A and ROM[0x08497CEF - 0x08000000] == 0x05
 assert ROM[0x0848309B - 0x08000000] == 0x02 and ROM[0x08483123 - 0x08000000] == 0x0F
 BB_ANIM = atb()
 cab = 1 + 4 + 4 + 1 + 1                        # choosetwoturnanim t1 t2, waitforvisualfinish, end
