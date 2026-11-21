@@ -548,6 +548,73 @@ ss += resto
 assert SS_SCRIPT + len(ss) <= N1_FIM, hex(SS_SCRIPT + len(ss))
 assert N3 + len(n3) <= N3_FIM, hex(N3 + len(n3))
 
+# ============================ Behemoth Blade (709) em dois turnos, como o Fly ============================
+# 1º turno: escurece e ele sobe (sem a espada e sem as pedrinhas), some e fica no ar (STATUS3_ON_AIR: só Thunder,
+# Gust, Sky Uppercut... acertam), fala "desapareceu num instante" (a do Phantom Force). 2º turno: escurece, ele
+# volta e ataca com os cortes (verdes se for o Sirfetch'd), sem a explosão.
+# Tudo no lugar do script de animação antigo do Behemoth Blade (só a tabela de animações apontava para ele).
+BB, BB_R0, BB_R1 = 709, 0x08482E98, 0x08483007
+for R in ROMS: assert R[BB_R0 - 0x08000000:BB_R1 - 0x08000000] == ROM[BB_R0 - 0x08000000:BB_R1 - 0x08000000]
+SEMI_FN, EFEITO_TAB, EF_SEMI = 0x08085D80, 0x084A9994, 0x96
+assert ROM[SEMI_FN - 0x08000000:SEMI_FN - 0x08000000 + 8] == bytes.fromhex('10b509490b680948')
+rb = bytearray()
+def atb(): return BB_R0 + len(rb)
+# setsemiinvulnerablebit: Behemoth Blade -> no ar (os endereços vêm dos literais do próprio jogo: o Coop 3 mudou gStatuses3)
+h = Asm(atb())
+h.ldr_lit('r0', 0x08085DAC); h.ldr_i('r0', 'r0', 0); h.ldrh_i('r2', 'r0', 0)     # gCurrentMove
+h.ldr_lit('r1', BB); h.alu('cmp', 'r2', 'r1'); h.bc('ne', 'orig')
+h.ldr_lit('r0', 0x08085DF0); h.ldr_i('r0', 'r0', 0); h.ldrb_i('r1', 'r0', 0); h.lsl('r1', 'r1', 2)   # gBattlerAttacker
+h.ldr_lit('r0', 0x08085DEC); h.ldr_i('r0', 'r0', 0); h.add_r('r1', 'r1', 'r0')   # gStatuses3[atacante]
+h.ldr_i('r0', 'r1', 0); h.mov('r2', 0x40); h.alu('orr', 'r0', 'r2'); h.str_i('r0', 'r1', 0)   # STATUS3_ON_AIR
+h.ldr_lit('r1', 0x08085DA8); h.ldr_i('r1', 'r1', 0); h.ldr_i('r0', 'r1', 0); h.addi('r0', 1); h.str_i('r0', 'r1', 0)
+h.bx('lr')
+h.label('orig')                                # as 4 instruções trocadas pelo desvio e volta para a função
+h.push(['r4'], lr=True)
+h.ldr_lit('r1', 0x08085DA8); h.ldr_i('r1', 'r1', 0); h.ldr_i('r3', 'r1', 0)
+h.ldr_lit('r0', 0x08085DAC); h.ldr_i('r0', 'r0', 0)
+h.ldr_lit('r2', SEMI_FN + 8 + 1); h.bx('r2')
+h.pool()
+BB_SEMI = h.base; rb += h.build()
+while len(rb) % 4: rb.append(0)
+# script do efeito 0x96 (dois turnos, fora de alcance): as 2 primeiras checagens + Behemoth Blade -> fala do Phantom Force
+EF_VELHO = w32(EFEITO_TAB + 4 * EF_SEMI)
+assert EF_VELHO == 0x084AED10 and ROM[0x4AED28:0x4AED2E] == bytes.fromhex('2a00e2310202')   # 3º comando: jumpifhalfword gCurrentMove
+BB_EF = atb()
+rb += ROM[EF_VELHO - 0x08000000:EF_VELHO - 0x08000000 + 24]                       # jumpifstatus2 / jumpifword (2º turno)
+rb += b'\x2a\x00' + p32(0x020231E2) + h16(BB) + p32(0x084AED85)                   # jumpifhalfword ==709 -> fala 8
+rb += b'\x28' + p32(EF_VELHO + 24)                                                # goto resto original
+assert ROM[0x4AED85:0x4AED8B] == bytes.fromhex('2eff34020208')                    # setbyte sTWOTURN_STRINGID, 8
+# animação
+def trecho_bb(de, ate): return ROM[de - 0x08000000:ate - 0x08000000]
+ESCURECE = trecho_bb(0x08482EA4, 0x08482EBB)   # monbg 00, setalpha, escurece, waitforvisualfinish
+CLAREIA = trecho_bb(0x08482FF1, 0x08483003)    # clareia, waitforvisualfinish
+assert ESCURECE[0] == 0x0A and CLAREIA[0] == 0x03
+BB_T1 = None
+t1 = bytearray()
+t1 += bytes.fromhex('00ac27') + bytes.fromhex('00aa27')        # subida (sem 0x2873/0x274A das pedrinhas)
+t1 += ESCURECE + bytes.fromhex('0b00')       # clearmonbg 00
+t1 += trecho_bb(0x08482EF2, 0x08482F19)        # monbg 01, setalpha, som, ele sobe (0x0920C560), tremor, delay 18
+t1 += bytes.fromhex('05') + bytes.fromhex('0b01') + bytes.fromhex('0d')   # espera, clearmonbg 01, blendoff
+t1 += CLAREIA + b'\x08'
+t2 = bytearray()
+t2 += bytes.fromhex('009a27005128004c28')     # espada/cortes
+t2 += b'\x03' + p32(SS_TASK | 1) + b'\x05\x00' + b'\x05'   # cortes verdes se for o Sirfetch'd
+t2 += ESCURECE + bytes.fromhex('0b00')
+t2 += bytes.fromhex('2c00')                    # visible atacante: ele volta
+t2 += bytes.fromhex('0a01') + bytes.fromhex('0c0c08')    # monbg 01, setalpha
+t2 += trecho_bb(0x08482F4C, 0x08482F85)        # som, cortes, tremor, espera, clearmonbg 01, blendoff (sem a explosão)
+t2 += CLAREIA + b'\x08'
+BB_ANIM = atb()
+cab = 1 + 4 + 4 + 1 + 1                        # choosetwoturnanim t1 t2, waitforvisualfinish, end
+rb += b'\x11' + p32(BB_ANIM + cab) + p32(BB_ANIM + cab + len(t1)) + b'\x05\x08'
+rb += t1 + t2
+assert BB_R0 + len(rb) <= BB_R1, (len(rb), BB_R1 - BB_R0)
+# dados do golpe: efeito 0x015D -> 0x0096 e marca de dois turnos (byte 15: 0x01 -> 0x81)
+BB_DADOS = 0x0853AD34 + 24 * BB
+bd = bytearray(ROM[BB_DADOS - 0x08000000:BB_DADOS - 0x08000000 + 16])
+assert bd[0:2] == bytes.fromhex('5d01') and bd[15] == 0x01
+bd[0:2] = h16(EF_SEMI); bd[15] = 0x81
+
 def orig(addr, n_): return ROM[addr - 0x08000000:addr - 0x08000000 + n_].hex()
 saida = {
   'novos': [
@@ -564,6 +631,11 @@ saida = {
     [0x5505C0, '500000007100', struct.pack('<3H', HAB, HAB, HAB).hex(), "Sirfetch'd: Caçador nas 3 vagas"],
     [ARB_PAL_VELHA - 0x08000000, orig(ARB_PAL_VELHA, 40), ARB_PAL_NOVA.hex(), "Arboliva: paleta nova no lugar da antiga (era 0x09FFF700)"],
     [0x46AB1C + 4 * SS_MOVE, orig(0x0846AB1C + 4 * SS_MOVE, 4), p32(SS_SCRIPT).hex(), "animação do Sacred Sword -> script com a espada verde do Sirfetch'd"],
+    [BB_R0 - 0x08000000, orig(BB_R0, len(rb)), bytes(rb).hex(), "Behemoth Blade em 2 turnos (no lugar da animação antiga): desvio do 'no ar', script do efeito e animação nova"],
+    [0x46AB1C + 4 * BB, orig(0x0846AB1C + 4 * BB, 4), p32(BB_ANIM).hex(), "animação do Behemoth Blade -> a nova de dois turnos"],
+    [SEMI_FN - 0x08000000, orig(SEMI_FN, 8), (struct.pack('<HH', 0x4B00, 0x4718) + p32(BB_SEMI | 1)).hex(), "setsemiinvulnerablebit: Behemoth Blade fica no ar"],
+    [EFEITO_TAB + 4 * EF_SEMI - 0x08000000, orig(EFEITO_TAB + 4 * EF_SEMI, 4), p32(BB_EF).hex(), "efeito 'dois turnos fora de alcance' -> script que aceita o Behemoth Blade"],
+    [BB_DADOS - 0x08000000, orig(BB_DADOS, 16), bytes(bd).hex(), "Behemoth Blade: efeito do Fly (dois turnos) e marca de dois turnos"],
   ],
   'fix_trocas': {   # endereço -> novo valor
     '0x52600': '3f010000',
